@@ -260,3 +260,65 @@ def test_plugin_handles_failed_person_crop():
     assert person_cropper.called
     assert not preprocessor.called
     assert not recognizer.called
+
+class MockOrchestrator:
+    def __init__(self):
+        self.called = False
+        self.received_track = None
+        self.received_frame = None
+        self.received_time = None
+
+    def process(self, track, frame, current_time):
+        self.called = True
+        self.received_track = track
+        self.received_frame = frame
+        self.received_time = current_time
+        return None
+
+def test_plugin_delegates_recognition_to_orchestrator():
+    detector = MockFaceDetector(return_detection=True)
+    embedder = MockFaceEmbedder(dimension=512)
+    matcher = FaceMatcher(threshold=0.30)
+
+    plugin = FaceRecognizerPlugin(
+        detector=detector,
+        embedder=embedder,
+        matcher=matcher,
+    )
+
+    orchestrator = MockOrchestrator()
+    plugin._orchestrator = orchestrator
+
+    image = np.zeros(
+        (300, 200, 3),
+        dtype=np.uint8,
+    )
+
+    frame = Frame(
+        image=image,
+        metadata=FrameMetadata(
+            frame_id=1,
+            timestamp=123.0,
+        ),
+    )
+
+    track = Track(
+        track_id=10,
+        bbox=BoundingBox(
+            x1=10,
+            y1=10,
+            x2=150,
+            y2=250,
+        ),
+        state=TrackState.TRACKED,
+    )
+
+    plugin.on_tracks_updated(
+        [track],
+        frame,
+    )
+
+    assert orchestrator.called
+    assert orchestrator.received_track is track
+    assert orchestrator.received_frame is frame
+    assert orchestrator.received_time == 123.0

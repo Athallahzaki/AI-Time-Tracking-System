@@ -30,12 +30,15 @@ from ..contracts.recognition import (
     RecognitionResult,
     RecognitionStatus,
 )
-from ..contracts.preprocessing import ImagePreprocessor as IImagePreprocessor
-from ..contracts.preprocessing import PersonCropper as IPersonCropper
+from ..contracts.preprocessing import (
+    ImagePreprocessor as IImagePreprocessor,
+    PersonCropper as IPersonCropper,
+)
 from ..preprocessing import (
     BoundingBoxPersonCropper,
     DefaultImagePreprocessor,
 )
+from .orchestrator import RecognitionOrchestrator
 from .recognizer import FaceRecognitionService
 from ..detector.scrfd import SCRFDDetector
 from ..embedding.glintr100 import GLINTR100Embedder
@@ -62,9 +65,9 @@ class FaceRecognizerPlugin:
         embedder: Optional[IFaceEmbedder] = None,
         matcher: Optional[IFaceMatcher] = None,
         repository: Optional[IIdentityRepository] = None,
-        recognizer: Optional[IFaceRecognizer] = None,
         cache: Optional[RecognitionCache] = None,
         policy: Optional[IRecognitionPolicy] = None,
+        recognizer: Optional[IFaceRecognizer] = None,
         person_cropper: Optional[IPersonCropper] = None,
         image_preprocessor: Optional[IImagePreprocessor] = None,
     ) -> None:
@@ -116,6 +119,15 @@ class FaceRecognizerPlugin:
         self._person_cropper = person_cropper or BoundingBoxPersonCropper()
         self._image_preprocessor = image_preprocessor or DefaultImagePreprocessor()
 
+        self._orchestrator = RecognitionOrchestrator(
+            recognizer=self._recognizer,
+            person_cropper=self._person_cropper,
+            image_preprocessor=self._image_preprocessor,
+            policy=self._policy,
+            cache=self._cache,
+            event_handler=self._emit_event,
+        )
+
         self._event_handlers: List[Callable[[PluginEvent], None]] = []
 
     def add_event_handler(self, handler: Callable[[PluginEvent], None]) -> FaceRecognizerPlugin:
@@ -131,11 +143,17 @@ class FaceRecognizerPlugin:
             except Exception as e:
                 logger.error(f"Error in face recognition event handler: {e}")
 
-    def on_tracks_updated(self, tracks: List[Track], frame: Frame) -> None:
+    def on_tracks_updated(
+        self,
+        tracks: List[Track],
+        frame: Frame,
+    ) -> None:
         """
         Consumes active tracks from vision_core each processing cycle.
-        Executes facial recognition according to policy and cache state.
+
+        Recognition workflow is delegated to RecognitionOrchestrator.
         """
+
         now = frame.timestamp
         active_track_ids = set()
 
@@ -144,141 +162,26 @@ class FaceRecognizerPlugin:
                 continue
 
             active_track_ids.add(track.track_id)
-            cached_state = self._cache.get(track.track_id)
 
-            # Evaluate policy
-            if self._policy.should_recognize(track, cached_state, current_time=now):
-                self._process_recognition(track, frame, now)
-            else:
-                # Use existing cache state if present
-                pass
+            self._orchestrator.process(
+                track=track,
+                frame=frame,
+                current_time=now,
+            )
 
-            # Annotate track attributes cleanly
             final_state = self._cache.get(track.track_id)
+
             if final_state is not None:
                 track.attributes["identity"] = final_state.identity
-                track.attributes["recognition_status"] = final_state.state.value
+                track.attributes["recognition_status"] = (
+                    final_state.state.value
+                )
                 track.attributes["similarity"] = final_state.similarity
 
-        # Evict stale tracks that disappeared
-        self._cache.cleanup_stale_tracks(active_track_ids)
-
-    def _process_recognition(
-        self,
-        track: Track,
-        frame: Frame,
-        current_time: float,
-    ) -> None:
-        """Run one recognition attempt for a tracked person."""
-
-        person_crop = self._person_cropper.crop(
-            image=frame.image,
-            track=track,
+        self._cache.cleanup_stale_tracks(
+            active_track_ids,
         )
 
-        if person_crop is None:
-            result = RecognitionResult(
-                status=RecognitionStatus.ERROR,
-            )
-            self._apply_recognition_result(
-                track,
-                result,
-                current_time,
-            )
-            return
-
-        prepared_image = self._image_preprocessor.preprocess(person_crop)
-
-        result = self._recognizer.recognize(prepared_image)
-
-        self._apply_recognition_result(
-            track,
-            result,
-            current_time,
-        )
-
-    def _apply_recognition_result(
-        self,
-        track: Track,
-        result: RecognitionResult,
-        current_time: float,
-    ) -> None:
-        """Translate recognition result into cache state and plugin events."""
-
-        if result.status == RecognitionStatus.RECOGNIZED:
-            from ..contracts.identity import IdentityMatch
-
-            previous_state = self._cache.get(track.track_id)
-
-            old_identity = (
-                previous_state.identity
-                if previous_state is not None
-                else None
-            )
-
-            match = IdentityMatch(
-                identity=result.identity_id,
-                similarity=result.similarity,
-            )
-
-            state, identity_changed = self._cache.update_with_match(
-                track_id=track.track_id,
-                match=match,
-                current_time=current_time,
-            )
-
-            if identity_changed:
-                self._emit_event(
-                    IdentityChangedEvent(
-                        track_id=track.track_id,
-                        old_identity=old_identity,
-                        new_identity=result.identity_id,
-                        similarity=result.similarity,
-                    )
-                )
-
-            self._emit_event(
-                FaceRecognizedEvent(
-                    track_id=track.track_id,
-                    employee_id=result.identity_id,
-                    similarity=result.similarity,
-                    track=track,
-                )
-            )
-
-            return
-
-        if result.status == RecognitionStatus.UNKNOWN:
-            self._cache.record_no_face(
-                track.track_id,
-                current_time=current_time,
-            )
-
-            self._emit_event(
-                PersonUnknownEvent(
-                    track_id=track.track_id,
-                    similarity=result.similarity,
-                    track=track,
-                )
-            )
-
-            return
-
-        if result.status == RecognitionStatus.NO_FACE:
-            self._cache.record_no_face(
-                track.track_id,
-                current_time=current_time,
-            )
-
-            return
-
-        if result.status == RecognitionStatus.ERROR:
-            self._cache.record_no_face(
-                track.track_id,
-                current_time=current_time,
-            )
-
-            return
 
     def on_track_lost(self, track: Track) -> None:
         """Invoked when vision_core removes a track."""
