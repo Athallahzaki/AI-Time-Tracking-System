@@ -7,10 +7,6 @@ from typing import Optional
 
 
 class RecognitionState(str, enum.Enum):
-    """
-    Runtime lifecycle state for recognition associated with a track.
-    """
-
     PENDING = "PENDING"
     CONFIRMED = "CONFIRMED"
     RETRY = "RETRY"
@@ -19,10 +15,6 @@ class RecognitionState(str, enum.Enum):
 
 @dataclass(frozen=True)
 class IdentityMatch:
-    """
-    Result of vector matching against registered identity references.
-    """
-
     identity: Optional[str]
     similarity: float
 
@@ -33,12 +25,6 @@ class IdentityMatch:
 
 @dataclass
 class TrackIdentityState:
-    """
-    Cached recognition state associated with a temporary tracker ID.
-
-    Track ID is a temporary association, not a permanent identity.
-    """
-
     track_id: int
 
     identity: Optional[str] = None
