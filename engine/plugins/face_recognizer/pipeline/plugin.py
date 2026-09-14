@@ -22,6 +22,7 @@ from ..contracts.interfaces import (
     FaceDetector as IFaceDetector,
     FaceEmbedder as IFaceEmbedder,
     FaceMatcher as IFaceMatcher,
+    FaceRecognizer as IFaceRecognizer,
     IdentityRepository as IIdentityRepository,
     RecognitionPolicy as IRecognitionPolicy,
 )
@@ -55,6 +56,7 @@ class FaceRecognizerPlugin:
         embedder: Optional[IFaceEmbedder] = None,
         matcher: Optional[IFaceMatcher] = None,
         repository: Optional[IIdentityRepository] = None,
+        recognizer: Optional[IFaceRecognizer] = None,
         cache: Optional[RecognitionCache] = None,
         policy: Optional[IRecognitionPolicy] = None,
     ) -> None:
@@ -83,7 +85,7 @@ class FaceRecognizerPlugin:
             embeddings_dir=self._config.embeddings_dir,
             embedding_dimension=self._config.embedding_dimension,
         )
-        self._recognizer = FaceRecognitionService(
+        self._recognizer = recognizer or FaceRecognitionService(
             detector=self._detector,
             aligner=self._aligner,
             embedder=self._embedder,
@@ -189,7 +191,7 @@ class FaceRecognizerPlugin:
                 result,
                 current_time,
             )
-            
+
     def _apply_recognition_result(
         self,
         track: Track,
