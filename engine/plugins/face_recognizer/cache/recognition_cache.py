@@ -5,11 +5,16 @@ import threading
 import time
 from typing import Dict, List, Optional, Set, Tuple
 
+
+from ..contracts.recognition import RecognitionStatus
+
+
 from ..contracts.identity import (
     IdentityMatch,
     RecognitionState,
     TrackIdentityState,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -77,14 +82,11 @@ class RecognitionCache:
             if match.is_match:
                 if identity_changed:
                     logger.info(
-                        "[Cache] Track #%s identity changed from '%s' "
-                        "to '%s' (sim: %.3f)",
+                        "Identity changed for track %s: %s -> %s",
                         track_id,
                         old_identity,
                         match.identity,
-                        match.similarity,
                     )
-
                     state.consecutive_matches = 1
                 else:
                     state.consecutive_matches += 1
@@ -92,6 +94,7 @@ class RecognitionCache:
                 state.identity = match.identity
                 state.similarity = match.similarity
                 state.state = RecognitionState.CONFIRMED
+                state.last_status = RecognitionStatus.RECOGNIZED
 
                 if state.first_recognized_time is None:
                     state.first_recognized_time = now
@@ -209,6 +212,70 @@ class RecognitionCache:
         """Clear all cached recognition states."""
         with self._lock:
             self._states.clear()
+
+    def record_unknown(
+        self,
+        track_id: int,
+        similarity: float = 0.0,
+        current_time: Optional[float] = None,
+    ) -> TrackIdentityState:
+        now = current_time if current_time is not None else time.time()
+
+        with self._lock:
+            state = self.get_or_create(
+                track_id,
+                current_time=now,
+            )
+
+            state.state = RecognitionState.RETRY
+            state.last_status = RecognitionStatus.UNKNOWN
+            state.similarity = similarity
+            state.last_attempt_time = now
+            state.retry_count += 1
+
+            return state
+
+
+    def record_no_face(
+        self,
+        track_id: int,
+        current_time: Optional[float] = None,
+    ) -> TrackIdentityState:
+        now = current_time if current_time is not None else time.time()
+
+        with self._lock:
+            state = self.get_or_create(
+                track_id,
+                current_time=now,
+            )
+
+            state.state = RecognitionState.RETRY
+            state.last_status = RecognitionStatus.NO_FACE
+            state.last_attempt_time = now
+            state.retry_count += 1
+
+            return state
+
+
+    def record_error(
+        self,
+        track_id: int,
+        current_time: Optional[float] = None,
+    ) -> TrackIdentityState:
+        now = current_time if current_time is not None else time.time()
+
+        with self._lock:
+            state = self.get_or_create(
+                track_id,
+                current_time=now,
+            )
+
+            state.state = RecognitionState.RETRY
+            state.last_status = RecognitionStatus.ERROR
+            state.last_attempt_time = now
+            state.retry_count += 1
+
+            return state
 
     @property
     def size(self) -> int:

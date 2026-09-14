@@ -173,8 +173,9 @@ class RecognitionOrchestrator:
             return
 
         if result.status == RecognitionStatus.UNKNOWN:
-            self._cache.record_no_face(
+            self._cache.record_unknown(
                 track_id=track.track_id,
+                similarity=result.similarity,
                 current_time=current_time,
             )
 
@@ -187,12 +188,13 @@ class RecognitionOrchestrator:
             )
 
             return
-
-        if result.status in (
-            RecognitionStatus.NO_FACE,
-            RecognitionStatus.ERROR,
-        ):
+        if result.status == RecognitionStatus.NO_FACE:
             self._cache.record_no_face(
+                track_id=track.track_id,
+                current_time=current_time,
+            )
+        if result.status == RecognitionStatus.ERROR :
+            self._cache.record_error(
                 track_id=track.track_id,
                 current_time=current_time,
             )

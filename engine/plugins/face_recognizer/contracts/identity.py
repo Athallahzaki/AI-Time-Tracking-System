@@ -5,6 +5,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
+from .recognition import RecognitionStatus
+
 
 class RecognitionState(str, enum.Enum):
     PENDING = "PENDING"
@@ -26,10 +28,8 @@ class IdentityMatch:
 @dataclass
 class TrackIdentityState:
     track_id: int
-
     identity: Optional[str] = None
     similarity: float = 0.0
-
     state: RecognitionState = RecognitionState.PENDING
 
     first_recognized_time: Optional[float] = None
@@ -37,6 +37,8 @@ class TrackIdentityState:
 
     retry_count: int = 0
     consecutive_matches: int = 0
+
+    last_status: Optional[RecognitionStatus] = None
 
     @property
     def is_recognized(self) -> bool:

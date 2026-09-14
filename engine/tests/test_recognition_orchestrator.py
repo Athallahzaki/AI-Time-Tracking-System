@@ -439,6 +439,8 @@ def test_orchestrator_emits_person_unknown_event():
 
     assert result is not None
     assert result.status == RecognitionStatus.UNKNOWN
+    assert state.last_status == RecognitionStatus.ERROR
+    assert state.last_status == RecognitionStatus.RECOGNIZED
 
     assert len(events) == 1
     assert isinstance(
