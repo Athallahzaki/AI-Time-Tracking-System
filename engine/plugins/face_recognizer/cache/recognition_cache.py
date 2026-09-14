@@ -105,11 +105,10 @@ class RecognitionCache:
             else:
                 state.similarity = match.similarity
                 state.state = RecognitionState.RETRY
+                state.last_status = RecognitionStatus.UNKNOWN
                 state.last_attempt_time = now
                 state.retry_count += 1
 
-                # Preserve an already known identity during a temporary
-                # failed recognition attempt.
                 if old_identity is None:
                     state.identity = None
 
