@@ -157,9 +157,21 @@ class MockRecognizer:
 
 
 def test_plugin_uses_cropper_preprocessor_and_recognizer():
-    frame_image = np.zeros((200, 100, 3), dtype=np.uint8)
-    person_crop = np.ones((80, 40, 3), dtype=np.uint8)
-    prepared_image = np.full((112, 112, 3), 7, dtype=np.uint8)
+    frame_image = np.zeros(
+        (200, 100, 3),
+        dtype=np.uint8,
+    )
+
+    person_crop = np.ones(
+        (80, 40, 3),
+        dtype=np.uint8,
+    )
+
+    prepared_image = np.full(
+        (112, 112, 3),
+        7,
+        dtype=np.uint8,
+    )
 
     person_cropper = MockPersonCropper(person_crop)
     preprocessor = MockImagePreprocessor(prepared_image)
@@ -184,6 +196,7 @@ def test_plugin_uses_cropper_preprocessor_and_recognizer():
             x2=60,
             y2=120,
         ),
+        state=TrackState.TRACKED,
     )
 
     frame = Frame(
@@ -193,10 +206,10 @@ def test_plugin_uses_cropper_preprocessor_and_recognizer():
             timestamp=100.0,
         ),
     )
-    plugin._process_recognition(
-        track=track,
-        frame=frame,
-        current_time=100.0,
+
+    plugin.on_tracks_updated(
+        [track],
+        frame,
     )
 
     assert person_cropper.called
@@ -211,12 +224,18 @@ def test_plugin_uses_cropper_preprocessor_and_recognizer():
 
 
 def test_plugin_handles_failed_person_crop():
-    frame_image = np.zeros((200, 100, 3), dtype=np.uint8)
+    frame_image = np.zeros(
+        (200, 100, 3),
+        dtype=np.uint8,
+    )
 
     person_cropper = MockPersonCropper(None)
 
     preprocessor = MockImagePreprocessor(
-        np.ones((112, 112, 3), dtype=np.uint8)
+        np.ones(
+            (112, 112, 3),
+            dtype=np.uint8,
+        )
     )
 
     recognizer = MockRecognizer(
@@ -241,6 +260,7 @@ def test_plugin_handles_failed_person_crop():
             x2=60,
             y2=120,
         ),
+        state=TrackState.TRACKED,
     )
 
     frame = Frame(
@@ -251,15 +271,16 @@ def test_plugin_handles_failed_person_crop():
         ),
     )
 
-    plugin._process_recognition(
-        track=track,
-        frame=frame,
-        current_time=100.0,
+    plugin.on_tracks_updated(
+        [track],
+        frame,
     )
 
     assert person_cropper.called
     assert not preprocessor.called
     assert not recognizer.called
+
+    assert track.attributes["recognition_status"] == "RETRY"
 
 class MockOrchestrator:
     def __init__(self):
