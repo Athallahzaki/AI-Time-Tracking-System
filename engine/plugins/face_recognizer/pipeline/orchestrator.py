@@ -1,49 +1,50 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Callable, Optional
 
-import numpy as np
-
+from ....vision_core.contracts.frame import Frame
+from ....vision_core.contracts.tracking import Track
 from ..cache.recognition_cache import RecognitionCache
 from ..contracts.events import (
     FaceRecognizedEvent,
     IdentityChangedEvent,
     PersonUnknownEvent,
+    PluginEvent,
 )
 from ..contracts.identity import IdentityMatch
-from ..contracts.preprocessing import (
-    ImagePreprocessor,
-    PersonCropper,
-)
 from ..contracts.interfaces import (
     FaceRecognizer,
     RecognitionPolicy,
 )
-from ..contracts.recognition import RecognitionResult, RecognitionStatus
-from ....vision_core.contracts.frame import Frame
-from ....vision_core.contracts.tracking import Track
+from ..contracts.preprocessing import (
+    ImagePreprocessor,
+    PersonCropper,
+)
+from ..contracts.recognition import (
+    RecognitionResult,
+    RecognitionStatus,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class RecognitionOrchestrator:
     """
-    Coordinates the full recognition workflow for one tracked person.
+    Coordinates the complete recognition workflow for one tracked person.
 
-    Owns:
+    Responsibilities:
     - recognition policy
-    - person crop
+    - person cropping
     - image preprocessing
     - face recognition
-    - recognition cache
-    - recognition state updates
-    - recognition events
+    - recognition cache updates
+    - recognition event generation
 
-    Does not own:
-    - video input
-    - tracking
-    - model implementation details
+    Does not know:
+    - RTSP/video source
+    - YOLO detector
+    - tracker implementation
     - attendance/business logic
     """
 
@@ -54,12 +55,14 @@ class RecognitionOrchestrator:
         image_preprocessor: ImagePreprocessor,
         policy: RecognitionPolicy,
         cache: RecognitionCache,
+        event_handler: Optional[Callable[[PluginEvent], None]] = None,
     ) -> None:
         self._recognizer = recognizer
         self._person_cropper = person_cropper
         self._image_preprocessor = image_preprocessor
         self._policy = policy
         self._cache = cache
+        self._event_handler = event_handler
 
     def process(
         self,
@@ -68,10 +71,11 @@ class RecognitionOrchestrator:
         current_time: float,
     ) -> RecognitionResult | None:
         """
-        Process one recognition attempt for a track.
+        Process one recognition attempt for a tracked person.
 
-        Returns None when policy decides that recognition should not
-        be attempted at this moment.
+        Returns:
+            RecognitionResult when recognition is attempted.
+            None when recognition policy denies the attempt.
         """
 
         state = self._cache.get(track.track_id)
@@ -92,11 +96,13 @@ class RecognitionOrchestrator:
             result = RecognitionResult(
                 status=RecognitionStatus.ERROR,
             )
+
             self._apply_result(
                 track=track,
                 result=result,
                 current_time=current_time,
             )
+
             return result
 
         prepared_image = self._image_preprocessor.preprocess(
@@ -121,44 +127,52 @@ class RecognitionOrchestrator:
         result: RecognitionResult,
         current_time: float,
     ) -> None:
-        state = self._cache.get(track.track_id)
+        """
+        Translate RecognitionResult into cache state and events.
+        """
 
         if result.status == RecognitionStatus.RECOGNIZED:
-            previous_identity = state.identity if state is not None else None
+            previous_state = self._cache.get(track.track_id)
+
+            old_identity = (
+                previous_state.identity
+                if previous_state is not None
+                else None
+            )
 
             match = IdentityMatch(
                 identity=result.identity_id,
                 similarity=result.similarity,
             )
 
-            updated_state, identity_changed = (
-                self._cache.update_with_match(
-                    track_id=track.track_id,
-                    match=match,
-                    current_time=current_time,
-                )
+            state, identity_changed = self._cache.update_with_match(
+                track_id=track.track_id,
+                match=match,
+                current_time=current_time,
             )
 
             if identity_changed:
                 self._emit(
                     IdentityChangedEvent(
                         track_id=track.track_id,
-                        old_identity=previous_identity,
-                        new_identity=updated_state.identity,
-                        similarity=updated_state.similarity,
+                        old_identity=old_identity,
+                        new_identity=state.identity,
+                        similarity=state.similarity,
                     )
                 )
 
             self._emit(
                 FaceRecognizedEvent(
                     track_id=track.track_id,
-                    employee_id=updated_state.identity,
-                    similarity=updated_state.similarity,
+                    employee_id=state.identity,
+                    similarity=state.similarity,
                     track=track,
                 )
             )
 
-        elif result.status == RecognitionStatus.UNKNOWN:
+            return
+
+        if result.status == RecognitionStatus.UNKNOWN:
             self._cache.record_no_face(
                 track_id=track.track_id,
                 current_time=current_time,
@@ -172,7 +186,9 @@ class RecognitionOrchestrator:
                 )
             )
 
-        elif result.status in (
+            return
+
+        if result.status in (
             RecognitionStatus.NO_FACE,
             RecognitionStatus.ERROR,
         ):
@@ -181,11 +197,22 @@ class RecognitionOrchestrator:
                 current_time=current_time,
             )
 
-    def _emit(self, event: object) -> None:
-        """
-        Temporary event boundary.
+            return
 
-        Event dispatch will be injected explicitly once the existing
-        plugin event mechanism is moved out of FaceRecognizerPlugin.
+    def _emit(self, event: PluginEvent) -> None:
         """
-        logger.debug("Recognition event generated: %r", event)
+        Forward event to the external event handler.
+
+        The orchestrator does not own event subscriptions. It only
+        forwards generated events to its boundary callback.
+        """
+
+        if self._event_handler is None:
+            return
+
+        try:
+            self._event_handler(event)
+        except Exception:
+            logger.exception(
+                "Recognition event handler failed."
+            )
