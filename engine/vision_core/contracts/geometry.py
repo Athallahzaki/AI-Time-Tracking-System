@@ -19,8 +19,17 @@ class Point:
 @dataclass(frozen=True)
 class BoundingBox:
     """
-    Standardized bounding box representation [x1, y1, x2, y2].
-    Coordinate system: top-left origin (x1 <= x2, y1 <= y2).
+    Bounding box in frame coordinate space.
+
+    Coordinates:
+        - origin: top-left
+        - x increases to the right
+        - y increases downward
+        - format: (x1, y1, x2, y2)
+
+    Contract:
+        Bounding boxes exposed by the engine are expressed in the
+        original frame coordinate space, never model-internal coordinates.
     """
     x1: float
     y1: float
