@@ -80,16 +80,43 @@ def test_face_recognizer_plugin_track_listener():
     # Seed reference embedding matching the mock embedder output
     dummy_img = np.zeros((300, 200, 3), dtype=np.uint8)
     dummy_img[:, :] = (100, 100, 100)
+
     ref_emb = embedder.embed(dummy_img).vector
-    plugin.repository.register_employee("EMP_TEST", "Test Employee", [ref_emb])
+
+    plugin.repository.register_employee(
+        "EMP_TEST",
+        "Test Employee",
+        [ref_emb],
+    )
 
     # Create Frame and Track
-    frame = Frame(image=dummy_img, metadata=FrameMetadata(frame_id=1, timestamp=100.0))
+    frame = Frame(
+        image=dummy_img,
+        metadata=FrameMetadata(
+            frame_id=1,
+            timestamp=100.0,
+        ),
+    )
+
     track = Track(
         track_id=10,
-        bbox=BoundingBox(x1=10, y1=10, x2=150, y2=250),
+        bbox=BoundingBox(
+            x1=10,
+            y1=10,
+            x2=150,
+            y2=250,
+        ),
         state=TrackState.TRACKED,
     )
+
+    # Invoke plugin listener
+    plugin.on_tracks_updated([track], frame)
+
+    # Verify track decoration
+    assert track.attributes["identity"] == "EMP_TEST"
+    assert track.attributes["recognition_status"] == "CONFIRMED"
+    assert track.attributes["similarity"] > 0.9
+
 
 class MockPersonCropper:
     def __init__(self, crop):
@@ -137,10 +164,11 @@ def test_plugin_uses_cropper_preprocessor_and_recognizer():
     person_cropper = MockPersonCropper(person_crop)
     preprocessor = MockImagePreprocessor(prepared_image)
 
-    recognition_result = RecognitionResult(
-        status=RecognitionStatus.NO_FACE,
+    recognizer = MockRecognizer(
+        RecognitionResult(
+            status=RecognitionStatus.NO_FACE,
+        )
     )
-    recognizer = MockRecognizer(recognition_result)
 
     plugin = FaceRecognizerPlugin(
         recognizer=recognizer,
@@ -181,6 +209,7 @@ def test_plugin_handles_failed_person_crop():
     frame_image = np.zeros((200, 100, 3), dtype=np.uint8)
 
     person_cropper = MockPersonCropper(None)
+
     preprocessor = MockImagePreprocessor(
         np.ones((112, 112, 3), dtype=np.uint8)
     )
@@ -220,11 +249,3 @@ def test_plugin_handles_failed_person_crop():
     assert person_cropper.called
     assert not preprocessor.called
     assert not recognizer.called
-
-    # Invoke plugin listener
-    plugin.on_tracks_updated([track], frame)
-
-    # Verify track decoration
-    assert track.attributes["identity"] == "EMP_TEST"
-    assert track.attributes["recognition_status"] == "CONFIRMED"
-    assert track.attributes["similarity"] > 0.9
