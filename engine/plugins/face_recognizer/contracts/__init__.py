@@ -1,5 +1,6 @@
-from .face import FaceLandmarks, FaceDetection, FaceEmbedding
-from .identity import RecognitionStatus, IdentityMatch, TrackIdentityState
+from .face import FaceDetection, FaceEmbedding, FaceLandmarks
+from .identity import IdentityMatch, RecognitionState, TrackIdentityState
+from .recognition import RecognitionResult, RecognitionStatus
 from .interfaces import (
     FaceDetector,
     FaceAligner,
