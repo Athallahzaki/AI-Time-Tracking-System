@@ -1,0 +1,42 @@
+core:
+  source_uri: "0"                              # "0" for webcam, "rtsp://..." for IP camera, or "path/to/video.mp4"
+  source_type: "opencv"                        # opencv, video_file, mock
+  model_path: "engine/models/yolo/yolo11s.pt"  # YOLO object detection model
+  detection_interval: 1                        # Run object detection every N frames
+  device: "auto"                               # "auto" (uses CUDA if available, else CPU), 0, "cuda", or "cpu"
+  target_fps: 30.0
+  enable_profiling: true
+  auto_warmup: true
+
+face_recognizer:
+  detector_model_path: "engine/models/detector/scrfd_10g_bnkps.onnx"
+  embedder_model_path: "engine/models/embedder/glintr100.onnx"
+  employees_dir: "engine/data/employees"
+  embeddings_dir: "engine/data/embeddings"
+  detector_input_size: [640, 640]
+  detector_confidence_threshold: 0.50
+  alignment_output_size: [112, 112]
+  embedding_dimension: 512
+  similarity_threshold: 0.37
+
+  cache_ttl_seconds: 60.0          # Time to keep recognized employee association before refreshing
+  min_confirmations: 2             # Consecutive matches required for high confidence
+  unknown_retry_interval_sec: 1.0  # Retry interval for unrecognized track
+  max_unknown_retries: 5           # Max rapid retries before backing off
+  backoff_retry_interval_sec: 5.0  # Slower retry interval after exceeding max retries
+  min_person_crop_width: 40
+  min_person_crop_height: 80
+
+attendance:
+  min_present_seconds: 60.0        # PASSING -> CONFIRMED
+  warning_minutes: 25.0            # CONFIRMED -> WARNING
+  max_session_minutes: 30.0        # WARNING -> LIMIT
+  max_missing_seconds: 10.0        # Time before closing session after track disappears
+
+visualizer:
+  enabled: true
+  window_name: "AI Vision Engine - Real-Time Tracking"
+  draw_velocity: true
+  draw_history: true
+  show_metrics_overlay: true
+  window_scale: 1.0
