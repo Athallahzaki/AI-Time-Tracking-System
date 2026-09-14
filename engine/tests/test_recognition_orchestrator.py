@@ -327,7 +327,7 @@ def test_orchestrator_stops_when_person_crop_fails():
     assert state is not None
     assert state.state == RecognitionState.RETRY
     assert state.last_status == RecognitionStatus.ERROR
-    assert state.last_status == RecognitionStatus.RECOGNIZED
+
     assert state.identity is None
     assert state.retry_count == 1
 
