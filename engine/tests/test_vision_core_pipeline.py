@@ -11,6 +11,11 @@ from engine.vision_core.trackers.iou_tracker import IoUTracker
 from engine.vision_core.pipeline.engine import VisionEngine
 from engine.vision_core.pipeline.config import VisionCoreConfig
 
+from engine.vision_core.contracts.tracking import (
+    Track,
+    TrackState,
+)
+
 
 def test_iou_tracker_lifecycle():
     tracker = IoUTracker(min_hits_to_confirm=2, max_missing_frames=2)
@@ -80,3 +85,106 @@ def test_vision_core_standalone_execution():
     assert "source_ingest" in engine.metrics.average_latencies
     assert "detector" in engine.metrics.average_latencies
     assert "tracker" in engine.metrics.average_latencies
+
+class RecordingListener:
+    def __init__(self):
+        self.updated = []
+        self.lost = []
+        self.removed = []
+
+    def on_tracks_updated(
+        self,
+        tracks,
+        frame,
+    ):
+        self.updated.append(
+            [track.track_id for track in tracks]
+        )
+
+    def on_track_lost(
+        self,
+        track,
+    ):
+        self.lost.append(
+            track.track_id
+        )
+
+    def on_track_removed(
+        self,
+        track,
+    ):
+        self.removed.append(
+            track.track_id
+        )
+
+
+def test_vision_engine_distinguishes_lost_from_removed():
+    source = MockFrameSource(
+        width=320,
+        height=240,
+        max_frames=3,
+    )
+
+    detector = MockDetector()
+
+    class SequenceTracker:
+        def __init__(self):
+            self.calls = 0
+
+        def update(
+            self,
+            detections,
+            frame,
+        ):
+            self.calls += 1
+
+            track = Track(
+                track_id=1,
+                bbox=BoundingBox(
+                    50,
+                    50,
+                    100,
+                    150,
+                ),
+                state=(
+                    TrackState.TRACKED
+                    if self.calls == 1
+                    else TrackState.LOST
+                ),
+                first_seen_timestamp=100.0,
+                last_seen_timestamp=frame.timestamp,
+            )
+
+            return (
+                [track]
+                if self.calls <= 2
+                else []
+            )
+
+    tracker = SequenceTracker()
+    listener = RecordingListener()
+
+    engine = VisionEngine(
+        source=source,
+        detector=detector,
+        tracker=tracker,
+        config=VisionCoreConfig(
+            auto_warmup=False,
+        ),
+    )
+
+    engine.add_listener(listener)
+    engine.start()
+
+    frame1, _ = engine.step()
+    frame2, _ = engine.step()
+    frame3, _ = engine.step()
+
+    engine.stop()
+
+    assert frame1 is not None
+    assert frame2 is not None
+    assert frame3 is not None
+
+    assert listener.lost == [1]
+    assert listener.removed == [1]

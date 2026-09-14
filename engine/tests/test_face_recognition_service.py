@@ -94,18 +94,7 @@ def make_face(x1=10, y1=10, x2=100, y2=100):
             y2=y2,
         ),
         confidence=0.95,
-        landmarks=FaceLandmarks(
-            points=np.array(
-                [
-                    [30.0, 30.0],
-                    [70.0, 30.0],
-                    [50.0, 50.0],
-                    [35.0, 70.0],
-                    [65.0, 70.0],
-                ],
-                dtype=np.float32,
-            )
-        ),
+        landmarks=None,
     )
 
 def test_no_face_returns_no_face():

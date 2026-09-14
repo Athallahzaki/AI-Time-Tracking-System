@@ -155,13 +155,10 @@ class FaceRecognizerPlugin:
         """
 
         now = frame.timestamp
-        active_track_ids = set()
 
         for track in tracks:
             if not track.is_active:
                 continue
-
-            active_track_ids.add(track.track_id)
 
             self._orchestrator.process(
                 track=track,
@@ -169,31 +166,57 @@ class FaceRecognizerPlugin:
                 current_time=now,
             )
 
-            final_state = self._cache.get(track.track_id)
+            final_state = self._cache.get(
+                track.track_id,
+            )
 
             if final_state is not None:
-                track.attributes["identity"] = final_state.identity
+                track.attributes["identity"] = (
+                    final_state.identity
+                )
+
                 track.attributes["recognition_status"] = (
                     final_state.state.value
                 )
-                track.attributes["similarity"] = final_state.similarity
 
-        self._cache.cleanup_stale_tracks(
-            active_track_ids,
+                track.attributes["similarity"] = (
+                    final_state.similarity
+                )
+
+
+    def on_track_lost(
+        self,
+        track: Track,
+    ) -> None:
+        """
+        Called once when a track transitions into LOST.
+
+        Recognition state is intentionally retained while the
+        track is temporarily occluded.
+        """
+        logger.debug(
+            "[Plugin] Track #%s temporarily lost; "
+            "recognition cache retained.",
+            track.track_id,
         )
 
 
-    def on_track_lost(self, track: Track) -> None:
-        """Invoked when vision_core removes a track."""
-        if track.state == TrackState.REMOVED:
-            evicted = self._cache.evict(track.track_id)
-            if evicted and evicted.identity:
-                logger.info(f"[Plugin] Evicted track #{track.track_id} (Employee: {evicted.identity}) from recognition cache.")
+    def on_track_removed(
+        self,
+        track: Track,
+    ) -> None:
+        """
+        Called when a track is permanently removed from
+        tracker output.
+        """
+        evicted = self._cache.evict(
+            track.track_id,
+        )
 
-    @property
-    def cache(self) -> RecognitionCache:
-        return self._cache
-
-    @property
-    def repository(self) -> IIdentityRepository:
-        return self._repository
+        if evicted and evicted.identity:
+            logger.info(
+                "[Plugin] Evicted track #%s "
+                "(Employee: %s) from recognition cache.",
+                track.track_id,
+                evicted.identity,
+            )

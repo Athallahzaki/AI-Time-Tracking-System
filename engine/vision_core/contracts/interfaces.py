@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Optional, Protocol, Tuple, runtime_checkable
+from typing import List, Optional, Protocol, Sequence, Tuple, runtime_checkable
 
 from .detection import DetectionBatch
 from .frame import Frame
@@ -44,7 +44,7 @@ class ObjectTracker(Protocol):
 
 class TrackListener(Protocol):
     """
-    Receives updated tracks from the vision pipeline.
+    Receives track updates and lifecycle transitions from the vision pipeline.
     """
 
     def on_tracks_updated(
@@ -53,6 +53,23 @@ class TrackListener(Protocol):
         frame: Frame,
     ) -> None:
         ...
+
+    def on_track_lost(self, track: Track) -> None:
+        """
+        Called once when a known track transitions into LOST.
+
+        LOST means the tracker temporarily lost the object. The track may
+        reappear later with the same ID.
+        """
+        ...
+
+    def on_track_removed(self, track: Track) -> None:
+        """
+        Called once when a known track disappears completely from tracker
+        output and is considered permanently removed.
+        """
+        ...
+
 
 @runtime_checkable
 class FrameSink(Protocol):
