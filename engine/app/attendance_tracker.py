@@ -146,15 +146,27 @@ class AttendanceTracker:
             if (now - sess.last_seen) > self._config.max_missing_seconds:
                 to_close.append(key)
 
-        for key in to_close:
-            closed_sess = self._sessions.pop(key)
-            self._emit_event(
-                PersonDepartedEvent(
-                    employee_id=closed_sess.employee_id,
-                    track_id=closed_sess.active_track_id or 0,
-                    total_session_seconds=closed_sess.elapsed_seconds,
-                )
-            )
+                for key in to_close:
+                    closed_sess = self._sessions.pop(key)
+
+                    if closed_sess.active_track_id is not None:
+                        mapped_key = self._track_to_key.get(
+                            closed_sess.active_track_id
+                        )
+
+                        if mapped_key == key:
+                            self._track_to_key.pop(
+                                closed_sess.active_track_id,
+                                None,
+                            )
+
+                    self._emit_event(
+                        PersonDepartedEvent(
+                            employee_id=closed_sess.employee_id,
+                            track_id=closed_sess.active_track_id or 0,
+                            total_session_seconds=closed_sess.elapsed_seconds,
+                        )
+                    )
 
     def _compute_status(self, elapsed_seconds: float) -> PresenceStatus:
         if elapsed_seconds >= self._config.max_session_minutes * 60.0:
