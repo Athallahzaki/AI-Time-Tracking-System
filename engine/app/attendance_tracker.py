@@ -71,7 +71,11 @@ class AttendanceTracker:
             except Exception as e:
                 logger.error(f"Error in attendance event handler: {e}")
 
-    def on_tracks_updated(self, tracks: List[Track], frame: Frame) -> None:
+    def on_tracks_updated(
+        self,
+        tracks: List[Track],
+        frame: Frame,
+    ) -> None:
         """Processes active tracks and updates presence timers."""
         now = frame.timestamp
         current_active_keys = set()
@@ -81,21 +85,32 @@ class AttendanceTracker:
                 continue
 
             emp_id = track.attributes.get("identity")
-            session_key = emp_id if emp_id else f"track_{track.track_id}"
+            session_key = (
+                emp_id
+                if emp_id
+                else f"track_{track.track_id}"
+            )
+
             current_active_keys.add(session_key)
 
-            # Check if this track was previously mapped to an anonymous track key but now has an employee ID
-            if emp_id and track.track_id in self._track_to_key:
+            # Upgrade anonymous track session to employee session
+            if (
+                emp_id
+                and track.track_id in self._track_to_key
+            ):
                 old_key = self._track_to_key[track.track_id]
-                if old_key != emp_id and old_key in self._sessions:
-                    # Merge anonymous session into employee session
+
+                if (
+                    old_key != emp_id
+                    and old_key in self._sessions
+                ):
                     old_sess = self._sessions.pop(old_key)
+
                     if emp_id not in self._sessions:
                         old_sess.employee_id = emp_id
                         old_sess.session_id = emp_id
                         self._sessions[emp_id] = old_sess
                     else:
-                        # Update existing employee session
                         self._sessions[emp_id].last_seen = now
 
             self._track_to_key[track.track_id] = session_key
@@ -109,77 +124,102 @@ class AttendanceTracker:
                     last_seen=now,
                     active_track_id=track.track_id,
                 )
+
                 self._sessions[session_key] = sess
-                self._emit_event(PersonEnteredEvent(employee_id=emp_id, track_id=track.track_id))
+
+                self._emit_event(
+                    PersonEnteredEvent(
+                        employee_id=emp_id,
+                        track_id=track.track_id,
+                    )
+                )
             else:
                 sess = self._sessions[session_key]
                 sess.last_seen = now
                 sess.active_track_id = track.track_id
+
                 if emp_id:
                     sess.employee_id = emp_id
 
-            # Evaluate status transitions
+            # Evaluate status
             elapsed = sess.elapsed_seconds
             status = self._compute_status(elapsed)
             sess.status = status
 
-            # Annotate track for visualizer/HUD
+            # Annotate track
             track.attributes["presence_status"] = status.value
             track.attributes["session_elapsed"] = elapsed
 
             # Emit milestone events
-            if status == PresenceStatus.CONFIRMED and not sess.confirmed_emitted:
+            if (
+                status == PresenceStatus.CONFIRMED
+                and not sess.confirmed_emitted
+            ):
                 sess.confirmed_emitted = True
-                self._emit_event(PersonConfirmedEvent(employee_id=sess.employee_id, track_id=track.track_id, duration_seconds=elapsed))
 
-            elif status == PresenceStatus.WARNING and not sess.warning_emitted:
+                self._emit_event(
+                    PersonConfirmedEvent(
+                        employee_id=sess.employee_id,
+                        track_id=track.track_id,
+                        duration_seconds=elapsed,
+                    )
+                )
+
+            elif (
+                status == PresenceStatus.WARNING
+                and not sess.warning_emitted
+            ):
                 sess.warning_emitted = True
-                self._emit_event(SessionWarningEvent(employee_id=sess.employee_id, track_id=track.track_id, duration_minutes=elapsed / 60.0))
 
-            elif status == PresenceStatus.LIMIT and not sess.limit_emitted:
+                self._emit_event(
+                    SessionWarningEvent(
+                        employee_id=sess.employee_id,
+                        track_id=track.track_id,
+                        duration_minutes=elapsed / 60.0,
+                    )
+                )
+
+            elif (
+                status == PresenceStatus.LIMIT
+                and not sess.limit_emitted
+            ):
                 sess.limit_emitted = True
-                self._emit_event(SessionLimitReachedEvent(employee_id=sess.employee_id, track_id=track.track_id, duration_minutes=elapsed / 60.0))
+
+                self._emit_event(
+                    SessionLimitReachedEvent(
+                        employee_id=sess.employee_id,
+                        track_id=track.track_id,
+                        duration_minutes=elapsed / 60.0,
+                    )
+                )
 
         # Check for expired/departed sessions
         to_close = []
-        for key, sess in self._sessions.items():
-            if (now - sess.last_seen) > self._config.max_missing_seconds:
+
+        for key, sess in list(self._sessions.items()):
+            if (
+                now - sess.last_seen
+            ) > self._config.max_missing_seconds:
                 to_close.append(key)
 
-                for key in to_close:
-                    closed_sess = self._sessions.pop(key)
+        for key in to_close:
+            closed_sess = self._sessions.pop(key)
 
-                    if closed_sess.active_track_id is not None:
-                        mapped_key = self._track_to_key.get(
-                            closed_sess.active_track_id
-                        )
+            if closed_sess.active_track_id is not None:
+                mapped_key = self._track_to_key.get(
+                    closed_sess.active_track_id
+                )
 
-                        if mapped_key == key:
-                            self._track_to_key.pop(
-                                closed_sess.active_track_id,
-                                None,
-                            )
-
-                    self._emit_event(
-                        PersonDepartedEvent(
-                            employee_id=closed_sess.employee_id,
-                            track_id=closed_sess.active_track_id or 0,
-                            total_session_seconds=closed_sess.elapsed_seconds,
-                        )
+                if mapped_key == key:
+                    self._track_to_key.pop(
+                        closed_sess.active_track_id,
+                        None,
                     )
 
-    def _compute_status(self, elapsed_seconds: float) -> PresenceStatus:
-        if elapsed_seconds >= self._config.max_session_minutes * 60.0:
-            return PresenceStatus.LIMIT
-        if elapsed_seconds >= self._config.warning_minutes * 60.0:
-            return PresenceStatus.WARNING
-        if elapsed_seconds >= self._config.min_present_seconds:
-            return PresenceStatus.CONFIRMED
-        return PresenceStatus.PASSING
-
-    def get_session(self, employee_or_track_id: str) -> Optional[EmployeeSession]:
-        return self._sessions.get(employee_or_track_id)
-
-    @property
-    def active_sessions(self) -> Dict[str, EmployeeSession]:
-        return dict(self._sessions)
+            self._emit_event(
+                PersonDepartedEvent(
+                    employee_id=closed_sess.employee_id,
+                    track_id=closed_sess.active_track_id or 0,
+                    total_session_seconds=closed_sess.elapsed_seconds,
+                )
+            )
