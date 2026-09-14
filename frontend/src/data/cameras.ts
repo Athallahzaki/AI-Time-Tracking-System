@@ -1,9 +1,39 @@
-export const cameras = [
+export interface CameraDetection {
+  label: string;
+  sub: string;
+  conf: string;
+  extra?: string;
+  color: 'emerald' | 'amber' | 'red' | 'cyan';
+  top: string;
+  left: string;
+  width: string;
+  height: string;
+  warning?: boolean;
+  track_id?: number;
+}
+
+export interface CameraDefinition {
+  id: string;
+  code: string;
+  name: string;
+  src: string;
+  fps: string;
+  latency: string;
+  model: string;
+  fov: string;
+  streamStatus: string;
+  activity: string;
+  trackingIds: string;
+  maxSession: string;
+  detections: CameraDetection[];
+}
+
+export const cameras: CameraDefinition[] = [
   {
     id: 'cam-01',
     code: 'CAM-01',
     name: 'Entertainment Room',
-    src: './public/videos/video2.mp4',
+    src: '/videos/video2.mp4',
     fps: '30.2',
     latency: '18ms',
     model: 'YOLOv8x-Pose + ActionNet v2',
@@ -21,7 +51,7 @@ export const cameras = [
     id: 'cam-02',
     code: 'CAM-02',
     name: 'Carport Area',
-    src: './public/videos/video1.mp4',
+    src: '/videos/video1.mp4',
     fps: '28.7',
     latency: '21ms',
     model: 'YOLOv8x-Pose + ActionNet v2',
@@ -38,7 +68,7 @@ export const cameras = [
     id: 'cam-03',
     code: 'CAM-03',
     name: 'Lobby Entrance',
-    src: './public/videos/video3.mp4',
+    src: '/videos/video3.mp4',
     fps: '29.9',
     latency: '16ms',
     model: 'YOLOv8x-Pose + ActionNet v2',
@@ -57,7 +87,7 @@ export const cameras = [
     id: 'cam-04',
     code: 'CAM-04',
     name: 'Rooftop Terrace (Smoking Area)',
-    src: './public/videos/video4.mp4',
+    src: '/videos/video4.mp4',
     fps: '30.0',
     latency: '15ms',
     model: 'YOLOv8x-Pose + ActionNet v2',
@@ -68,4 +98,4 @@ export const cameras = [
     maxSession: 'Inactive',
     detections: [],
   },
-]
+];

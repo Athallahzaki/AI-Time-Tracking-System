@@ -102,7 +102,11 @@ class EngineService:
 
                 for track in tracks:
 
-                    bbox = track.bbox
+                    attrs = getattr(track, "attributes", {}) or {}
+                    presence_status = attrs.get("presence_status", "PASSING")
+                    identity = attrs.get("identity")
+                    similarity = float(attrs.get("similarity", 0.0))
+                    session_elapsed = float(attrs.get("session_elapsed", track.dwell_time))
 
                     people.append({
                         "track_id": int(track.track_id),
@@ -123,6 +127,11 @@ class EngineService:
                         "dwell_time": float(
                             track.dwell_time
                         ),
+
+                        "presence_status": presence_status,
+                        "identity": identity,
+                        "similarity": similarity,
+                        "session_elapsed": session_elapsed,
                     })
 
                 # ==================================

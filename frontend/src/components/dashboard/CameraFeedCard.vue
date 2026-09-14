@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { Circle, Camera, ScanSearch, TriangleAlert } from '@lucide/vue';
 import DetectionBox from './DetectionBox.vue';
 
@@ -9,6 +9,11 @@ const props = defineProps({
 });
 
 const videoEl = ref(null);
+
+const videoSrc = computed(() => {
+  if (!props.camera?.src) return '';
+  return props.camera.src.replace(/^\.\/public\//, '/');
+});
 
 watch(
   () => props.camera.src,
@@ -46,44 +51,45 @@ watch(
         loop
         playsinline
       >
-        <source :src="camera.src" type="video/mp4" />
+        <source :src="videoSrc" type="video/mp4" />
       </video>
 
       <div
-        class="absolute left-3 top-3 flex items-center gap-1.5 rounded bg-black/60 px-2 py-1 text-[10px] font-medium text-white"
+        class="absolute left-3 top-3 flex items-center gap-1.5 rounded bg-black/60 px-2 py-1 text-[10px] font-medium text-white pointer-events-none"
       >
         <Circle class="h-2 w-2 fill-red-500 text-red-500" />
         REC · {{ camera.code }} LIVE STREAM
       </div>
 
       <div
-        v-if="!compact"
-        class="absolute right-3 top-3 rounded bg-black/60 px-2 py-1 text-[10px] font-medium"
+        class="absolute right-3 top-3 rounded bg-black/60 px-2 py-1 text-[10px] font-medium pointer-events-none"
         :class="
-          camera.detections.length ? 'text-emerald-300' : 'text-slate-300'
+          camera.detections?.length ? 'text-emerald-300' : 'text-slate-300'
         "
       >
-        POSE_ESTIMATION:
-        {{ camera.detections.length ? `ACTIVE (${camera.fps} KPT)` : 'IDLE' }}
+        <span v-if="!compact">POSE_ESTIMATION: </span>
+        {{ camera.detections?.length ? `ACTIVE (${camera.fps} FPS)` : 'IDLE' }}
       </div>
-      <template v-if="!compact">
-        <DetectionBox
-          v-for="(d, i) in camera.detections"
-          :key="i"
-          :detection="d"
-        />
-      </template>
+
+      <!-- Real-time Bounding Boxes -->
+      <DetectionBox
+        v-for="(d, i) in camera.detections"
+        :key="d.id ?? d.track_id ?? i"
+        :detection="d"
+        :compact="compact"
+      />
+
       <div
         v-if="!compact"
-        class="absolute bottom-3 left-3 rounded bg-black/60 px-2 py-1 text-[10px] font-medium text-slate-200"
+        class="absolute bottom-3 left-3 rounded bg-black/60 px-2 py-1 text-[10px] font-medium text-slate-200 pointer-events-none"
       >
         FOV {{ camera.fov }}
       </div>
       <div
         v-if="compact"
-        class="absolute bottom-2 left-2 rounded bg-black/60 px-2 py-1 text-[10px] font-medium text-white"
+        class="absolute bottom-2 left-2 rounded bg-black/60 px-2 py-1 text-[10px] font-medium text-white pointer-events-none"
       >
-        {{ camera.detections.length }} detected
+        {{ camera.detections?.length || 0 }} detected
       </div>
     </div>
 

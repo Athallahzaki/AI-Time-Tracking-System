@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue';
-import { LayoutGrid, MonitorPlay } from '@lucide/vue';
+import { LayoutGrid, MonitorPlay, Radio } from '@lucide/vue';
 import {
   Select,
   SelectContent,
@@ -8,11 +8,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { cameras } from '@/data/cameras';
+import { useDetectionStream } from '@/composables/useDetectionStream';
 import CameraFeedCard from './CameraFeedCard.vue';
 
+const { cameras, isConnected, isStreaming } = useDetectionStream();
+
 const viewMode = ref('grid');
-const activeCameraId = ref(cameras[0].id);
+const activeCameraId = ref(cameras[0]?.id || 'cam-01');
 
 const activeCamera = computed(
   () => cameras.find((c) => c.id === activeCameraId.value) || cameras[0],
@@ -22,18 +24,36 @@ const activeCamera = computed(
 <template>
   <div class="space-y-3">
     <div class="flex flex-wrap items-center justify-between gap-2">
-      <Select v-if="viewMode === 'single'" v-model="activeCameraId">
-        <SelectTrigger class="w-75 bg-white text-sm">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem v-for="cam in cameras" :key="cam.id" :value="cam.id">
-            {{ cam.code }}: {{ cam.name }}
-          </SelectItem>
-        </SelectContent>
-      </Select>
-      <div v-else class="text-sm font-medium text-slate-700">
-        All Facilities — Live Grid
+      <div v-if="viewMode === 'single'" class="flex items-center gap-2.5">
+        <Select v-model="activeCameraId">
+          <SelectTrigger class="w-75 bg-white text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem v-for="cam in cameras" :key="cam.id" :value="cam.id">
+              {{ cam.code }}: {{ cam.name }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        <span
+          v-if="isStreaming"
+          class="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-600 border border-emerald-200"
+        >
+          <span class="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+          AI Vision Live
+        </span>
+      </div>
+      <div v-else class="flex items-center gap-2.5">
+        <span class="text-sm font-medium text-slate-700">
+          All Facilities — Live Grid
+        </span>
+        <span
+          v-if="isStreaming"
+          class="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-600 border border-emerald-200"
+        >
+          <span class="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+          AI Vision Live
+        </span>
       </div>
 
       <div class="flex items-center gap-1 rounded-lg border bg-white p-1">
