@@ -223,3 +223,34 @@ class AttendanceTracker:
                     total_session_seconds=closed_sess.elapsed_seconds,
                 )
             )
+
+    def _compute_status(
+        self,
+        elapsed_seconds: float,
+    ) -> PresenceStatus:
+        if elapsed_seconds >= (
+            self._config.max_session_minutes * 60.0
+        ):
+            return PresenceStatus.LIMIT
+
+        if elapsed_seconds >= (
+            self._config.warning_minutes * 60.0
+        ):
+            return PresenceStatus.WARNING
+
+        if elapsed_seconds >= self._config.min_present_seconds:
+            return PresenceStatus.CONFIRMED
+
+        return PresenceStatus.PASSING
+
+    def get_session(
+        self,
+        employee_or_track_id: str,
+    ) -> Optional[EmployeeSession]:
+        return self._sessions.get(employee_or_track_id)
+
+    @property
+    def active_sessions(
+        self,
+    ) -> Dict[str, EmployeeSession]:
+        return dict(self._sessions)
