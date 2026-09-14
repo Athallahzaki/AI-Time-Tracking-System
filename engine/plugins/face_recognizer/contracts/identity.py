@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import numpy as np
+
 import enum
 import time
 from dataclasses import dataclass, field
@@ -46,3 +48,25 @@ class TrackIdentityState:
             self.state == RecognitionState.CONFIRMED
             and self.identity is not None
         )
+
+@dataclass(frozen=True)
+class Identity:
+    employee_id: str
+    name: str
+    active: bool = True
+
+
+@dataclass(frozen=True)
+class EnrollmentRequest:
+    employee_id: str
+    name: str
+    images: list[np.ndarray]
+    active: bool = True
+
+
+@dataclass(frozen=True)
+class EnrollmentResult:
+    employee_id: str
+    name: str
+    reference_count: int
+    active: bool
