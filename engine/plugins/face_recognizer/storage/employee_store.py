@@ -57,3 +57,12 @@ class EmployeeStore:
         with open(self._get_path(employee_id), "w", encoding="utf-8") as f:
             json.dump(emp, f, indent=2)
         return True
+
+    def delete(self, employee_id: str) -> bool:
+        path = self._get_path(employee_id)
+
+        if not path.exists():
+            return False
+
+        path.unlink()
+        return True

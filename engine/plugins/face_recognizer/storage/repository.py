@@ -69,3 +69,13 @@ class EmployeeRepository:
 
     def reload(self) -> None:
         self.load_active_references(force_reload=True)
+
+    def delete_employee(self, employee_id: str) -> bool:
+        deleted_employee = self._employee_store.delete(employee_id)
+        deleted_embedding = self._embedding_store.delete(employee_id)
+
+        if deleted_employee or deleted_embedding:
+            self._cached_references = None
+            return True
+
+        return False

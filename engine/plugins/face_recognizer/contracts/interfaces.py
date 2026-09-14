@@ -93,3 +93,29 @@ class RecognitionPolicy(Protocol):
         current_time: float,
     ) -> bool:
         ...
+
+@runtime_checkable
+class EnrollmentRepository(Protocol):
+    """Interface for registering and managing identities."""
+
+    def register_employee(
+        self,
+        employee_id: str,
+        name: str,
+        embeddings: List[np.ndarray],
+        active: bool = True,
+    ) -> None:
+        ...
+
+    def set_active(
+        self,
+        employee_id: str,
+        active: bool,
+    ) -> None:
+        ...
+
+    def delete_employee(
+        self,
+        employee_id: str,
+    ) -> bool:
+        ...
