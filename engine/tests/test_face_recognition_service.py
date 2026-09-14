@@ -3,7 +3,9 @@ import numpy as np
 from engine.plugins.face_recognizer.contracts.face import (
     FaceDetection,
     FaceEmbedding,
+    FaceLandmarks,
 )
+from engine.vision_core.contracts.geometry import BoundingBox
 from engine.plugins.face_recognizer.contracts.identity import IdentityMatch
 from engine.plugins.face_recognizer.contracts.interfaces import FaceRecognizer
 from engine.plugins.face_recognizer.contracts.recognition import RecognitionStatus
@@ -76,13 +78,35 @@ def make_service(
     )
 
 
+from engine.plugins.face_recognizer.contracts.face import (
+    FaceDetection,
+    FaceLandmarks,
+)
+
+from engine.vision_core.contracts.geometry import BoundingBox
+
 def make_face(x1=10, y1=10, x2=100, y2=100):
     return FaceDetection(
-        bbox=(x1, y1, x2, y2),
+        bbox=BoundingBox(
+            x1=x1,
+            y1=y1,
+            x2=x2,
+            y2=y2,
+        ),
         confidence=0.95,
-        landmarks=None,
+        landmarks=FaceLandmarks(
+            points=np.array(
+                [
+                    [30.0, 30.0],
+                    [70.0, 30.0],
+                    [50.0, 50.0],
+                    [35.0, 70.0],
+                    [65.0, 70.0],
+                ],
+                dtype=np.float32,
+            )
+        ),
     )
-
 
 def test_no_face_returns_no_face():
     service = make_service(
