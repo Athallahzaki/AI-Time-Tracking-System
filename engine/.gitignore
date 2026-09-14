@@ -1,0 +1,57 @@
+# ==============================================================================
+# Git Ignore Rules for Engine Package
+# ==============================================================================
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# AI Model Weights & Checkpoints (Heavy Binaries)
+*.pt
+*.pth
+*.onnx
+*.engine
+*.plan
+*.bin
+*.weights
+*.tflite
+*.safetensors
+*.ckpt
+
+# Keep folder structure intact via .gitkeep
+!models/**/.gitkeep
+!data/**/.gitkeep
+
+# Runtime Data Storage & Embeddings
+data/employees/*.json
+data/embeddings/*.npy
+
+# Media, Recordings & Snapshots
+snapshot_*.jpg
+*.mp4
+*.avi
+*.mkv
+*.mov
+runs/
+*.log
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editor / OS specifics
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
