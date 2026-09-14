@@ -1,5 +1,5 @@
 <script setup>
-import { Download, Settings2 } from 'lucide-vue-next';
+import { Download, Settings2 } from '@lucide/vue';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -32,7 +32,7 @@ const emit = defineEmits(['update:refreshInterval', 'export', 'configure']);
     </div>
 
     <div class="flex items-center gap-3">
-      <div
+      <!-- <div
         class="flex items-center gap-2 rounded-lg border bg-white px-3 py-1.5"
       >
         <span class="flex items-center gap-1.5 text-sm text-slate-600">
@@ -55,7 +55,7 @@ const emit = defineEmits(['update:refreshInterval', 'export', 'configure']);
             <SelectItem value="off">Off</SelectItem>
           </SelectContent>
         </Select>
-      </div>
+      </div> -->
 
       <Button variant="outline" class="gap-2" @click="emit('export')">
         <Download class="h-4 w-4" />

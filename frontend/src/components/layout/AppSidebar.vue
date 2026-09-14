@@ -7,12 +7,12 @@ const route = useRoute();
 
 const mainNav = [
   { label: 'Dashboard', icon: LayoutDashboard, to: '/' },
-  { label: 'Live Monitoring', icon: Video, to: '/live-monitoring' },
-  { label: 'Usage History', icon: History, to: '/usage-history' },
-  { label: 'Facilities', icon: Building2, to: '/facilities' },
-  { label: 'Employees', icon: Users, to: '/employees' },
-  { label: 'Reports', icon: FileText, to: '/reports' },
-  { label: 'Notifications', icon: Bell, to: '/notifications', badge: 3 },
+  { label: 'Live Monitoring', icon: Video, to: '/#' },
+//   { label: 'Usage History', icon: History, to: '/#' },
+//   { label: 'Facilities', icon: Building2, to: '/#' },
+  { label: 'Employees', icon: Users, to: '/#' },
+  { label: 'Reports', icon: FileText, to: '/#' },
+  { label: 'Notifications', icon: Bell, to: '/#'},
 ];
 
 const systemNav = [
@@ -29,8 +29,8 @@ const isActive = (path) => route.path === path
                 <ShieldCheck class="h-5 w-5 text-white" />
             </div>
             <div class="leading-tight">
-                <p class="text-sm font-semibold text-slate-900">Facility Monitor</p>
-                <p class="text-xs text-slate-500">CV Surveillance Telemetry</p>
+                <p class="text-sm font-semibold text-slate-900">Hotel Murah</p>
+                <p class="text-xs text-slate-500">Hotel Murah dot kom</p>
             </div>
         </div>
         <nav class="flex-1 space-y-1 px-3 pt-2">
@@ -52,7 +52,7 @@ const isActive = (path) => route.path === path
                 </Badge>
             </RouterLink>
 
-            <p class="px-3 pb-1 pt-5 text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <!-- <p class="px-3 pb-1 pt-5 text-xs font-semibold uppercase tracking-wider text-slate-400">
                 System
             </p>
             <RouterLink
@@ -64,7 +64,7 @@ const isActive = (path) => route.path === path
             >
                 <component :is="item.icon" class="h-4 w-4" />
                 {{ item.label }}
-            </RouterLink>
+            </RouterLink> -->
         </nav>
 
         <div class="flex items-center gap-3 border-t px-4 py-4">
@@ -73,7 +73,7 @@ const isActive = (path) => route.path === path
             </div>
             <div class="min-w-0 flex-1 leading-tight">
                 <p class="truncate text-sm font-medium text-slate-900">Administrator</p>
-                <p class="truncate text-xs text-slate-500">admin@company.com</p>
+                <p class="truncate text-xs text-slate-500">admin@hotelmurah.com</p>
             </div>
             <ChevronsUpDown class="h-4 w-4 shrink-0 text-slate-400" />
         </div>

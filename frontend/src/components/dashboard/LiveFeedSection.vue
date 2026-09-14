@@ -1,0 +1,83 @@
+<script setup>
+import { ref, computed } from 'vue';
+import { LayoutGrid, MonitorPlay } from '@lucide/vue';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { cameras } from '@/data/cameras';
+import CameraFeedCard from './CameraFeedCard.vue';
+
+const viewMode = ref('grid');
+const activeCameraId = ref(cameras[0].id);
+
+const activeCamera = computed(
+  () => cameras.find((c) => c.id === activeCameraId.value) || cameras[0],
+);
+</script>
+
+<template>
+  <div class="space-y-3">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <Select v-if="viewMode === 'single'" v-model="activeCameraId">
+        <SelectTrigger class="w-75 bg-white text-sm">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem v-for="cam in cameras" :key="cam.id" :value="cam.id">
+            {{ cam.code }}: {{ cam.name }}
+          </SelectItem>
+        </SelectContent>
+      </Select>
+      <div v-else class="text-sm font-medium text-slate-700">
+        All Facilities — Live Grid
+      </div>
+
+      <div class="flex items-center gap-1 rounded-lg border bg-white p-1">
+        <button
+          class="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+          :class="
+            viewMode === 'single'
+              ? 'bg-slate-900 text-white'
+              : 'text-slate-500 hover:bg-slate-50'
+          "
+          @click="viewMode = 'single'"
+        >
+          <MonitorPlay class="h-3.5 w-3.5" />
+          Single
+        </button>
+        <button
+          class="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+          :class="
+            viewMode === 'grid'
+              ? 'bg-slate-900 text-white'
+              : 'text-slate-500 hover:bg-slate-50'
+          "
+          @click="viewMode = 'grid'"
+        >
+          <LayoutGrid class="h-3.5 w-3.5" />
+          Grid (4)
+        </button>
+      </div>
+    </div>
+
+    <CameraFeedCard v-if="viewMode === 'single'" :camera="activeCamera" />
+
+    <div v-else class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <CameraFeedCard
+        v-for="cam in cameras"
+        :key="cam.id"
+        :camera="cam"
+        compact
+        class="cursor-pointer"
+        @click="
+          activeCameraId = cam.id;
+          viewMode = 'single';
+        "
+      />
+    </div>
+  </div>
+</template>
