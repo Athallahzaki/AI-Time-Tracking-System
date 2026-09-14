@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Protocol, Sequence
+from typing import List, Optional, Protocol, Tuple, runtime_checkable
 
-from .detection import Detection, DetectionBatch
+from .detection import DetectionBatch
 from .frame import Frame
 from .tracking import Track
 
@@ -52,4 +52,20 @@ class TrackListener(Protocol):
         tracks: Sequence[Track],
         frame: Frame,
     ) -> None:
+        ...
+
+@runtime_checkable
+class FrameSink(Protocol):
+    """Interface for visual outputs, video writers, or streaming sinks."""
+
+    def write(
+        self,
+        frame: Frame,
+        tracks: List[Track],
+    ) -> None:
+        """Processes or writes the annotated frame."""
+        ...
+
+    def close(self) -> None:
+        """Closes the sink."""
         ...
