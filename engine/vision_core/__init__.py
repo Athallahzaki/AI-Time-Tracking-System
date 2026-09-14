@@ -18,6 +18,8 @@ from .contracts import (
     ObjectTracker,
     TrackListener,
     FrameSink,
+    TrackResult,
+    EngineResult,
 )
 from .sources import (
     BaseFrameSource,
@@ -86,4 +88,6 @@ __all__ = [
     "TrackUpdatedEvent",
     "TrackLostEvent",
     "TrackRemovedEvent",
+    "TrackResult",
+    "EngineResult",
 ]

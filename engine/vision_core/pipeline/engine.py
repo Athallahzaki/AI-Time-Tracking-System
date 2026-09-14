@@ -4,7 +4,7 @@ import logging
 import signal
 import time
 from typing import Any, Callable, List, Optional, Tuple
-
+from ..contracts.result import EngineResult, TrackResult
 from ..contracts.detection import Detection
 from ..contracts.frame import Frame
 from ..contracts.interfaces import (
@@ -426,3 +426,38 @@ class VisionEngine:
     @property
     def is_running(self) -> bool:
         return self._is_running
+
+    def process_frame(self) -> EngineResult | None:
+        """
+        Processes one frame and returns the backend-facing public result.
+
+        The existing step() API remains unchanged for internal/runtime use.
+        """
+        frame, tracks = self.step()
+
+        if frame is None:
+            return None
+
+        results = [
+            TrackResult(
+                track_id=track.track_id,
+                bbox=track.bbox,
+                identity_id=track.attributes.get("identity"),
+                recognition_status=track.attributes.get(
+                    "recognition_status"
+                ),
+                similarity=float(
+                    track.attributes.get(
+                        "similarity",
+                        0.0,
+                    )
+                ),
+            )
+            for track in tracks
+        ]
+
+        return EngineResult(
+            frame_id=frame.frame_id,
+            timestamp=frame.timestamp,
+            tracks=results,
+        )

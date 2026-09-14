@@ -2,6 +2,7 @@ from .geometry import Point, BoundingBox
 from .frame import Frame, FrameMetadata
 from .detection import Detection, DetectionBatch
 from .tracking import Track, TrackState
+from .result import TrackResult, EngineResult
 from .interfaces import (
     FrameSource,
     ObjectDetector,
@@ -24,4 +25,6 @@ __all__ = [
     "ObjectTracker",
     "TrackListener",
     "FrameSink",
+    "TrackResult",
+    "EngineResult",
 ]

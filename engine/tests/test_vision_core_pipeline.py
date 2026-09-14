@@ -188,3 +188,50 @@ def test_vision_engine_distinguishes_lost_from_removed():
 
     assert listener.lost == [1]
     assert listener.removed == [1]
+
+def test_vision_engine_process_frame_returns_public_result():
+    source = MockFrameSource(
+        width=640,
+        height=480,
+        max_frames=1,
+    )
+    detector = MockDetector()
+    tracker = IoUTracker()
+
+    engine = VisionEngine(
+        source=source,
+        detector=detector,
+        tracker=tracker,
+        config=VisionCoreConfig(
+            auto_warmup=False,
+        ),
+    )
+
+    engine.start()
+
+    result = engine.process_frame()
+
+    engine.stop()
+
+    assert result is not None
+    assert result.frame_id == 1
+    assert result.timestamp > 0.0
+    assert len(result.tracks) > 0
+
+    track = result.tracks[0]
+
+    assert track.track_id == 1
+    assert track.bbox.width > 0
+    assert track.bbox.height > 0
+    assert track.identity_id is None
+    assert track.recognition_status is None
+    assert track.similarity == 0.0
+
+def test_vision_core_result_contract_has_no_face_recognition_dependency():
+    import inspect
+
+    from engine.vision_core.contracts import result
+
+    source = inspect.getsource(result)
+
+    assert "plugins.face_recognizer" not in source
