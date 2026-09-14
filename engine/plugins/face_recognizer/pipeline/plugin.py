@@ -30,6 +30,12 @@ from ..contracts.recognition import (
     RecognitionResult,
     RecognitionStatus,
 )
+from ..contracts.preprocessing import ImagePreprocessor as IImagePreprocessor
+from ..contracts.preprocessing import PersonCropper as IPersonCropper
+from ..preprocessing import (
+    BoundingBoxPersonCropper,
+    DefaultImagePreprocessor,
+)
 from .recognizer import FaceRecognitionService
 from ..detector.scrfd import SCRFDDetector
 from ..embedding.glintr100 import GLINTR100Embedder
@@ -59,6 +65,8 @@ class FaceRecognizerPlugin:
         recognizer: Optional[IFaceRecognizer] = None,
         cache: Optional[RecognitionCache] = None,
         policy: Optional[IRecognitionPolicy] = None,
+        person_cropper: Optional[IPersonCropper] = None,
+        image_preprocessor: Optional[IImagePreprocessor] = None,
     ) -> None:
         self._config = config or FaceRecognizerConfig()
 
@@ -104,6 +112,9 @@ class FaceRecognizerPlugin:
             backoff_retry_interval_sec=self._config.backoff_retry_interval_sec,
             recognition_ttl_sec=self._config.cache_ttl_seconds,
         )
+
+        self._person_cropper = person_cropper or BoundingBoxPersonCropper()
+        self._image_preprocessor = image_preprocessor or DefaultImagePreprocessor()
 
         self._event_handlers: List[Callable[[PluginEvent], None]] = []
 
@@ -158,39 +169,33 @@ class FaceRecognizerPlugin:
         frame: Frame,
         current_time: float,
     ) -> None:
-            """Run one recognition attempt for a tracked person."""
+        """Run one recognition attempt for a tracked person."""
 
-            x1, y1, x2, y2 = track.bbox.to_int_xyxy()
-            h, w = frame.shape[:2]
+        person_crop = self._person_cropper.crop(
+            image=frame.image,
+            track=track,
+        )
 
-            # Clip bounding box to original frame coordinates.
-            cx1 = max(0, min(w, x1))
-            cy1 = max(0, min(h, y1))
-            cx2 = max(cx1, min(w, x2))
-            cy2 = max(cy1, min(h, y2))
-
-            if (cx2 - cx1) < 10 or (cy2 - cy1) < 10:
-                result = RecognitionResult(
-                    status=RecognitionStatus.ERROR,
-                )
-                self._apply_recognition_result(
-                    track,
-                    result,
-                    current_time,
-                )
-                return
-
-            person_crop = frame.image[cy1:cy2, cx1:cx2]
-
-            result = self._recognizer.recognize(
-                person_crop,
+        if person_crop is None:
+            result = RecognitionResult(
+                status=RecognitionStatus.ERROR,
             )
-
             self._apply_recognition_result(
                 track,
                 result,
                 current_time,
             )
+            return
+
+        prepared_image = self._image_preprocessor.preprocess(person_crop)
+
+        result = self._recognizer.recognize(prepared_image)
+
+        self._apply_recognition_result(
+            track,
+            result,
+            current_time,
+        )
 
     def _apply_recognition_result(
         self,

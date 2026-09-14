@@ -1,6 +1,7 @@
 import pytest
 import numpy as np
 
+from ..plugins.face_recognizer.contracts.recognition import RecognitionResult, RecognitionStatus
 from engine.vision_core.contracts.geometry import BoundingBox
 from engine.vision_core.contracts.tracking import Track, TrackState
 from engine.vision_core.contracts.frame import Frame, FrameMetadata
@@ -89,6 +90,135 @@ def test_face_recognizer_plugin_track_listener():
         bbox=BoundingBox(x1=10, y1=10, x2=150, y2=250),
         state=TrackState.TRACKED,
     )
+
+    class MockPersonCropper:
+        def __init__(self, crop):
+            self.crop_result = crop
+            self.called = False
+            self.received_image = None
+            self.received_track = None
+
+        def crop(self, image, track):
+            self.called = True
+            self.received_image = image
+            self.received_track = track
+            return self.crop_result
+
+
+    class MockImagePreprocessor:
+        def __init__(self, result):
+            self.result = result
+            self.called = False
+            self.received_image = None
+
+        def preprocess(self, image):
+            self.called = True
+            self.received_image = image
+            return self.result
+
+
+    class MockRecognizer:
+        def __init__(self, result):
+            self.result = result
+            self.called = False
+            self.received_image = None
+
+        def recognize(self, image):
+            self.called = True
+            self.received_image = image
+            return self.result
+
+    def test_plugin_uses_cropper_preprocessor_and_recognizer():
+        frame_image = np.zeros((200, 100, 3), dtype=np.uint8)
+        person_crop = np.ones((80, 40, 3), dtype=np.uint8)
+        prepared_image = np.full((112, 112, 3), 7, dtype=np.uint8)
+
+        person_cropper = MockPersonCropper(person_crop)
+        preprocessor = MockImagePreprocessor(prepared_image)
+
+        recognition_result = RecognitionResult(
+            status=RecognitionStatus.NO_FACE,
+        )
+        recognizer = MockRecognizer(recognition_result)
+
+        plugin = FaceRecognizerPlugin(
+            # dependency lain yang memang sudah dipakai fixture/test-mu
+            recognizer=recognizer,
+            person_cropper=person_cropper,
+            image_preprocessor=preprocessor,
+        )
+
+        track = Track(
+            track_id=1,
+            bbox=BoundingBox(
+                x1=10,
+                y1=20,
+                x2=60,
+                y2=120,
+            ),
+        )
+
+        frame = Frame(image=frame_image)
+
+        plugin._process_recognition(
+            track=track,
+            frame=frame,
+            current_time=100.0,
+        )
+
+        assert person_cropper.called
+        assert person_cropper.received_image is frame_image
+        assert person_cropper.received_track is track
+
+        assert preprocessor.called
+        assert preprocessor.received_image is person_crop
+
+        assert recognizer.called
+        assert recognizer.received_image is prepared_image
+
+    def test_plugin_handles_failed_person_crop():
+        frame_image = np.zeros((200, 100, 3), dtype=np.uint8)
+
+        person_cropper = MockPersonCropper(None)
+        preprocessor = MockImagePreprocessor(
+            np.ones((112, 112, 3), dtype=np.uint8)
+        )
+
+        recognizer = MockRecognizer(
+            RecognitionResult(
+                status=RecognitionStatus.RECOGNIZED,
+                identity_id="employee-1",
+                similarity=0.95,
+            )
+        )
+
+        plugin = FaceRecognizerPlugin(
+            recognizer=recognizer,
+            person_cropper=person_cropper,
+            image_preprocessor=preprocessor,
+        )
+
+        track = Track(
+            track_id=1,
+            bbox=BoundingBox(
+                x1=10,
+                y1=20,
+                x2=60,
+                y2=120,
+            ),
+        )
+
+        frame = Frame(image=frame_image)
+
+        plugin._process_recognition(
+            track=track,
+            frame=frame,
+            current_time=100.0,
+        )
+
+        assert person_cropper.called
+        assert not preprocessor.called
+        assert not recognizer.called
 
     # Invoke plugin listener
     plugin.on_tracks_updated([track], frame)
