@@ -18,7 +18,10 @@ class BoundingBoxPersonCropper:
 
         height, width = image.shape[:2]
 
-        x1, y1, x2, y2 = track.bbox.to_int_tuple()
+        x1 = int(track.bbox.x1)
+        y1 = int(track.bbox.y1)
+        x2 = int(track.bbox.x2)
+        y2 = int(track.bbox.y2)
 
         # Clamp coordinates to the original frame.
         x1 = max(0, min(x1, width))
@@ -26,7 +29,7 @@ class BoundingBoxPersonCropper:
         x2 = max(0, min(x2, width))
         y2 = max(0, min(y2, height))
 
-        # Invalid or empty bounding box.
+        # Invalid or empty bounding box after clipping.
         if x2 <= x1 or y2 <= y1:
             return None
 

@@ -62,14 +62,14 @@ def test_person_cropper_clips_bbox_to_frame():
     assert crop.shape == (100, 100, 3)
 
 
-def test_person_cropper_returns_none_for_invalid_bbox():
+def test_person_cropper_returns_none_for_bbox_outside_frame():
     image = np.zeros((100, 100, 3), dtype=np.uint8)
 
     track = make_track(
-        x1=80,
-        y1=80,
-        x2=20,
-        y2=20,
+        x1=120,
+        y1=120,
+        x2=150,
+        y2=150,
     )
 
     cropper = BoundingBoxPersonCropper()
