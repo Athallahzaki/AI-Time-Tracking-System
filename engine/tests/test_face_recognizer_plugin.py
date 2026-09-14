@@ -128,6 +128,7 @@ def test_face_recognizer_plugin_track_listener():
             self.received_image = image
             return self.result
 
+
     def test_plugin_uses_cropper_preprocessor_and_recognizer():
         frame_image = np.zeros((200, 100, 3), dtype=np.uint8)
         person_crop = np.ones((80, 40, 3), dtype=np.uint8)
@@ -142,7 +143,6 @@ def test_face_recognizer_plugin_track_listener():
         recognizer = MockRecognizer(recognition_result)
 
         plugin = FaceRecognizerPlugin(
-            # dependency lain yang memang sudah dipakai fixture/test-mu
             recognizer=recognizer,
             person_cropper=person_cropper,
             image_preprocessor=preprocessor,
@@ -175,6 +175,7 @@ def test_face_recognizer_plugin_track_listener():
 
         assert recognizer.called
         assert recognizer.received_image is prepared_image
+
 
     def test_plugin_handles_failed_person_crop():
         frame_image = np.zeros((200, 100, 3), dtype=np.uint8)
