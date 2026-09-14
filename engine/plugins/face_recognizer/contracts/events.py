@@ -4,7 +4,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 from ....vision_core.contracts.tracking import Track
-from .identity import RecognitionStatus
 
 
 @dataclass(frozen=True)

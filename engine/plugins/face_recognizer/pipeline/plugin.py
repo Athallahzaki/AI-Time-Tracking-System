@@ -16,7 +16,7 @@ from ..contracts.events import (
     PluginEvent,
     RecognitionExpiredEvent,
 )
-from ..contracts.identity import IdentityMatch, RecognitionStatus, TrackIdentityState
+from ..contracts.identity import IdentityMatch, TrackIdentityState
 from ..contracts.interfaces import (
     FaceAligner as IFaceAligner,
     FaceDetector as IFaceDetector,
@@ -25,6 +25,11 @@ from ..contracts.interfaces import (
     IdentityRepository as IIdentityRepository,
     RecognitionPolicy as IRecognitionPolicy,
 )
+from ..contracts.recognition import (
+    RecognitionResult,
+    RecognitionStatus,
+)
+from .recognizer import FaceRecognitionService
 from ..detector.scrfd import SCRFDDetector
 from ..embedding.glintr100 import GLINTR100Embedder
 from ..matching.matcher import FaceMatcher
@@ -77,6 +82,13 @@ class FaceRecognizerPlugin:
             employees_dir=self._config.employees_dir,
             embeddings_dir=self._config.embeddings_dir,
             embedding_dimension=self._config.embedding_dimension,
+        )
+        self._recognizer = FaceRecognitionService(
+            detector=self._detector,
+            aligner=self._aligner,
+            embedder=self._embedder,
+            matcher=self._matcher,
+            repository=self._repository,
         )
         self._cache = cache or RecognitionCache(
             ttl_seconds=self._config.cache_ttl_seconds,
@@ -132,92 +144,134 @@ class FaceRecognizerPlugin:
             final_state = self._cache.get(track.track_id)
             if final_state is not None:
                 track.attributes["identity"] = final_state.identity
-                track.attributes["recognition_status"] = final_state.status.value
+                track.attributes["recognition_status"] = final_state.state.value
                 track.attributes["similarity"] = final_state.similarity
 
         # Evict stale tracks that disappeared
         self._cache.cleanup_stale_tracks(active_track_ids)
 
-    def _process_recognition(self, track: Track, frame: Frame, current_time: float) -> None:
-        """Performs crop, face detection, alignment, embedding, and vector matching for one track."""
-        x1, y1, x2, y2 = track.bbox.to_int_xyxy()
-        h, w = frame.shape[:2]
+    def _process_recognition(
+        self,
+        track: Track,
+        frame: Frame,
+        current_time: float,
+    ) -> None:
+            """Run one recognition attempt for a tracked person."""
 
-        # Safe bounding box crop
-        cx1 = max(0, min(w, x1))
-        cy1 = max(0, min(h, y1))
-        cx2 = max(cx1, min(w, x2))
-        cy2 = max(cy1, min(h, y2))
+            x1, y1, x2, y2 = track.bbox.to_int_xyxy()
+            h, w = frame.shape[:2]
 
-        if (cx2 - cx1) < 10 or (cy2 - cy1) < 10:
-            self._cache.record_no_face(track.track_id, current_time=current_time)
-            return
+            # Clip bounding box to original frame coordinates.
+            cx1 = max(0, min(w, x1))
+            cy1 = max(0, min(h, y1))
+            cx2 = max(cx1, min(w, x2))
+            cy2 = max(cy1, min(h, y2))
 
-        person_crop = frame.image[cy1:cy2, cx1:cx2]
-
-        # 1. Detect faces in person crop
-        face_detections = self._detector.detect(person_crop)
-        if not face_detections:
-            self._cache.record_no_face(track.track_id, current_time=current_time)
-            return
-
-        # Pick primary face (largest area)
-        primary_face = max(face_detections, key=lambda f: f.area)
-
-        # 2. Align face chip
-        try:
-            aligned_face = self._aligner.align(person_crop, primary_face)
-        except Exception as e:
-            logger.warning(f"Face alignment error for track #{track.track_id}: {e}")
-            self._cache.record_no_face(track.track_id, current_time=current_time)
-            return
-
-        # 3. Generate feature embedding
-        try:
-            embedding = self._embedder.embed(aligned_face)
-        except Exception as e:
-            logger.warning(f"Face embedding error for track #{track.track_id}: {e}")
-            self._cache.record_no_face(track.track_id, current_time=current_time)
-            return
-
-        # 4. Match against active employee references
-        references = self._repository.load_active_references()
-        match = self._matcher.match(embedding, references)
-
-        # 5. Update cache and emit events
-        state, identity_changed = self._cache.update_with_match(
-            track_id=track.track_id,
-            match=match,
-            current_time=current_time,
-        )
-
-        if identity_changed:
-            self._emit_event(
-                IdentityChangedEvent(
-                    track_id=track.track_id,
-                    old_identity=None,
-                    new_identity=match.identity,
-                    similarity=match.similarity,
+            if (cx2 - cx1) < 10 or (cy2 - cy1) < 10:
+                result = RecognitionResult(
+                    status=RecognitionStatus.ERROR,
                 )
+                self._apply_recognition_result(
+                    track,
+                    result,
+                    current_time,
+                )
+                return
+
+            person_crop = frame.image[cy1:cy2, cx1:cx2]
+
+            result = self._recognizer.recognize(
+                person_crop,
             )
 
-        if match.is_match:
+            self._apply_recognition_result(
+                track,
+                result,
+                current_time,
+            )
+            
+    def _apply_recognition_result(
+        self,
+        track: Track,
+        result: RecognitionResult,
+        current_time: float,
+    ) -> None:
+        """Translate recognition result into cache state and plugin events."""
+
+        if result.status == RecognitionStatus.RECOGNIZED:
+            from ..contracts.identity import IdentityMatch
+
+            previous_state = self._cache.get(track.track_id)
+
+            old_identity = (
+                previous_state.identity
+                if previous_state is not None
+                else None
+            )
+
+            match = IdentityMatch(
+                identity=result.identity_id,
+                similarity=result.similarity,
+            )
+
+            state, identity_changed = self._cache.update_with_match(
+                track_id=track.track_id,
+                match=match,
+                current_time=current_time,
+            )
+
+            if identity_changed:
+                self._emit_event(
+                    IdentityChangedEvent(
+                        track_id=track.track_id,
+                        old_identity=old_identity,
+                        new_identity=result.identity_id,
+                        similarity=result.similarity,
+                    )
+                )
+
             self._emit_event(
                 FaceRecognizedEvent(
                     track_id=track.track_id,
-                    employee_id=match.identity,
-                    similarity=match.similarity,
+                    employee_id=result.identity_id,
+                    similarity=result.similarity,
                     track=track,
                 )
             )
-        else:
+
+            return
+
+        if result.status == RecognitionStatus.UNKNOWN:
+            self._cache.record_no_face(
+                track.track_id,
+                current_time=current_time,
+            )
+
             self._emit_event(
                 PersonUnknownEvent(
                     track_id=track.track_id,
-                    similarity=match.similarity,
+                    similarity=result.similarity,
                     track=track,
                 )
             )
+
+            return
+
+        if result.status == RecognitionStatus.NO_FACE:
+            self._cache.record_no_face(
+                track.track_id,
+                current_time=current_time,
+            )
+
+            return
+
+        if result.status == RecognitionStatus.ERROR:
+            self._cache.record_no_face(
+                track.track_id,
+                current_time=current_time,
+            )
+
+            return
 
     def on_track_lost(self, track: Track) -> None:
         """Invoked when vision_core removes a track."""

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Protocol, Sequence, runtime_checkable
+from typing import Dict, List, Optional, Protocol, runtime_checkable
 
 import numpy as np
 
+from ....vision_core.contracts.tracking import Track
 from .face import FaceDetection, FaceEmbedding
 from .identity import IdentityMatch, TrackIdentityState
 from .recognition import RecognitionResult
@@ -19,7 +20,7 @@ class FaceDetector(Protocol):
 
 @runtime_checkable
 class FaceAligner(Protocol):
-    """Interface for face alignment."""
+    """Interface for face alignment routines."""
 
     def align(
         self,
@@ -31,7 +32,7 @@ class FaceAligner(Protocol):
 
 @runtime_checkable
 class FaceEmbedder(Protocol):
-    """Interface for facial feature extraction."""
+    """Interface for facial feature extraction models."""
 
     def embed(
         self,
@@ -42,7 +43,7 @@ class FaceEmbedder(Protocol):
 
 @runtime_checkable
 class FaceMatcher(Protocol):
-    """Interface for comparing an embedding against registered references."""
+    """Interface for matching embedding vectors against registered references."""
 
     def match(
         self,
@@ -53,8 +54,24 @@ class FaceMatcher(Protocol):
 
 
 @runtime_checkable
+class FaceRecognizer(Protocol):
+    """
+    High-level stateless face-recognition service.
+
+    Input is an already prepared image.
+    The recognizer does not know where the image came from.
+    """
+
+    def recognize(
+        self,
+        image: np.ndarray,
+    ) -> RecognitionResult:
+        ...
+
+
+@runtime_checkable
 class IdentityRepository(Protocol):
-    """Persistence boundary for registered identity embeddings."""
+    """Interface for loading registered identity references."""
 
     def load_active_references(
         self,
@@ -65,30 +82,14 @@ class IdentityRepository(Protocol):
 @runtime_checkable
 class RecognitionPolicy(Protocol):
     """
-    Determines whether a track should undergo recognition.
-
-    This is a state/orchestration concern rather than a face-model concern.
+    Determines whether recognition should be performed
+    for a tracked object.
     """
 
     def should_recognize(
         self,
-        track_id: int,
+        track: Track,
         state: Optional[TrackIdentityState],
         current_time: float,
     ) -> bool:
-        ...
-
-@runtime_checkable
-class FaceRecognizer(Protocol):
-    """
-    Stateless high-level face recognition service.
-
-    Input is an already prepared image.
-    It does not know Track, YOLO, FrameSource, or cache state.
-    """
-
-    def recognize(
-        self,
-        image: np.ndarray,
-    ) -> RecognitionResult:
         ...

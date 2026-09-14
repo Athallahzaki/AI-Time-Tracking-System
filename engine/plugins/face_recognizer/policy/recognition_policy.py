@@ -1,30 +1,29 @@
 from __future__ import annotations
 
-import logging
 import time
 from typing import Optional
 
-from ....vision_core.contracts.tracking import Track, TrackState
-from ..contracts.identity import RecognitionStatus, TrackIdentityState
-
-logger = logging.getLogger(__name__)
+from ....vision_core.contracts.tracking import Track
+from ..contracts.identity import RecognitionState, TrackIdentityState
 
 
 class StandardRecognitionPolicy:
     """
-    Decoupled policy engine that determines whether a track should undergo face recognition.
-    Balances recognition accuracy, computational efficiency, and latency.
+    Determines when face recognition should be executed for a tracked person.
+
+    The policy controls recognition frequency and retry behavior.
+    It does not perform recognition itself.
     """
 
     def __init__(
         self,
         min_person_width: int = 40,
         min_person_height: int = 80,
-        min_confirmations: int = 2,            # Number of consecutive matches for high confidence
-        unknown_retry_interval_sec: float = 1.0,  # Interval between retries for unrecognized person
-        max_unknown_retries: int = 5,           # Max rapid retries before backing off
-        backoff_retry_interval_sec: float = 5.0,  # Slower retry interval after max rapid retries
-        recognition_ttl_sec: float = 60.0,      # TTL after which confirmed identity is refreshed
+        min_confirmations: int = 2,
+        unknown_retry_interval_sec: float = 1.0,
+        max_unknown_retries: int = 5,
+        backoff_retry_interval_sec: float = 5.0,
+        recognition_ttl_sec: float = 60.0,
     ) -> None:
         self._min_width = min_person_width
         self._min_height = min_person_height
@@ -40,39 +39,49 @@ class StandardRecognitionPolicy:
         state: Optional[TrackIdentityState],
         current_time: Optional[float] = None,
     ) -> bool:
-        """
-        Evaluates whether face recognition should be executed for this track on the current frame.
-        """
         now = current_time if current_time is not None else time.time()
 
-        # 1. Quality / Geometry check: Bounding box must be large enough to contain a face
-        if track.bbox.width < self._min_width or track.bbox.height < self._min_height:
+        # Recognition is pointless when the person crop is too small.
+        if (
+            track.bbox.width < self._min_width
+            or track.bbox.height < self._min_height
+        ):
             return False
 
-        # 2. If track is newly created or has no state yet -> Recognize immediately
-        if state is None or state.status == RecognitionStatus.PENDING:
+        # New track.
+        if state is None:
             return True
 
-        # 3. If track is recognized
-        if state.status == RecognitionStatus.RECOGNIZED:
-            # If we haven't reached min_confirmations, keep confirming on next frames
+        # Newly created cache state.
+        if state.state == RecognitionState.PENDING:
+            return True
+
+        # A successful recognition is re-run only when:
+        # 1. confirmation has not reached the configured threshold, or
+        # 2. the cached recognition has expired.
+        if state.state == RecognitionState.CONFIRMED:
             if state.consecutive_matches < self._min_confirmations:
-                # Fast confirmation (throttle slightly to 0.1s to allow track to stabilize)
-                return (now - state.last_attempt_time) >= 0.1
+                return (
+                    now - state.last_attempt_time
+                ) >= 0.1
 
-            # If already confirmed, check if cached state expired (TTL)
-            if (now - state.last_attempt_time) >= self._ttl_sec:
-                return True
+            return (
+                now - state.last_attempt_time
+            ) >= self._ttl_sec
 
-            # Otherwise, use existing cached identity without running inference
-            return False
+        # Failed recognition attempts use retry/backoff intervals.
+        if state.state == RecognitionState.RETRY:
+            time_since_attempt = (
+                now - state.last_attempt_time
+            )
 
-        # 4. If track is UNKNOWN or NO_FACE
-        if state.status in (RecognitionStatus.UNKNOWN, RecognitionStatus.NO_FACE):
-            time_since_attempt = now - state.last_attempt_time
             if state.retry_count <= self._max_unknown_retries:
                 return time_since_attempt >= self._unknown_retry_interval
-            else:
-                return time_since_attempt >= self._backoff_retry_interval
+
+            return time_since_attempt >= self._backoff_retry_interval
+
+        # EXPIRED should immediately trigger a fresh recognition.
+        if state.state == RecognitionState.EXPIRED:
+            return True
 
         return False
