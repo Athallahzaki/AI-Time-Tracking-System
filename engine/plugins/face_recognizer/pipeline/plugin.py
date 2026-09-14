@@ -130,6 +130,10 @@ class FaceRecognizerPlugin:
 
         self._event_handlers: List[Callable[[PluginEvent], None]] = []
 
+    @property
+    def repository(self) -> IIdentityRepository:
+        return self._repository
+
     def add_event_handler(self, handler: Callable[[PluginEvent], None]) -> FaceRecognizerPlugin:
         """Registers a callback for face recognition events."""
         if handler not in self._event_handlers:
