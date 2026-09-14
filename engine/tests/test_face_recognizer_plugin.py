@@ -95,5 +95,5 @@ def test_face_recognizer_plugin_track_listener():
 
     # Verify track decoration
     assert track.attributes["identity"] == "EMP_TEST"
-    assert track.attributes["recognition_status"] == "RECOGNIZED"
+    assert track.attributes["recognition_status"] == "CONFIRMED"
     assert track.attributes["similarity"] > 0.9

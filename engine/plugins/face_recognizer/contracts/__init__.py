@@ -1,6 +1,7 @@
 from .face import FaceDetection, FaceEmbedding, FaceLandmarks
 from .identity import IdentityMatch, RecognitionState, TrackIdentityState
 from .recognition import RecognitionResult, RecognitionStatus
+from .preprocessing import ImagePreprocessor, PersonCropper
 from .interfaces import (
     FaceDetector,
     FaceAligner,
