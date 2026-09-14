@@ -186,8 +186,13 @@ def test_plugin_uses_cropper_preprocessor_and_recognizer():
         ),
     )
 
-    frame = Frame(image=frame_image)
-
+    frame = Frame(
+        image=frame_image,
+        metadata=FrameMetadata(
+            frame_id=1,
+            timestamp=100.0,
+        ),
+    )
     plugin._process_recognition(
         track=track,
         frame=frame,
@@ -238,7 +243,13 @@ def test_plugin_handles_failed_person_crop():
         ),
     )
 
-    frame = Frame(image=frame_image)
+    frame = Frame(
+        image=frame_image,
+        metadata=FrameMetadata(
+            frame_id=1,
+            timestamp=100.0,
+        ),
+    )
 
     plugin._process_recognition(
         track=track,
