@@ -62,7 +62,7 @@ def test_end_to_end_composition_and_execution():
 
         # Verify face recognition plugin decorated track
         assert active_track.attributes.get("identity") == "EMP_007"
-        assert active_track.attributes.get("recognition_status") == "RECOGNIZED"
+        assert active_track.attributes.get("recognition_status") == "CONFIRMED"
 
         # Verify attendance tracker decorated track
         assert "presence_status" in active_track.attributes

@@ -66,22 +66,37 @@ def test_cosine_similarity_and_matcher():
 
 
 def test_face_recognizer_plugin_track_listener():
-    # Setup mock components
-    detector = MockFaceDetector(return_detection=True)
-    embedder = MockFaceEmbedder(dimension=512)
-    matcher = FaceMatcher(threshold=0.30)
+    detector = MockFaceDetector(
+        return_detection=True,
+    )
+
+    embedder = MockFaceEmbedder(
+        dimension=512,
+    )
+
+    matcher = FaceMatcher(
+        threshold=0.30,
+    )
+
+    repository = MockIdentityRepository()
 
     plugin = FaceRecognizerPlugin(
         detector=detector,
         embedder=embedder,
         matcher=matcher,
+        repository=repository,
     )
 
-    # Seed reference embedding matching the mock embedder output
-    dummy_img = np.zeros((300, 200, 3), dtype=np.uint8)
+    dummy_img = np.zeros(
+        (300, 200, 3),
+        dtype=np.uint8,
+    )
+
     dummy_img[:, :] = (100, 100, 100)
 
-    ref_emb = embedder.embed(dummy_img).vector
+    ref_emb = embedder.embed(
+        dummy_img,
+    ).vector
 
     plugin.repository.register_employee(
         "EMP_TEST",
@@ -89,7 +104,6 @@ def test_face_recognizer_plugin_track_listener():
         [ref_emb],
     )
 
-    # Create Frame and Track
     frame = Frame(
         image=dummy_img,
         metadata=FrameMetadata(
@@ -109,10 +123,11 @@ def test_face_recognizer_plugin_track_listener():
         state=TrackState.TRACKED,
     )
 
-    # Invoke plugin listener
-    plugin.on_tracks_updated([track], frame)
+    plugin.on_tracks_updated(
+        [track],
+        frame,
+    )
 
-    # Verify track decoration
     assert track.attributes["identity"] == "EMP_TEST"
     assert track.attributes["recognition_status"] == "CONFIRMED"
     assert track.attributes["similarity"] > 0.9
@@ -343,3 +358,18 @@ def test_plugin_delegates_recognition_to_orchestrator():
     assert orchestrator.received_track is track
     assert orchestrator.received_frame is frame
     assert orchestrator.received_time == 123.0
+
+class MockIdentityRepository:
+    def __init__(self):
+        self.references = {}
+
+    def register_employee(
+        self,
+        employee_id,
+        name,
+        embeddings,
+    ):
+        self.references[employee_id] = embeddings
+
+    def load_active_references(self):
+        return self.references
