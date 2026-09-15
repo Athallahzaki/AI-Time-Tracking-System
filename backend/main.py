@@ -1,126 +1,70 @@
-import asyncio
-import json
+from __future__ import annotations
+
+import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sse_starlette.sse import EventSourceResponse
 
-from backend.engine_service import EngineService
+from backend.core.config import settings
+from backend.services.camera_manager import camera_manager
+from backend.routers import attendance, cameras, stats, streams
 
-
-# ==========================================
-# VIDEO SOURCE
-# ==========================================
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-VIDEO_PATH = (
-    PROJECT_ROOT
-    / "frontend"
-    / "public"
-    / "videos"
-    / "video2.mp4"
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] [%(name)s]: %(message)s",
+    datefmt="%H:%M:%S",
 )
+logger = logging.getLogger("AI-Time-Tracking-Backend")
 
-
-# ==========================================
-# ENGINE
-# ==========================================
-
-engine_service = EngineService(
-    source=str(VIDEO_PATH)
-)
-
-
-# ==========================================
-# LIFESPAN (replaces deprecated on_event)
-# ==========================================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Starts the engine on server startup and stops it cleanly on shutdown."""
-    print("Starting Engine Service...")
-    engine_service.start()
+    """Lifecycle manager to start camera workers on startup and cleanup on shutdown."""
+    logger.info("Initializing AI Time Tracking Backend...")
+    camera_manager.start_default_cameras()
     yield
-    engine_service.stop()
+    logger.info("Shutting down AI Time Tracking Backend...")
+    camera_manager.shutdown()
 
 
 app = FastAPI(
-    title="AI Time Tracking API",
+    title="AI Time Tracking System API",
+    description="Real-time multi-camera computer vision and attendance tracking backend.",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
-
-# ==========================================
-# CORS
-# ==========================================
-
+# CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-    ],
+    allow_origins=settings.cors_origins + ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Register Routers
+app.include_router(streams.router)
+app.include_router(cameras.router)
+app.include_router(stats.router)
+app.include_router(attendance.router)
 
-# ==========================================
-# TEST API
-# ==========================================
 
 @app.get("/")
 def root():
-
+    """Health check and overview of active workers and cameras."""
+    active_workers = camera_manager.get_active_workers()
     return {
         "status": "online",
-        "engine": engine_service.running,
+        "version": "2.0.0",
+        "active_cameras_count": len(active_workers),
+        "total_configured_cameras": len(camera_manager.get_camera_list()),
+        "active_camera_ids": [w.camera_id for w in active_workers],
     }
 
 
-# ==========================================
-# SSE
-# ==========================================
-
-@app.get("/api/detections/stream")
-async def detection_stream(request: Request):
-
-    client_queue = engine_service.subscribe()
-
-    async def event_generator():
-
-        try:
-
-            while True:
-
-                if await request.is_disconnected():
-                    break
-
-                try:
-
-                    data = await asyncio.to_thread(
-                        client_queue.get,
-                        True,
-                        1.0
-                    )
-
-                    yield {
-                        "event": "detection",
-                        "data": json.dumps(data),
-                    }
-
-                except Exception:
-                    continue
-
-        finally:
-
-            engine_service.unsubscribe(
-                client_queue
-            )
-
-    return EventSourceResponse(
-        event_generator()
-    )
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True)
