@@ -1,0 +1,44 @@
+# Camera Configuration for AI Time Tracking System
+# Add, edit, or remove cameras by editing this file — no code changes needed.
+#
+# stream_url formats supported by the frontend player (auto-detected):
+#
+#   WebRTC (WHEP) — lowest latency ~100ms, recommended for live monitoring:
+#     stream_url: "http://localhost:8889/<name>/whep"
+#
+#   HLS — higher latency ~2-5s, works everywhere without a running WebRTC server:
+#     stream_url: "/hls/<name>/index.m3u8"   (Vite proxies /hls → localhost:8888)
+#
+#   Direct MP4 / static file:
+#     stream_url: "/videos/test.mp4"
+#
+# source_uri — RTSP URL that the AI Engine connects to for processing.
+
+cameras:
+  - id: "cam-01"
+    code: "CAM-01"
+    name: "Entertainment Room"
+    source_uri: "rtsp://localhost:8554/cam01"
+    stream_url: "http://localhost:8889/cam01/whep"
+    enabled_by_default: true
+
+  # - id: "cam-02"
+  #   code: "CAM-02"
+  #   name: "Carport Area"
+  #   source_uri: "rtsp://localhost:8554/cam02"
+  #   stream_url: "http://localhost:8889/cam02/whep"
+  #   enabled_by_default: false
+
+  # - id: "cam-03"
+  #   code: "CAM-03"
+  #   name: "Lobby Entrance"
+  #   source_uri: "rtsp://localhost:8554/cam03"
+  #   stream_url: "http://localhost:8889/cam03/whep"
+  #   enabled_by_default: false
+
+  # - id: "cam-04"
+  #   code: "CAM-04"
+  #   name: "Rooftop Terrace"
+  #   source_uri: "rtsp://localhost:8554/cam04"
+  #   stream_url: "http://localhost:8889/cam04/whep"
+  #   enabled_by_default: false

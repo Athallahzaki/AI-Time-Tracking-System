@@ -79,7 +79,7 @@ const activeCamera = computed(
           @click="viewMode = 'grid'"
         >
           <LayoutGrid class="h-3.5 w-3.5" />
-          Grid (4)
+          Grid ({{ cameras.length }})
         </button>
       </div>
     </div>

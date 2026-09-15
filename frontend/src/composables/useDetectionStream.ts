@@ -1,5 +1,4 @@
 import { ref, reactive, onMounted, onUnmounted } from 'vue';
-import { cameras as initialCameras } from '@/data/cameras';
 
 export interface DetectionItem {
   id?: string | number;
@@ -20,16 +19,8 @@ export interface CameraItem {
   id: string;
   code: string;
   name: string;
-  src: string;
-  source_uri?: string;
+  stream_url?: string;
   fps: string | number;
-  latency: string;
-  model: string;
-  fov: string;
-  streamStatus: string;
-  activity: string;
-  trackingIds: string;
-  maxSession: string;
   is_running?: boolean;
   active_people?: number;
   detections: DetectionItem[];
@@ -80,14 +71,12 @@ function formatDuration(seconds: number): string {
   return `${m}m ${rem}s`;
 }
 
-// Deep clone initial cameras to make reactive state
-const liveCameras = reactive<CameraItem[]>(
-  JSON.parse(JSON.stringify(initialCameras))
-);
+// Reactive list of cameras dynamically loaded from backend GET /api/cameras
+const liveCameras = reactive<CameraItem[]>([]);
 
 const liveStats = reactive<DashboardStats>({
-  activeFacilities: 1,
-  totalFacilities: 4,
+  activeFacilities: 0,
+  totalFacilities: 0,
   activeUsers: 0,
   totalUsage: '0s',
   avgSession: '0s',
@@ -111,20 +100,41 @@ export function useDetectionStream() {
       if (!res.ok) return;
       const json = await res.json();
       if (json.status === 'success' && Array.isArray(json.cameras)) {
-        json.cameras.forEach((backendCam: any) => {
-          const match = liveCameras.find((c) => c.id === backendCam.id);
-          if (match) {
+        const backendCams = json.cameras;
+
+        // Remove cameras no longer in backend config
+        for (let i = liveCameras.length - 1; i >= 0; i--) {
+          if (!backendCams.some((bc: any) => bc.id === liveCameras[i].id)) {
+            liveCameras.splice(i, 1);
+          }
+        }
+
+        // Add or update cameras
+        backendCams.forEach((backendCam: any) => {
+          let match = liveCameras.find((c) => c.id === backendCam.id);
+          if (!match) {
+            match = {
+              id: backendCam.id,
+              code: backendCam.code || backendCam.id.toUpperCase(),
+              name: backendCam.name || backendCam.id,
+              stream_url: backendCam.stream_url || '',
+              fps: backendCam.fps || 0,
+              is_running: backendCam.is_running || false,
+              active_people: backendCam.active_people || 0,
+              detections: [],
+            };
+            liveCameras.push(match);
+          } else {
             match.name = backendCam.name || match.name;
             match.code = backendCam.code || match.code;
-            match.fov = backendCam.fov || match.fov;
-            match.model = backendCam.model || match.model;
-            match.streamStatus = backendCam.streamStatus || match.streamStatus;
+            match.stream_url = backendCam.stream_url || match.stream_url;
             match.is_running = backendCam.is_running;
+            if (backendCam.fps !== undefined) match.fps = backendCam.fps;
           }
         });
       }
     } catch (err) {
-      console.debug('[API] Cameras fetch fallback to local defaults:', err);
+      console.debug('[API] Cameras fetch error:', err);
     }
   }
 
@@ -138,20 +148,6 @@ export function useDetectionStream() {
       }
     } catch (err) {
       console.debug('[API] Stats fetch skipped:', err);
-    }
-  }
-
-  async function switchCameraSource(cameraId: string, sourceUri: string) {
-    try {
-      const res = await fetch(`/api/cameras/${cameraId}/source`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source_uri: sourceUri }),
-      });
-      return await res.json();
-    } catch (err) {
-      console.error('[API] Failed to switch source:', err);
-      throw err;
     }
   }
 
@@ -173,7 +169,6 @@ export function useDetectionStream() {
       eventSource.onopen = () => {
         isConnected.value = true;
         connectionError.value = null;
-        console.log('[SSE] Connected to AI Vision detection stream:', apiUrl);
       };
 
       const handlePayload = (rawPayload: string) => {
@@ -184,13 +179,25 @@ export function useDetectionStream() {
           isStreaming.value = true;
           lastUpdated.value = new Date();
 
-          const targetCam = liveCameras.find((c) => c.id === data.camera_id);
-          if (!targetCam) return;
+          let targetCam = liveCameras.find((c) => c.id === data.camera_id);
+          if (!targetCam) {
+            targetCam = {
+              id: data.camera_id,
+              code: data.camera_id.toUpperCase(),
+              name: data.camera_id,
+              stream_url: '',
+              fps: data.fps || 0,
+              is_running: true,
+              active_people: 0,
+              detections: [],
+            };
+            liveCameras.push(targetCam);
+          }
 
           const frameW = data.width || 1920;
           const frameH = data.height || 1080;
 
-          // Convert backend detections to frontend percentage bounding boxes
+          // Convert backend detections to frontend percentage coordinates
           const mappedDetections: DetectionItem[] = (data.people || []).map(
             (person) => {
               const bbox = person.bbox || { x1: 0, y1: 0, x2: 0, y2: 0 };
@@ -260,23 +267,8 @@ export function useDetectionStream() {
           if (data.fps) {
             targetCam.fps = data.fps.toFixed(1);
           }
-          targetCam.streamStatus = 'Online & Streaming';
-
-          if (mappedDetections.length > 0) {
-            targetCam.trackingIds = mappedDetections
-              .map((d) => `#TRK-${d.track_id}`)
-              .join(', ');
-
-            const maxElapsed = Math.max(
-              ...data.people.map(
-                (p) => p.session_elapsed ?? p.dwell_time ?? 0
-              )
-            );
-            targetCam.maxSession = formatDuration(maxElapsed);
-          } else {
-            targetCam.trackingIds = '—';
-            targetCam.maxSession = 'Inactive';
-          }
+          targetCam.active_people = mappedDetections.length;
+          targetCam.is_running = true;
         } catch (err) {
           console.error('[SSE] Failed to parse detection message:', err);
         }
@@ -291,7 +283,6 @@ export function useDetectionStream() {
       };
 
       eventSource.onerror = (err) => {
-        console.warn('[SSE] Disconnected from AI Engine, retrying in 3s...', err);
         isConnected.value = false;
         connectionError.value = 'Disconnected from AI Engine';
         if (eventSource) {
@@ -321,7 +312,10 @@ export function useDetectionStream() {
       connect();
     }
     if (!statsPollTimer) {
-      statsPollTimer = setInterval(fetchStats, 3000);
+      statsPollTimer = setInterval(() => {
+        fetchStats();
+        fetchCameras();
+      }, 5000);
     }
   });
 
@@ -353,6 +347,5 @@ export function useDetectionStream() {
     reconnect: connect,
     fetchCameras,
     fetchStats,
-    switchCameraSource,
   };
 }

@@ -7,7 +7,6 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-import cv2
 
 from backend.core.config import PROJECT_ROOT
 from backend.core.state import system_state
@@ -54,7 +53,6 @@ class EngineWorker:
 
         self._clients: List[queue.Queue] = []
         self._lock = threading.Lock()
-        self._latest_jpeg: Optional[bytes] = None
         self._latest_data: Optional[Dict[str, Any]] = None
         self._fps: float = 0.0
 
@@ -76,10 +74,6 @@ class EngineWorker:
                 self.engine.stop()
             except Exception as e:
                 logger.warning(f"[{self.camera_id}] Error stopping engine: {e}")
-
-    def get_latest_jpeg(self) -> Optional[bytes]:
-        with self._lock:
-            return self._latest_jpeg
 
     def get_latest_data(self) -> Optional[Dict[str, Any]]:
         with self._lock:
@@ -116,7 +110,6 @@ class EngineWorker:
         if not self.engine:
             return
 
-        # Find attendance tracker in engine listeners
         for listener in getattr(self.engine, "_listeners", []):
             listener_name = type(listener).__name__
             if listener_name == "AttendanceTracker":
@@ -188,7 +181,6 @@ class EngineWorker:
                 frame, tracks = self.engine.step()
 
                 if frame is None:
-                    # If stream ended and didn't auto-loop, pause briefly
                     time.sleep(0.01)
                     continue
 
@@ -236,7 +228,6 @@ class EngineWorker:
                         "session_elapsed": session_elapsed,
                     })
 
-                # Update camera activity status in global state
                 system_state.update_camera_status(
                     camera_id=self.camera_id,
                     fps=fps,
@@ -245,16 +236,7 @@ class EngineWorker:
                     stream_status="Online & Streaming",
                 )
 
-                # Capture JPEG snapshot if subscribers or MJPEG clients might need it
-                try:
-                    ret, jpeg_buf = cv2.imencode(".jpg", frame.image, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
-                    if ret:
-                        with self._lock:
-                            self._latest_jpeg = jpeg_buf.tobytes()
-                except Exception as e:
-                    logger.debug(f"[{self.camera_id}] Error encoding frame to JPEG: {e}")
-
-                # Prepare and broadcast SSE detection payload
+                # Broadcast JSON SSE detection payload
                 data = {
                     "camera_id": self.camera_id,
                     "frame_id": frame.frame_id,

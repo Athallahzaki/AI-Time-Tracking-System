@@ -1,4 +1,5 @@
 fastapi
 uvicorn
 sse-starlette
-opencv-python
+pyyaml
+pydantic
