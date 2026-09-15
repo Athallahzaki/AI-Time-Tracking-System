@@ -14,6 +14,25 @@ from engine.vision_core.contracts.geometry import BoundingBox
 from engine.vision_core.contracts.tracking import Track, TrackState
 
 
+class FakeClock:
+    """
+    Deterministic, manually-advanced stand-in for time.time().
+
+    AttendanceTracker computes all session timing from an injected
+    clock rather than calling time.time() directly, specifically so
+    tests can control "now" instead of racing against real wall-clock
+    time (which would make elapsed-time thresholds like
+    warning_minutes/max_session_minutes unreachable within a test's
+    actual runtime).
+    """
+
+    def __init__(self, start: float = 0.0) -> None:
+        self.now = start
+
+    def __call__(self) -> float:
+        return self.now
+
+
 def make_frame(timestamp: float, frame_id: int = 1) -> Frame:
     image = np.zeros((240, 320, 3), dtype=np.uint8)
 
@@ -53,13 +72,15 @@ def make_track(
 
 
 def test_new_track_creates_passing_session_and_emits_entered():
+    clock = FakeClock(100.0)
     tracker = AttendanceTracker(
         AttendanceConfig(
             min_present_seconds=60.0,
             warning_minutes=25.0,
             max_session_minutes=30.0,
             max_missing_seconds=10.0,
-        )
+        ),
+        clock=clock,
     )
 
     events = []
@@ -93,33 +114,39 @@ def test_new_track_creates_passing_session_and_emits_entered():
 
 
 def test_session_progresses_through_confirmed_warning_and_limit_once():
+    clock = FakeClock(100.0)
     tracker = AttendanceTracker(
         AttendanceConfig(
             min_present_seconds=60.0,
             warning_minutes=25.0,
             max_session_minutes=30.0,
             max_missing_seconds=10.0,
-        )
+        ),
+        clock=clock,
     )
 
     events = []
     tracker.add_event_handler(events.append)
 
+    clock.now = 100.0
     tracker.on_tracks_updated(
         [make_track(1, 100.0, identity="EMP_001")],
         make_frame(100.0, 1),
     )
 
+    clock.now = 160.0
     tracker.on_tracks_updated(
         [make_track(1, 160.0, identity="EMP_001")],
         make_frame(160.0, 2),
     )
 
+    clock.now = 1600.0
     tracker.on_tracks_updated(
         [make_track(1, 1600.0, identity="EMP_001")],
         make_frame(1600.0, 3),
     )
 
+    clock.now = 1900.0
     tracker.on_tracks_updated(
         [make_track(1, 1900.0, identity="EMP_001")],
         make_frame(1900.0, 4),
@@ -150,12 +177,14 @@ def test_session_progresses_through_confirmed_warning_and_limit_once():
 
 
 def test_repeated_updates_do_not_repeat_milestone_events():
+    clock = FakeClock(100.0)
     tracker = AttendanceTracker(
         AttendanceConfig(
             min_present_seconds=60.0,
             warning_minutes=2.0,
             max_session_minutes=4.0,
-        )
+        ),
+        clock=clock,
     )
 
     events = []
@@ -167,6 +196,7 @@ def test_repeated_updates_do_not_repeat_milestone_events():
         timestamps,
         start=1,
     ):
+        clock.now = timestamp
         tracker.on_tracks_updated(
             [make_track(
                 1,
@@ -196,16 +226,19 @@ def test_repeated_updates_do_not_repeat_milestone_events():
 
 
 def test_identity_upgrade_preserves_anonymous_session():
+    clock = FakeClock(100.0)
     tracker = AttendanceTracker(
         AttendanceConfig(
             min_present_seconds=60.0,
             max_missing_seconds=10.0,
-        )
+        ),
+        clock=clock,
     )
 
     events = []
     tracker.add_event_handler(events.append)
 
+    clock.now = 100.0
     tracker.on_tracks_updated(
         [make_track(7, 100.0)],
         make_frame(100.0, 1),
@@ -215,6 +248,7 @@ def test_identity_upgrade_preserves_anonymous_session():
 
     assert anonymous_session is not None
 
+    clock.now = 130.0
     tracker.on_tracks_updated(
         [make_track(
             7,
@@ -237,16 +271,19 @@ def test_identity_upgrade_preserves_anonymous_session():
 
 
 def test_temporary_missing_does_not_close_session():
+    clock = FakeClock(100.0)
     tracker = AttendanceTracker(
         AttendanceConfig(
             min_present_seconds=60.0,
             max_missing_seconds=10.0,
-        )
+        ),
+        clock=clock,
     )
 
     events = []
     tracker.add_event_handler(events.append)
 
+    clock.now = 100.0
     tracker.on_tracks_updated(
         [make_track(
             3,
@@ -256,6 +293,7 @@ def test_temporary_missing_does_not_close_session():
         make_frame(100.0, 1),
     )
 
+    clock.now = 105.0
     tracker.on_tracks_updated(
         [],
         make_frame(105.0, 2),
@@ -273,16 +311,19 @@ def test_temporary_missing_does_not_close_session():
 
 
 def test_departure_closes_session_and_cleans_track_mapping():
+    clock = FakeClock(100.0)
     tracker = AttendanceTracker(
         AttendanceConfig(
             min_present_seconds=60.0,
             max_missing_seconds=10.0,
-        )
+        ),
+        clock=clock,
     )
 
     events = []
     tracker.add_event_handler(events.append)
 
+    clock.now = 100.0
     tracker.on_tracks_updated(
         [make_track(
             4,
@@ -292,6 +333,7 @@ def test_departure_closes_session_and_cleans_track_mapping():
         make_frame(100.0, 1),
     )
 
+    clock.now = 111.0
     tracker.on_tracks_updated(
         [],
         make_frame(111.0, 2),

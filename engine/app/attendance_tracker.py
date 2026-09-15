@@ -53,8 +53,13 @@ class AttendanceTracker:
     and manages employee presence sessions.
     """
 
-    def __init__(self, config: Optional[AttendanceConfig] = None) -> None:
+    def __init__(
+        self,
+        config: Optional[AttendanceConfig] = None,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
         self._config = config or AttendanceConfig()
+        self._clock = clock
         self._sessions: Dict[str, EmployeeSession] = {}  # key: employee_id or "track_{tid}"
         self._track_to_key: Dict[int, str] = {}
         self._event_handlers: List[Callable[[AppEvent], None]] = []
@@ -77,9 +82,11 @@ class AttendanceTracker:
         frame: Frame,
     ) -> None:
         """Processes active tracks and updates presence timers."""
-        # Use wall-clock time for all session timestamps so that video-file
-        # playback at any speed does not cause false-positive departure events.
-        wall_now = time.time()
+        # Use an injectable clock (real wall-clock time in production) for all
+        # session timestamps so that video-file playback at any speed does
+        # not cause false-positive departure events. Tests can inject a fake
+        # clock to get deterministic, frame-independent timing.
+        wall_now = self._clock()
         current_active_keys = set()
 
         for track in tracks:

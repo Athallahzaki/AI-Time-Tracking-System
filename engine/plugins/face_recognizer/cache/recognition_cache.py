@@ -114,26 +114,6 @@ class RecognitionCache:
 
             return state, identity_changed
 
-    def record_no_face(
-        self,
-        track_id: int,
-        current_time: Optional[float] = None,
-    ) -> TrackIdentityState:
-        """Record that no usable face was detected."""
-        now = current_time if current_time is not None else time.time()
-
-        with self._lock:
-            state = self.get_or_create(
-                track_id,
-                current_time=now,
-            )
-
-            state.state = RecognitionState.RETRY
-            state.last_attempt_time = now
-            state.retry_count += 1
-
-            return state
-
     def expire(
         self,
         track_id: int,
@@ -240,6 +220,7 @@ class RecognitionCache:
         track_id: int,
         current_time: Optional[float] = None,
     ) -> TrackIdentityState:
+        """Record that no usable face was detected."""
         now = current_time if current_time is not None else time.time()
 
         with self._lock:

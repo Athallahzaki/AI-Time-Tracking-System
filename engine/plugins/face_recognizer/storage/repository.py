@@ -59,35 +59,6 @@ class EmployeeRepository:
         active: bool = True,
     ) -> None:
         """Enrolls or updates an employee and invalidates the in-memory cache."""
-        self._employee_store.save(employee_id=employee_id, name=name, active=active)
-        self._embedding_store.save(employee_id=employee_id, embeddings=embeddings)
-        self._cached_references = None  # Invalidate cache
-
-    def set_active(self, employee_id: str, active: bool) -> None:
-        self._employee_store.set_active(employee_id, active)
-        self._cached_references = None
-
-    def reload(self) -> None:
-        self.load_active_references(force_reload=True)
-
-    def delete_employee(self, employee_id: str) -> bool:
-        deleted_employee = self._employee_store.delete(employee_id)
-        deleted_embedding = self._embedding_store.delete(employee_id)
-
-        if deleted_employee or deleted_embedding:
-            self._cached_references = None
-            return True
-
-        return False
-
-    def register_employee(
-        self,
-        employee_id: str,
-        name: str,
-        embeddings: List[np.ndarray],
-        active: bool = True,
-    ) -> None:
-        """Enrolls or updates an employee and invalidates the in-memory cache."""
         self._employee_store.save(
             employee_id=employee_id,
             name=name,
@@ -99,23 +70,18 @@ class EmployeeRepository:
         )
         self._cached_references = None
 
-
     def set_active(self, employee_id: str, active: bool) -> None:
         self._employee_store.set_active(employee_id, active)
         self._cached_references = None
 
-
     def get_employee(self, employee_id: str) -> Optional[Dict[str, object]]:
         return self._employee_store.get(employee_id)
-
 
     def list_employees(self) -> List[Dict[str, object]]:
         return self._employee_store.list_all()
 
-
     def reload(self) -> None:
         self.load_active_references(force_reload=True)
-
 
     def delete_employee(self, employee_id: str) -> bool:
         deleted_employee = self._employee_store.delete(employee_id)

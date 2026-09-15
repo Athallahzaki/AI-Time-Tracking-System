@@ -165,8 +165,10 @@ class ByteTrackTracker:
             return self._fallback.update(detections, frame)
 
         active_tracks: List[Track] = []
-        if online_targets is None or len(online_targets) == 0:
-            return active_tracks
+        seen_tids: set[int] = set()
+
+        if online_targets is None:
+            online_targets = []
 
         for t in online_targets:
             # Handle NumPy array row: [x1, y1, x2, y2, track_id, score, cls_id, ...]
@@ -202,6 +204,8 @@ class ByteTrackTracker:
                     continue
             else:
                 continue
+
+            seen_tids.add(tid)
 
             if tid in self._tracks_cache:
                 track = self._tracks_cache[tid]
@@ -243,6 +247,33 @@ class ByteTrackTracker:
                 )
                 self._tracks_cache[tid] = track
 
+            active_tracks.append(track)
+
+        # Any previously known track that the native tracker did NOT report
+        # this frame is either temporarily occluded/lost, or truly gone.
+        # We keep reporting it (in LOST state) for up to `track_buffer`
+        # missing frames -- matching IoUTracker's contract -- so that
+        # VisionEngine can emit a proper TrackLostEvent and downstream
+        # listeners (e.g. face recognition cache) get a grace period
+        # instead of an immediate, premature REMOVED/eviction.
+        stale_tids = [
+            tid for tid in self._tracks_cache
+            if tid not in seen_tids
+        ]
+
+        for tid in stale_tids:
+            track = self._tracks_cache[tid]
+            track.lost_frames += 1
+            track.age += 1
+
+            if track.lost_frames > self._track_buffer:
+                # Exceeded the buffer window: drop it from the cache and
+                # do not include it in the output. VisionEngine will see
+                # it disappear from current_track_ids and emit REMOVED.
+                del self._tracks_cache[tid]
+                continue
+
+            track.state = TrackState.LOST
             active_tracks.append(track)
 
         return active_tracks

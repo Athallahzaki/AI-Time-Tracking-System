@@ -4,7 +4,6 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Union
 import numpy as np
-import torch
 
 from ..contracts.geometry import BoundingBox
 from ..contracts.detection import Detection
@@ -52,6 +51,8 @@ class YOLODetector:
     def _resolve_device(dev: Union[str, int]) -> Union[str, int]:
         """Resolves 'auto' or checks CUDA availability."""
         if str(dev).lower() in ("auto", "none"):
+            import torch
+
             if torch.cuda.is_available():
                 cuda_name = torch.cuda.get_device_name(0)
                 logger.info(f"CUDA detected: {cuda_name}. Using GPU 0 for YOLO.")
