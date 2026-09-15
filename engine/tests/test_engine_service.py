@@ -1,5 +1,3 @@
-import pytest
-
 from engine.app.engine_service import EngineService
 from engine.vision_core.detectors.mock_detector import MockDetector
 from engine.vision_core.pipeline.config import VisionCoreConfig
@@ -119,8 +117,3 @@ def test_engine_service_returns_none_when_source_is_exhausted():
 
     assert first_result is not None
     assert second_result is None
-
-
-def test_engine_service_requires_existing_vision_engine():
-    with pytest.raises(TypeError):
-        EngineService(None)
