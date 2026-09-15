@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 import cv2
 
+from backend.core.config import PROJECT_ROOT
 from backend.core.state import system_state
 from engine.app.main import build_app
 from engine.app.attendance_tracker import (
@@ -154,11 +155,17 @@ class EngineWorker:
                 listener.add_event_handler(_handle_face_event)
 
     def _run_loop(self) -> None:
-        logger.info(f"[{self.camera_id}] Starting AI Vision Engine worker for source: {self.source_uri}")
+        source_str = str(self.source_uri)
+        if not source_str.isdigit() and not source_str.startswith(("rtsp://", "http://", "https://")):
+            p = Path(source_str)
+            if not p.is_absolute():
+                source_str = str((PROJECT_ROOT / p).resolve())
+
+        logger.info(f"[{self.camera_id}] Starting AI Vision Engine worker for source: {source_str}")
 
         args = argparse.Namespace(
             config=self.config_path,
-            source=self.source_uri,
+            source=source_str,
             device=self.device,
             mock=False,
             no_face_recognition=self.no_face_recognition,

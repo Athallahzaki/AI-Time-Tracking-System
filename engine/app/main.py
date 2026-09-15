@@ -123,7 +123,7 @@ def build_app(args: argparse.Namespace) -> VisionEngine:
     elif source_uri.startswith("rtsp://") or source_uri.startswith("http://"):
         source = OpenCVStreamSource(uri=source_uri, source_id="rtsp_stream")
     elif Path(source_uri).is_file():
-        source = VideoFileSource(filepath=source_uri, source_id="video_file")
+        source = VideoFileSource(filepath=source_uri, source_id="video_file", loop=True)
     else:
         logger.warning(f"Unknown source URI '{source_uri}', defaulting to OpenCVStreamSource(0)")
         source = OpenCVStreamSource(uri=0, source_id="default_cam")
@@ -156,18 +156,22 @@ def build_app(args: argparse.Namespace) -> VisionEngine:
     # 6. Optional Face Recognition Plugin
     if not args.no_face_recognition and not args.mock:
         logger.info("Initializing FaceRecognizerPlugin...")
-        face_plugin = FaceRecognizerPlugin(config=app_config.face_recognizer)
+        try:
+            face_plugin = FaceRecognizerPlugin(config=app_config.face_recognizer)
 
-        def _on_face_plugin_event(event: PluginEvent) -> None:
-            if isinstance(event, FaceRecognizedEvent):
-                logger.info(f"==> [RECOGNIZED] Track #{event.track_id} -> Employee ID: '{event.employee_id}' (sim: {event.similarity:.2f})")
-            elif isinstance(event, IdentityChangedEvent):
-                logger.warning(f"==> [IDENTITY CHANGED] Track #{event.track_id} switched identity: '{event.old_identity}' -> '{event.new_identity}'")
-            elif isinstance(event, PersonUnknownEvent):
-                logger.debug(f"[UNKNOWN] Track #{event.track_id} not matched to registered employees (sim: {event.similarity:.2f})")
+            def _on_face_plugin_event(event: PluginEvent) -> None:
+                if isinstance(event, FaceRecognizedEvent):
+                    logger.info(f"==> [RECOGNIZED] Track #{event.track_id} -> Employee ID: '{event.employee_id}' (sim: {event.similarity:.2f})")
+                elif isinstance(event, IdentityChangedEvent):
+                    logger.warning(f"==> [IDENTITY CHANGED] Track #{event.track_id} switched identity: '{event.old_identity}' -> '{event.new_identity}'")
+                elif isinstance(event, PersonUnknownEvent):
+                    logger.debug(f"[UNKNOWN] Track #{event.track_id} not matched to registered employees (sim: {event.similarity:.2f})")
 
-        face_plugin.add_event_handler(_on_face_plugin_event)
-        engine.add_listener(face_plugin)
+            face_plugin.add_event_handler(_on_face_plugin_event)
+            engine.add_listener(face_plugin)
+            logger.info("FaceRecognizerPlugin registered successfully.")
+        except Exception as e:
+            logger.warning(f"FaceRecognizerPlugin initialization skipped: {e}. Running with detection + tracking only.")
     elif args.no_face_recognition:
         logger.info("Face recognition plugin disabled by flag (--no-face-recognition).")
 
