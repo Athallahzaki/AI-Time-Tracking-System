@@ -34,6 +34,8 @@ function isHlsUrl(url) {
 
 // ─── WebRTC / WHEP ────────────────────────────────────────────────────────────
 
+const WEBRTC_PLAYOUT_DELAY = 0.8; //800 ms
+
 async function startWhep(url) {
   teardown();
   streamError.value = false;
@@ -44,39 +46,88 @@ async function startWhep(url) {
       iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
     });
 
-    // Request one video and one audio track (recvonly)
-    pc.addTransceiver('video', { direction: 'recvonly' });
-    pc.addTransceiver('audio', { direction: 'recvonly' });
+    // Request video and audio as recvonly transceivers.
+    const videoTransceiver = pc.addTransceiver('video', {
+      direction: 'recvonly',
+    });
 
-    // Attach incoming tracks to the video element as a MediaStream
+    const audioTransceiver = pc.addTransceiver('audio', {
+      direction: 'recvonly',
+    });
+
+    // Ask the browser's WebRTC receiver to maintain ~200ms of
+    // playout delay. This is a rolling playback delay, unlike
+    // simply delaying assignment of srcObject.
+    try {
+      if ('playoutDelayHint' in videoTransceiver.receiver) {
+        videoTransceiver.receiver.playoutDelayHint =
+          WEBRTC_PLAYOUT_DELAY;
+      }
+
+      if ('playoutDelayHint' in audioTransceiver.receiver) {
+        audioTransceiver.receiver.playoutDelayHint =
+          WEBRTC_PLAYOUT_DELAY;
+      }
+    } catch (err) {
+      console.warn(
+        '[WebRTC] Could not set playout delay hint:',
+        err
+      );
+    }
+
+    // Attach incoming tracks to the video element.
     pc.ontrack = (event) => {
-      if (event.streams && event.streams[0] && videoEl.value) {
+      if (
+        event.streams &&
+        event.streams[0] &&
+        videoEl.value
+      ) {
         videoEl.value.srcObject = event.streams[0];
+
+        videoEl.value.play().catch((err) => {
+          console.warn('[WebRTC] Autoplay failed:', err);
+        });
       }
     };
 
     pc.onconnectionstatechange = () => {
-      if (pc && (pc.connectionState === 'failed' || pc.connectionState === 'closed')) {
+      if (
+        pc &&
+        (
+          pc.connectionState === 'failed' ||
+          pc.connectionState === 'closed'
+        )
+      ) {
         streamError.value = true;
       }
     };
 
     // WHEP signaling: POST SDP offer, receive SDP answer
     const offer = await pc.createOffer();
+
     await pc.setLocalDescription(offer);
 
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/sdp' },
+      headers: {
+        'Content-Type': 'application/sdp',
+      },
       body: offer.sdp,
     });
 
     if (!response.ok) {
-      throw new Error(`WHEP signaling failed: HTTP ${response.status}`);
+      throw new Error(
+        `WHEP signaling failed: HTTP ${response.status}`
+      );
     }
 
     const answerSdp = await response.text();
-    await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+
+    await pc.setRemoteDescription({
+      type: 'answer',
+      sdp: answerSdp,
+    });
+
   } catch (err) {
     console.error('[WebRTC] WHEP error:', err);
     streamError.value = true;
