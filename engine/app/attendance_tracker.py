@@ -227,6 +227,33 @@ class AttendanceTracker:
                 )
             )
 
+    def on_track_removed(
+        self,
+        track: Track,
+    ) -> None:
+        """
+        Called when vision_core determines that a track has been
+        permanently removed from tracker output.
+
+        Attendance session is allowed to perform its normal
+        missing-timeout logic, so this callback only clears the
+        track-to-session mapping when it still points to this track.
+        """
+        track_id = track.track_id
+
+        session_key = self._track_to_key.get(track_id)
+
+        if session_key is None:
+            return
+
+        session = self._sessions.get(session_key)
+
+        if session is not None:
+            if session.active_track_id == track_id:
+                session.active_track_id = None
+
+        self._track_to_key.pop(track_id, None)
+
     def _compute_status(
         self,
         elapsed_seconds: float,
