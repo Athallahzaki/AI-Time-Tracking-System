@@ -2,17 +2,19 @@
 import { ref } from 'vue';
 import DashboardLayout from '@/layouts/DashboardLayout.vue';
 import DashboardHeader from '@/components/dashboard/DashboardHeader.vue';
-import PipelineSteps from '@/components/dashboard/PipelineSteps.vue';
 import StatsRow from '@/components/dashboard/StatsRow.vue';
 import LiveFeedSection from '@/components/dashboard/LiveFeedSection.vue';
+import { useDetectionStream } from '@/composables/useDetectionStream';
 
 const refreshInterval = ref('5');
+const { stats, isConnected, isStreaming, reconnect } = useDetectionStream();
 
 function handleExport() {
-  console.log('export report');
+  window.open('/api/attendance/events', '_blank');
 }
+
 function handleConfigure() {
-  console.log('open configure facilities');
+  window.open('/api/cameras', '_blank');
 }
 </script>
 
@@ -24,8 +26,7 @@ function handleConfigure() {
         @export="handleExport"
         @configure="handleConfigure"
       />
-      <!-- <PipelineSteps />
-      <StatsRow /> -->
+      <StatsRow :stats="stats" />
       <LiveFeedSection />
     </div>
   </DashboardLayout>
