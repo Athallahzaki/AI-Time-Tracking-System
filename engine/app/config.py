@@ -92,6 +92,7 @@ class AppConfig:
             visualizer=VisualizerConfig(
                 enabled=bool(vis_dict.get("enabled", True)),
                 window_name=str(vis_dict.get("window_name", "AI Vision Engine - Real-Time Tracking")),
+                draw_landmarks=bool(vis_dict.get("draw_landmarks", False)),
                 draw_velocity=bool(vis_dict.get("draw_velocity", True)),
                 draw_history=bool(vis_dict.get("draw_history", True)),
                 show_metrics_overlay=bool(vis_dict.get("show_metrics_overlay", True)),

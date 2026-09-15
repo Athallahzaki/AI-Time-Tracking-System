@@ -2,9 +2,15 @@ from __future__ import annotations
 
 import enum
 import time
+from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Deque, Dict, List, Optional, Tuple
 from .geometry import BoundingBox, Point
+
+
+# Maximum number of historical centroid points retained per track.
+# At 30 fps this covers ~2 seconds of trajectory.
+HISTORY_MAXLEN: int = 60
 
 
 class TrackState(str, enum.Enum):
@@ -33,7 +39,9 @@ class Track:
     hits: int = 1              # Number of matched detection frames
     lost_frames: int = 0       # Consecutive frames lost
     velocity: Tuple[float, float] = (0.0, 0.0)  # (vx, vy) in pixels/second or pixels/frame
-    history: List[Point] = field(default_factory=list)  # Historical centroids
+    history: Deque[Point] = field(
+        default_factory=lambda: deque(maxlen=HISTORY_MAXLEN)
+    )  # Bounded ring-buffer of historical centroids
     attributes: Dict[str, Any] = field(default_factory=dict)
 
     @property

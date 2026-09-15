@@ -77,7 +77,9 @@ class AttendanceTracker:
         frame: Frame,
     ) -> None:
         """Processes active tracks and updates presence timers."""
-        now = frame.timestamp
+        # Use wall-clock time for all session timestamps so that video-file
+        # playback at any speed does not cause false-positive departure events.
+        wall_now = time.time()
         current_active_keys = set()
 
         for track in tracks:
@@ -111,7 +113,7 @@ class AttendanceTracker:
                         old_sess.session_id = emp_id
                         self._sessions[emp_id] = old_sess
                     else:
-                        self._sessions[emp_id].last_seen = now
+                        self._sessions[emp_id].last_seen = wall_now
 
             self._track_to_key[track.track_id] = session_key
 
@@ -120,8 +122,8 @@ class AttendanceTracker:
                 sess = EmployeeSession(
                     session_id=session_key,
                     employee_id=emp_id,
-                    first_seen=now,
-                    last_seen=now,
+                    first_seen=wall_now,
+                    last_seen=wall_now,
                     active_track_id=track.track_id,
                 )
 
@@ -135,7 +137,7 @@ class AttendanceTracker:
                 )
             else:
                 sess = self._sessions[session_key]
-                sess.last_seen = now
+                sess.last_seen = wall_now
                 sess.active_track_id = track.track_id
 
                 if emp_id:
@@ -193,12 +195,13 @@ class AttendanceTracker:
                     )
                 )
 
-        # Check for expired/departed sessions
+        # Check for expired/departed sessions (uses wall clock so video-file
+        # playback at any speed does not cause false-positive departures)
         to_close = []
 
         for key, sess in list(self._sessions.items()):
             if (
-                now - sess.last_seen
+                wall_now - sess.last_seen
             ) > self._config.max_missing_seconds:
                 to_close.append(key)
 

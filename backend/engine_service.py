@@ -1,9 +1,11 @@
+import logging
 import threading
-import time
 import queue
 import argparse
 
 from engine.app.main import build_app
+
+logger = logging.getLogger(__name__)
 
 
 class EngineService:
@@ -36,12 +38,10 @@ class EngineService:
 
     def _run(self):
 
-        print()
-        print("======================================")
-        print("STARTING AI VISION ENGINE")
-        print("======================================")
-        print("Source:", self.source)
-        print()
+        logger.info("======================================")
+        logger.info("STARTING AI VISION ENGINE")
+        logger.info("======================================")
+        logger.info("Source: %s", self.source)
 
         args = argparse.Namespace(
             config="engine/configs/default_config.yaml",
@@ -61,7 +61,7 @@ class EngineService:
 
             self.engine = build_app(args)
 
-            print("Engine berhasil dibuat.")
+            logger.info("Engine built successfully.")
 
             # ==================================
             # START ENGINE
@@ -69,8 +69,7 @@ class EngineService:
 
             self.engine.start()
 
-            print("Engine berhasil START.")
-            print()
+            logger.info("Engine started successfully.")
 
             # ==================================
             # PROCESS LOOP
@@ -80,11 +79,9 @@ class EngineService:
 
                 frame, tracks = self.engine.step()
 
-                # Video selesai
+                # Stream ended or video file finished
                 if frame is None:
-
-                    print("Frame kosong / video selesai.")
-
+                    logger.info("Frame source exhausted or stream ended.")
                     break
 
                 # ==================================
@@ -112,10 +109,10 @@ class EngineService:
                         "track_id": int(track.track_id),
 
                         "bbox": {
-                            "x1": float(bbox.x1),
-                            "y1": float(bbox.y1),
-                            "x2": float(bbox.x2),
-                            "y2": float(bbox.y2),
+                            "x1": float(track.bbox.x1),
+                            "y1": float(track.bbox.y1),
+                            "x2": float(track.bbox.x2),
+                            "y2": float(track.bbox.y2),
                         },
 
                         "confidence": float(
@@ -171,8 +168,7 @@ class EngineService:
                             client_queue.put_nowait(data)
 
                         except queue.Full:
-
-                            # Buang data lama
+                            # Drop the oldest frame and push the latest
                             try:
                                 client_queue.get_nowait()
                             except queue.Empty:
@@ -184,14 +180,7 @@ class EngineService:
                                 pass
 
         except Exception as e:
-
-            print()
-            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-            print("ENGINE ERROR")
-            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-            print(type(e).__name__)
-            print(e)
-            print()
+            logger.exception("Engine encountered a fatal error: %s: %s", type(e).__name__, e)
 
         finally:
 
@@ -204,7 +193,7 @@ class EngineService:
 
             self.running = False
 
-            print("Engine stopped.")
+            logger.info("Engine stopped.")
 
     def subscribe(self):
 

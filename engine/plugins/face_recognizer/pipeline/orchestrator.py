@@ -193,6 +193,8 @@ class RecognitionOrchestrator:
                 track_id=track.track_id,
                 current_time=current_time,
             )
+
+            return
         if result.status == RecognitionStatus.ERROR :
             self._cache.record_error(
                 track_id=track.track_id,

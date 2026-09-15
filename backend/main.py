@@ -1,5 +1,6 @@
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -7,26 +8,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 
 from backend.engine_service import EngineService
-
-
-app = FastAPI(
-    title="AI Time Tracking API"
-)
-
-
-# ==========================================
-# CORS
-# ==========================================
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 # ==========================================
@@ -54,15 +35,37 @@ engine_service = EngineService(
 
 
 # ==========================================
-# START ENGINE
+# LIFESPAN (replaces deprecated on_event)
 # ==========================================
 
-@app.on_event("startup")
-async def startup():
-
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Starts the engine on server startup and stops it cleanly on shutdown."""
     print("Starting Engine Service...")
-
     engine_service.start()
+    yield
+    engine_service.stop()
+
+
+app = FastAPI(
+    title="AI Time Tracking API",
+    lifespan=lifespan,
+)
+
+
+# ==========================================
+# CORS
+# ==========================================
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # ==========================================

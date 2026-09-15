@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import deque
 from typing import List, Optional, Tuple
 import cv2
 import numpy as np
@@ -39,7 +40,7 @@ class OpenCVVisualizer:
         self._window_created = False
         self._should_quit = False
         self._last_fps = 0.0
-        self._frame_times: List[float] = []
+        self._frame_times: deque = deque(maxlen=30)
 
     def write(self, frame: Frame, tracks: List[Track]) -> None:
         """Renders annotations onto frame and displays window if not headless."""
@@ -102,7 +103,19 @@ class OpenCVVisualizer:
 
         # 3. Top Telemetry Banner
         if self._config.show_metrics_overlay:
-            self._draw_telemetry_banner(annotated, frame, tracks)
+            # Compute local FPS from our own frame-time ring buffer.
+            # This matches what the user sees in the window (sink FPS),
+            # which may differ slightly from the engine's pipeline FPS.
+            now = time.perf_counter()
+            self._frame_times.append(now)
+            if len(self._frame_times) > 1:
+                local_fps = (len(self._frame_times) - 1) / max(
+                    1e-4,
+                    self._frame_times[-1] - self._frame_times[0],
+                )
+            else:
+                local_fps = 0.0
+            self._draw_telemetry_banner(annotated, frame, tracks, local_fps)
 
         # 4. Display frame
         if not self._is_headless:
@@ -119,7 +132,13 @@ class OpenCVVisualizer:
                 cv2.imwrite(snap_path, annotated)
                 logger.info(f"Saved snapshot to {snap_path}")
 
-    def _draw_telemetry_banner(self, img: np.ndarray, frame: Frame, tracks: List[Track]) -> None:
+    def _draw_telemetry_banner(
+        self,
+        img: np.ndarray,
+        frame: Frame,
+        tracks: List[Track],
+        fps: float = 0.0,
+    ) -> None:
         """Draws top HUD banner with FPS and active counts."""
         h, w = img.shape[:2]
         banner_h = 32
@@ -128,13 +147,6 @@ class OpenCVVisualizer:
         overlay = img.copy()
         cv2.rectangle(overlay, (0, 0), (w, banner_h), (20, 20, 20), -1)
         cv2.addWeighted(overlay, 0.75, img, 0.25, 0, img)
-
-        # Compute FPS
-        now = time.perf_counter()
-        self._frame_times.append(now)
-        if len(self._frame_times) > 30:
-            self._frame_times.pop(0)
-        fps = (len(self._frame_times) - 1) / max(1e-4, self._frame_times[-1] - self._frame_times[0]) if len(self._frame_times) > 1 else 0.0
 
         active_people = len([t for t in tracks if t.is_active])
         recognized_count = len([t for t in tracks if t.is_active and t.attributes.get("identity")])
