@@ -10,6 +10,10 @@ from .events import (
 from .attendance_tracker import AttendanceTracker, PresenceStatus, EmployeeSession
 from .visualizer import OpenCVVisualizer
 
+from .engine_service import EngineService, EngineStatus
+
+
+
 __all__ = [
     "AppConfig",
     "AttendanceConfig",
@@ -24,4 +28,7 @@ __all__ = [
     "PresenceStatus",
     "EmployeeSession",
     "OpenCVVisualizer",
+    "EngineService",
+    "EngineStatus",
+
 ]
