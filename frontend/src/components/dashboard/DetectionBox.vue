@@ -25,10 +25,10 @@ const colorMap = {
   >
     <!-- Top label badge -->
     <div
-      class="absolute left-0 z-10 whitespace-nowrap rounded px-1.5 py-0.5 font-semibold tracking-wide backdrop-blur-xs transition-colors"
+      class="absolute left-0 z-10 whitespace-nowrap rounded font-semibold tracking-wide backdrop-blur-xs transition-colors"
       :class="[
-        compact ? 'text-[9px] px-1 py-0' : 'text-[10px]',
-        parseFloat(detection.top) < 7 ? 'top-1' : '-top-6',
+        compact ? 'text-[8px] sm:text-[9px] px-1 py-0' : 'text-[8px] sm:text-[10px] px-1 sm:px-1.5 py-0.5',
+        parseFloat(detection.top) < 7 ? 'top-1' : '-top-5 sm:-top-6',
         detection.warning
           ? 'bg-red-500/90 text-white'
           : 'bg-slate-950/85 text-white border border-white/10',
@@ -42,7 +42,7 @@ const colorMap = {
     <!-- Bottom duration / extra badge (shown when extra exists, or hidden in very compact view if no room) -->
     <div
       v-if="detection.extra && !compact"
-      class="absolute -bottom-6 left-0 z-10 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium backdrop-blur-xs transition-colors"
+      class="absolute -bottom-5 sm:-bottom-6 left-0 z-10 whitespace-nowrap rounded px-1 sm:px-1.5 py-0.5 text-[8px] sm:text-[10px] font-medium backdrop-blur-xs transition-colors"
       :class="
         detection.warning
           ? 'bg-red-500/90 text-white'

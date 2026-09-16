@@ -282,7 +282,7 @@ export function useDetectionStream() {
         handlePayload(event.data);
       };
 
-      eventSource.onerror = (err) => {
+      eventSource.onerror = () => {
         isConnected.value = false;
         connectionError.value = 'Disconnected from AI Engine';
         if (eventSource) {

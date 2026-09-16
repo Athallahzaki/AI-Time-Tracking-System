@@ -23,10 +23,12 @@ const activeCamera = computed(
 
 <template>
   <div class="space-y-3">
-    <div class="flex flex-wrap items-center justify-between gap-2">
-      <div v-if="viewMode === 'single'" class="flex items-center gap-2.5">
+    <!-- Section Controls -->
+    <div class="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
+      <!-- Left: Camera selector (single mode) or Title (grid mode) -->
+      <div v-if="viewMode === 'single'" class="flex items-center gap-2 w-full sm:w-auto">
         <Select v-model="activeCameraId">
-          <SelectTrigger class="w-75 bg-white text-sm">
+          <SelectTrigger class="w-full sm:w-72 bg-white text-xs sm:text-sm">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -37,28 +39,29 @@ const activeCamera = computed(
         </Select>
         <span
           v-if="isStreaming"
-          class="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-600 border border-emerald-200"
+          class="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] sm:text-[11px] font-medium text-emerald-600 border border-emerald-200 shrink-0"
         >
           <span class="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-          AI Vision Live
+          Live
         </span>
       </div>
-      <div v-else class="flex items-center gap-2.5">
-        <span class="text-sm font-medium text-slate-700">
+      <div v-else class="flex items-center justify-between sm:justify-start gap-2.5">
+        <span class="text-xs sm:text-sm font-medium text-slate-700">
           All Facilities — Live Grid
         </span>
         <span
           v-if="isStreaming"
-          class="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-600 border border-emerald-200"
+          class="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] sm:text-[11px] font-medium text-emerald-600 border border-emerald-200"
         >
           <span class="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-          AI Vision Live
+          Live
         </span>
       </div>
 
-      <div class="flex items-center gap-1 rounded-lg border bg-white p-1">
+      <!-- Right: View Mode Toggle -->
+      <div class="flex items-center gap-1 rounded-lg border bg-white p-1 self-end sm:self-auto shrink-0">
         <button
-          class="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+          class="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors"
           :class="
             viewMode === 'single'
               ? 'bg-slate-900 text-white'
@@ -70,7 +73,7 @@ const activeCamera = computed(
           Single
         </button>
         <button
-          class="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+          class="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors"
           :class="
             viewMode === 'grid'
               ? 'bg-slate-900 text-white'
@@ -84,9 +87,10 @@ const activeCamera = computed(
       </div>
     </div>
 
+    <!-- Feed Content -->
     <CameraFeedCard v-if="viewMode === 'single'" :camera="activeCamera" />
 
-    <div v-else class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+    <div v-else class="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
       <CameraFeedCard
         v-for="cam in cameras"
         :key="cam.id"

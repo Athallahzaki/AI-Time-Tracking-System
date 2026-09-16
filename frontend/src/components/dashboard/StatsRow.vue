@@ -18,7 +18,7 @@ defineProps({
 </script>
 
 <template>
-  <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+  <div class="grid grid-cols-2 gap-2.5 sm:grid-cols-2 lg:grid-cols-5 sm:gap-4">
     <StatCard
       :icon="Building2"
       icon-bg="bg-indigo-50"
@@ -66,6 +66,7 @@ defineProps({
       footnote="Action Required"
       footnote-color="text-red-500"
       variant="warning"
+      class="col-span-2 sm:col-span-1 lg:col-span-1"
     />
   </div>
 </template>

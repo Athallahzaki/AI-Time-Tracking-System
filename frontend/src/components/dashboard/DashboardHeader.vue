@@ -20,53 +20,32 @@ const emit = defineEmits(['update:refreshInterval', 'export', 'configure']);
 </script>
 
 <template>
-  <div class="flex items-start justify-between">
+  <div class="flex flex-col gap-3.5 sm:flex-row sm:items-start sm:justify-between">
     <div>
-      <h1 class="text-2xl font-semibold text-slate-900">
+      <h1 class="text-xl sm:text-2xl font-semibold text-slate-900 tracking-tight">
         Monitoring Dashboard
       </h1>
-      <p class="mt-1 text-sm text-slate-500">
+      <p class="mt-0.5 sm:mt-1 text-xs sm:text-sm text-slate-500">
         Monitor employee entertainment facility usage and Computer Vision
         activity in real time.
       </p>
     </div>
 
-    <div class="flex items-center gap-3">
-      <!-- <div
-        class="flex items-center gap-2 rounded-lg border bg-white px-3 py-1.5"
+    <div class="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
+      <Button
+        variant="outline"
+        class="flex-1 sm:flex-initial justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm h-8.5 sm:h-9 px-3"
+        @click="emit('export')"
       >
-        <span class="flex items-center gap-1.5 text-sm text-slate-600">
-          <span class="h-1.5 w-1.5 rounded-full bg-green-500"></span>
-          Live Feed:
-        </span>
-        <Select
-          :model-value="refreshInterval"
-          @update:model-value="(v) => emit('update:refreshInterval', v)"
-        >
-          <SelectTrigger
-            class="h-7 w-37.5 border-none px-1 text-sm font-medium shadow-none focus:ring-0"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="5">Auto-refresh (5s)</SelectItem>
-            <SelectItem value="10">Auto-refresh (10s)</SelectItem>
-            <SelectItem value="30">Auto-refresh (30s)</SelectItem>
-            <SelectItem value="off">Off</SelectItem>
-          </SelectContent>
-        </Select>
-      </div> -->
-
-      <Button variant="outline" class="gap-2" @click="emit('export')">
-        <Download class="h-4 w-4" />
+        <Download class="h-3.5 w-3.5 sm:h-4 sm:w-4" />
         Export Report
       </Button>
 
       <Button
-        class="gap-2 bg-slate-900 hover:bg-slate-800"
+        class="flex-1 sm:flex-initial justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm h-8.5 sm:h-9 px-3 bg-slate-900 hover:bg-slate-800"
         @click="emit('configure')"
       >
-        <Settings2 class="h-4 w-4" />
+        <Settings2 class="h-3.5 w-3.5 sm:h-4 sm:w-4" />
         Configure Facilities
       </Button>
     </div>
