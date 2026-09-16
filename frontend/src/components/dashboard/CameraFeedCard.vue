@@ -251,15 +251,18 @@ function handleWarning() {
 
       <!-- Video element — srcObject is set by WebRTC, src by HLS/direct.
            Always in DOM so the ref is available immediately on mount. -->
-      <video
-        ref="videoEl"
-        class="absolute inset-0 h-full w-full object-cover"
-        :class="{ invisible: streamError || !camera.stream_url }"
-        autoplay
-        muted
-        playsinline
-        @error="onVideoError"
-      />
+        <video
+          ref="videoEl"
+          class="absolute inset-0 h-full w-full object-cover"
+          :class="{ invisible: streamError || !camera.stream_url }"
+          autoplay
+          muted
+          playsinline
+          loop
+          crossorigin="anonymous"
+          @error="onVideoError"
+        />
+
 
       <!-- Fallback: no stream URL or failed to connect -->
       <div
