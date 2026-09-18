@@ -5,6 +5,7 @@ import logging
 import queue
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -39,6 +40,8 @@ class EngineWorker:
         device: Optional[str] = None,
         headless: bool = True,
         no_face_recognition: bool = False,
+        break_start_hour: int = 12,
+        break_end_hour: int = 13,
     ) -> None:
         self.camera_id = camera_id
         self.source_uri = source_uri
@@ -46,6 +49,8 @@ class EngineWorker:
         self.device = device
         self.headless = headless
         self.no_face_recognition = no_face_recognition
+        self.break_start_hour = break_start_hour
+        self.break_end_hour = break_end_hour
 
         self.engine = None
         self.thread: Optional[threading.Thread] = None
@@ -59,6 +64,11 @@ class EngineWorker:
     @property
     def is_active(self) -> bool:
         return self.running and (self.engine is not None and getattr(self.engine, "is_running", False))
+
+    def _is_break_time(self) -> bool:
+        """Returns True if the current wall-clock hour falls within the break window."""
+        now_hour = datetime.now().hour
+        return self.break_start_hour <= now_hour < self.break_end_hour
 
     def start(self) -> None:
         if self.running:
@@ -189,6 +199,40 @@ class EngineWorker:
                 fps = getattr(self.engine.metrics, "fps", 30.0)
                 self._fps = fps
 
+                # ── Break-time gate ─────────────────────────────────────────
+                # The camera feed keeps streaming (engine.step() already ran),
+                # but detection data is suppressed during configured break hours.
+                if self._is_break_time():
+                    if not getattr(self, "_in_break", False):
+                        self._in_break = True
+                        logger.info(
+                            f"[{self.camera_id}] Break time started "
+                            f"({self.break_start_hour:02d}:00–{self.break_end_hour:02d}:00). "
+                            "Detection paused; stream continues."
+                        )
+                    system_state.update_camera_status(
+                        camera_id=self.camera_id,
+                        fps=fps,
+                        people_count=0,
+                        tracking_ids=[],
+                        stream_status="Break Time",
+                    )
+                    self._broadcast({
+                        "camera_id": self.camera_id,
+                        "frame_id": frame.frame_id,
+                        "width": width,
+                        "height": height,
+                        "fps": round(fps, 1),
+                        "people": [],
+                        "break_time": True,
+                    })
+                    continue
+                # ── End break-time gate ──────────────────────────────────────
+
+                if getattr(self, "_in_break", False):
+                    self._in_break = False
+                    logger.info(f"[{self.camera_id}] Break time ended. Detection resumed.")
+
                 people = []
                 tracking_ids = []
 
@@ -244,6 +288,7 @@ class EngineWorker:
                     "height": height,
                     "fps": round(fps, 1),
                     "people": people,
+                    "break_time": False,
                 }
                 self._broadcast(data)
 

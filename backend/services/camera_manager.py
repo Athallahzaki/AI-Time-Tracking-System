@@ -2,12 +2,27 @@ from __future__ import annotations
 
 import logging
 import threading
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+import yaml
 
 from backend.core.config import CameraConfig, settings
 from backend.services.engine_worker import EngineWorker
 
 logger = logging.getLogger(__name__)
+
+
+def _load_break_config(config_path: str) -> tuple[int, int]:
+    """Read break_start_hour / break_end_hour from the engine YAML. Defaults: 12, 13."""
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
+        att = raw.get("attendance", {})
+        return int(att.get("break_start_hour", 12)), int(att.get("break_end_hour", 13))
+    except Exception as e:
+        logger.warning(f"Could not read break config from {config_path}: {e}. Using defaults (12–13).")
+        return 12, 13
 
 
 class CameraManager:
@@ -42,13 +57,18 @@ class CameraManager:
                     return True
                 worker.stop()
 
+            config_path = str(settings.engine_config_path)
+            break_start, break_end = _load_break_config(config_path)
+
             worker = EngineWorker(
                 camera_id=camera_id,
                 source_uri=actual_source,
-                config_path=str(settings.engine_config_path),
+                config_path=config_path,
                 device=settings.device,
                 headless=settings.headless,
                 no_face_recognition=settings.no_face_recognition,
+                break_start_hour=break_start,
+                break_end_hour=break_end,
             )
             self._workers[camera_id] = worker
             worker.start()
