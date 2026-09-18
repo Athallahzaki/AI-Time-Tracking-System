@@ -134,7 +134,7 @@ def build_app(args: argparse.Namespace) -> VisionEngine:
     else:
         detector = YOLODetector(
             model_path=app_config.core.model_path,
-            confidence_threshold=0.40,
+            confidence_threshold=0.50,
             image_size=640,
             device=app_config.core.device,
         )

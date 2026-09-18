@@ -16,6 +16,8 @@ class AttendanceConfig:
     warning_minutes: float = 25.0           # CONFIRMED -> WARNING threshold
     max_session_minutes: float = 30.0       # WARNING -> LIMIT threshold
     max_missing_seconds: float = 10.0       # Session closure threshold after person departs
+    break_start_hour: int = 12              # Break start (24h hour, inclusive) — detection paused
+    break_end_hour: int = 13               # Break end (24h hour, exclusive) — detection resumes
 
 
 @dataclass
@@ -54,7 +56,7 @@ class AppConfig:
         att_dict = raw.get("attendance", {})
         vis_dict = raw.get("visualizer", {})
 
-        model_path = resolve_engine_path(core_dict.get("model_path", "engine/models/yolo/yolo11s.pt"))
+        model_path = resolve_engine_path(core_dict.get("model_path", "LibreDFINEs.pt"))
         detector_model = resolve_engine_path(face_dict.get("detector_model_path", "engine/models/detector/scrfd_10g_bnkps.onnx"))
         embedder_model = resolve_engine_path(face_dict.get("embedder_model_path", "engine/models/embedder/glintr100.onnx"))
         emp_dir = resolve_engine_path(face_dict.get("employees_dir", "engine/data/employees"))
@@ -88,6 +90,8 @@ class AppConfig:
                 warning_minutes=float(att_dict.get("warning_minutes", 25.0)),
                 max_session_minutes=float(att_dict.get("max_session_minutes", 30.0)),
                 max_missing_seconds=float(att_dict.get("max_missing_seconds", 10.0)),
+                break_start_hour=int(att_dict.get("break_start_hour", 12)),
+                break_end_hour=int(att_dict.get("break_end_hour", 13)),
             ),
             visualizer=VisualizerConfig(
                 enabled=bool(vis_dict.get("enabled", True)),

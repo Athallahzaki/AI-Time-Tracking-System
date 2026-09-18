@@ -44,7 +44,7 @@ class VisionCoreConfig:
     """Configuration parameters for the Vision Core engine."""
     source_uri: str = "0"
     source_type: str = "opencv"                   # opencv, video_file, mock
-    model_path: str = "engine/models/yolo/yolo11s.pt"  # YOLO object detection model
+    model_path: str = "LibreDFINEs.pt"           # D-FINE small model — auto-downloaded on first run (MIT license)
     detection_interval: int = 1                   # Run object detector every N frames (1 = every frame)
     device: Union[str, int] = "auto"              # "auto", 0, "cuda", "cpu"
     target_fps: Optional[float] = None

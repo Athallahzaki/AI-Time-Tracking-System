@@ -1,7 +1,7 @@
 core:
-  source_uri: "0"                              # "0" for webcam, "rtsp://..." for IP camera, or "path/to/video.mp4"
+  source_uri: "frontend/public/videos/video2.mp4"  # "0" for webcam, "rtsp://..." for IP camera, or "path/to/video.mp4"
   source_type: "opencv"                        # opencv, video_file, mock
-  model_path: "engine/models/yolo/yolo11s.pt"  # YOLO object detection model
+  model_path: "LibreDFINEs.pt"              # D-FINE small (MIT) — Transformer-based, 50.7% mAP, auto-downloaded on first run
   detection_interval: 1                        # Run object detection every N frames
   device: "auto"                               # "auto" (uses CUDA if available, else CPU), 0, "cuda", or "cpu"
   target_fps: 30.0
@@ -32,6 +32,8 @@ attendance:
   warning_minutes: 25.0            # CONFIRMED -> WARNING
   max_session_minutes: 30.0        # WARNING -> LIMIT
   max_missing_seconds: 10.0        # Time before closing session after track disappears
+  break_start_hour: 12             # Break time start (24h, inclusive) — detection paused
+  break_end_hour: 13               # Break time end (24h, exclusive) — detection resumes
 
 visualizer:
   enabled: true
