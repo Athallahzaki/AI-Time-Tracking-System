@@ -1,0 +1,77 @@
+name: engine
+
+on:
+  push:
+    paths: ["engine/**", "bench/**", "contracts/**", ".github/workflows/engine.yml"]
+  pull_request:
+    paths: ["engine/**", "bench/**", "contracts/**", ".github/workflows/engine.yml"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Deliberately does NOT install torch, libreyolo or ultralytics. If the
+      # mock path ever starts needing them, CI breaks here — which is the point:
+      # the benchmark has to be runnable without a GPU or model weights
+      # (ARCHITECTURE.md §13.9), or it stops being run at all.
+      - name: Install (mock path only)
+        run: pip install numpy "opencv-python-headless>=4.8" "PyYAML>=6.0" pytest
+
+      - name: No company policy in engine/
+        run: python contracts/tools/policy_grep.py engine/
+
+      # The go/no-go thresholds are company numbers and live outside engine/
+      # (§16). This asserts they are where they are supposed to be, so the check
+      # above cannot be satisfied by moving them back in.
+      - name: Go/no-go thresholds live outside the engine
+        run: |
+          test -f bench/gonogo.yaml
+          ! test -e engine/gonogo.yaml
+
+      - name: Unit tests
+        run: pytest engine/tests -q
+
+      - name: Pipeline smoke run
+        run: python -m engine.tools.run --mock --frames 30 --quiet
+
+      # The benchmark itself runs in CI, on mocks. A bug in bench code is then
+      # found in three seconds rather than thirty minutes into a real run.
+      - name: Benchmark smoke run (throughput)
+        run: |
+          python -m engine.bench --mock --frames 200 --quiet \
+            --thresholds bench/gonogo.yaml --out "$RUNNER_TEMP/bench-throughput"
+
+      - name: Benchmark smoke run (realtime, 3 cameras)
+        run: |
+          python -m engine.bench --mock --frames 60 --mode realtime --cameras 3 \
+            --quiet --out "$RUNNER_TEMP/bench-realtime"
+
+      # The report schema is frozen and additive-only (§13.4). A run that does
+      # not produce every frozen key fails here rather than three months later
+      # when two baselines turn out not to be comparable.
+      - name: Report carries every frozen field
+        run: |
+          python - "$RUNNER_TEMP/bench-throughput/baseline.json" <<'PY'
+          import json, sys
+          from engine.bench.report import FROZEN_TOP_LEVEL_KEYS, FROZEN_METRIC_KEYS
+          report = json.load(open(sys.argv[1]))
+          missing = [k for k in FROZEN_TOP_LEVEL_KEYS if k not in report]
+          missing += [f"metrics.{k}" for k in FROZEN_METRIC_KEYS if k not in report["metrics"]]
+          assert not missing, missing
+          assert report["go_no_go"]["verdict"] != "GO", (
+              "a mock run with no annotation must never come back GO"
+          )
+          print("report ok:", report["go_no_go"]["verdict"])
+          PY
+
+      - name: Upload bench artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-smoke
+          path: ${{ runner.temp }}/bench-*/

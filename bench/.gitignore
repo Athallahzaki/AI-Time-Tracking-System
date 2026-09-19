@@ -1,0 +1,12 @@
+# Recordings and anything derived from them that still contains faces.
+# Biometric data about colleagues; §7.4 and UU 27/2022. Never committed.
+*.mp4
+*.mkv
+*.mov
+*.avi
+overlay*
+recordings/
+
+# Raw per-run output: large, and rebuildable from the recording.
+# baseline.json is NOT ignored — it is the artefact §16 compares across steps.
+*.ndjson

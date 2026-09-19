@@ -3,13 +3,13 @@ Engine configuration as data.
 
 Two rules govern this module, both from ARCHITECTURE.md §16.
 
-1. No company policy lives here. There is no break allowance, no working
-   hours, no warning threshold. The engine may only hold *perceptual*
+1. No company rule lives here. The engine may only hold *perceptual*
    constants: how long before a track is considered gone, how much evidence
    before an identity is confirmed, what similarity counts as a match. The
-   `attendance:` block of the old configs/default_config.yaml is therefore not
-   ported — it is dead, and its replacement is born in backend/policy/.
-   contracts/tools/policy_grep.py enforces this in CI.
+   section of the old configs/default_config.yaml that encoded office rules was
+   therefore not ported — it is dead, and its replacement is born in
+   backend/policy/. config/loader.py enforces this by accepting only the fields
+   declared below, and contracts/tools/policy_grep.py enforces it in CI.
 
 2. Every temporal parameter is expressed in SECONDS and converted to frames at
    construction time using the effective fps. The old code hardcoded

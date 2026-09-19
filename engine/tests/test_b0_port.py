@@ -218,17 +218,29 @@ def test_no_policy_constants_in_engine_source():
     The cheap grep from ARCHITECTURE.md §16, run against our own tree so the
     check exists even before CI wires up contracts/tools/policy_grep.py.
     """
-    forbidden = ("break_start_hour", "break_end_hour", "max_session_minutes", "warning_minutes")
+    # B1 note: this used to carry an exemption for config/loader.py, which
+    # named these keys in order to reject them. contracts/tools/policy_grep.py
+    # has no such exemption and flagged the file, correctly — a denylist puts
+    # the vocabulary of office rules inside engine/, which is the thing §16
+    # tells you to grep for. The loader now works from an allowlist derived
+    # from the schema, so the exemption is gone and so are the strings.
+    forbidden = (
+        "break_start_hour",
+        "break_end_hour",
+        "max_session_minutes",
+        "warning_minutes",
+        "allowance",
+        "attendance",
+    )
     offenders = []
     for path in ENGINE_ROOT.rglob("*.py"):
         if "tests" in path.parts:
             continue
         text = path.read_text(encoding="utf-8")
         for needle in forbidden:
-            # config/loader.py names these in order to reject them.
-            if needle in text and "FORBIDDEN" not in text:
-                offenders.append(f"{path.name}:{needle}")
-    assert not offenders, f"policy constants found in engine/: {offenders}"
+            if needle in text:
+                offenders.append(f"{path.relative_to(ENGINE_ROOT)}:{needle}")
+    assert not offenders, f"policy vocabulary found in engine/: {offenders}"
 
 
 def test_engine_never_imports_the_backend():
@@ -301,7 +313,23 @@ def test_mock_path_needs_neither_torch_nor_ultralytics():
     """
     The mock path is what lets B1's benchmark run in CI. If importing the
     pipeline drags in torch, that stops being true.
+
+    Guarded, like its twin in test_b1_bench.py: on a machine with neither
+    package installed this assertion cannot fail, and a test that cannot fail
+    should say so rather than report a pass. The B1 version of this check was
+    written without the guard and passed for a day while
+    `report.package_versions()` imported both packages to read `__version__`.
     """
+    import importlib.util
+
+    if all(
+        importlib.util.find_spec(name) is None for name in ("torch", "ultralytics")
+    ):
+        pytest.skip(
+            "neither torch nor ultralytics is installed here, so this check "
+            "cannot fail. Run it on a machine with the real detector stack."
+        )
+
     script = (
         "import sys;"
         "import engine.ingest, engine.perception, engine.pipeline.engine;"
@@ -378,7 +406,7 @@ def test_tracker_is_configured_from_the_file_not_the_placeholder_fps():
     Found on a 24.8 fps file that produced "track_buffer 1.00s -> 30 frames at
     30.0 fps".
     """
-    from engine.tools.run import build_tracker
+    from engine.factory import build_tracker
     from engine.ingest import VideoFileSource
 
     clip = ENGINE_ROOT / "samples" / "synthetic_24fps.mp4"
@@ -436,7 +464,7 @@ def test_short_read_is_an_error_not_a_finished_run(tmp_path, monkeypatch):
 
     source = TruncatedSource()
 
-    def fake_build_engine(config, max_frames=None):
+    def fake_build_engine(config, max_frames=None, recorder=None, **kwargs):
         from engine.perception import MockDetector, MockTracker
         from engine.pipeline.engine import VisionEngine
 
@@ -446,11 +474,13 @@ def test_short_read_is_an_error_not_a_finished_run(tmp_path, monkeypatch):
                 detector=MockDetector(),
                 tracker=MockTracker(),
                 config=config,
+                recorder=recorder,
             ),
             source,
+            30.0,
         )
 
-    monkeypatch.setattr("engine.tools.run.build_engine", fake_build_engine)
+    monkeypatch.setattr("engine.factory.build_engine", fake_build_engine)
 
     with pytest.raises(RuntimeError, match="decode failure"):
         run_module.main(["--quiet"])
@@ -480,7 +510,7 @@ def test_builder_reads_fps_only_from_an_opened_source(tmp_path):
 
 def test_source_with_unknown_fps_is_refused_not_guessed():
     from engine.config import EngineConfig
-    from engine.tools.run import build_engine
+    from engine.factory import build_engine
 
     class FpsLessSource:
         fps = 0.0
@@ -495,12 +525,14 @@ def test_source_with_unknown_fps_is_refused_not_guessed():
         def stop(self):
             self.is_running = False
 
-    import engine.tools.run as run_module
+    import engine.factory as factory_module
 
-    original = run_module.build_source
-    run_module.build_source = lambda config, max_frames=None: FpsLessSource()
+    original = factory_module.build_source
+    factory_module.build_source = lambda config, max_frames=None, source_id=None: (
+        FpsLessSource()
+    )
     try:
         with pytest.raises(RuntimeError, match="fps"):
             build_engine(EngineConfig(source_type="video_file"))
     finally:
-        run_module.build_source = original
+        factory_module.build_source = original

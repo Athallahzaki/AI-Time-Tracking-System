@@ -2,12 +2,29 @@
 Loading and validating engine configuration.
 
 Beyond parsing YAML, this module does one thing the old loader did not: it
-refuses configuration that would let the engine lie. Two guards.
+refuses configuration the engine has no business holding.
 
-**The policy guard.** If a config file still carries the dead `attendance:`
-block — break hours, session limits, warning thresholds — loading fails with a
-message naming the keys. contracts/tools/policy_grep.py catches these in CI;
-this catches them at runtime, for the config files nobody remembered to commit.
+**How it refuses, and why that changed in B1.** The first version carried a
+denylist — the literal names of the company-rule keys the old config file used
+— and rejected any config containing one. It worked, and it was wrong twice
+over. A denylist always lags the thing it denies: the next rule to leak in will
+have a name nobody thought to add. And writing those names into `engine/` put
+the vocabulary of company rules inside the engine, which is the exact thing
+§16 tells you to grep for. `contracts/tools/policy_grep.py` flagged this file,
+and it was right to.
+
+What replaced it is an **allowlist derived from the schema itself**. The engine
+accepts three sections — `core`, `detector`, `tracker` — and within each, only
+the fields its dataclass declares. Everything else is refused by name at load
+time. No list of forbidden words exists anywhere in this package; the offending
+name comes from the user's file at runtime and appears only in the error.
+
+The side effect is worth having on its own: a mistyped key is now an error
+rather than a silently ignored line. §6.8's "unknown fields are ignored" is a
+rule for the *wire protocol*, where the two sides cannot be deployed together.
+A config file has no such constraint, and a benchmark run that silently used a
+default because `track_buffer_secondss` had a typo is a baseline nobody can
+trust.
 
 **Strict mode.** ARCHITECTURE.md §9 item 9 describes the worst failure mode this
 system has: a component swallows an exception, degrades to something harmless-
@@ -18,9 +35,10 @@ rather than surprises discovered in a benchmark report.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Iterable, Optional, Set, Union
 
 from .schema import DetectorConfig, EngineConfig, TrackerConfig, resolve_engine_path
 
@@ -28,34 +46,64 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent / "default_config.yaml"
 
-# Keys that must never appear in an engine config file. These are company rules,
-# and they belong to backend/policy/. See ARCHITECTURE.md §16.
-FORBIDDEN_SECTIONS = ("attendance", "policy", "break", "shift", "penalty")
-FORBIDDEN_KEYS = (
-    "break_start_hour",
-    "break_end_hour",
-    "warning_minutes",
-    "max_session_minutes",
-    "total_facilities",
-)
+
+class ConfigBoundaryError(ValueError):
+    """The config file asks the engine to hold something outside its remit."""
 
 
-class PolicyLeakError(ValueError):
-    """Raised when an engine config file carries a company policy constant."""
+# The name this used to have, kept so callers and tests that catch it still
+# work. Refusal is no longer specific to company rules — an unknown key is
+# refused the same way, because both are "the engine does not own this".
+PolicyLeakError = ConfigBoundaryError
 
 
-def _assert_no_policy(raw: Dict[str, Any]) -> None:
-    found = [s for s in FORBIDDEN_SECTIONS if s in raw]
-    for section in raw.values():
-        if isinstance(section, dict):
-            found.extend(k for k in FORBIDDEN_KEYS if k in section)
+def _field_names(cls: type) -> Set[str]:
+    return {field.name for field in dataclasses.fields(cls)}
 
-    if found:
-        raise PolicyLeakError(
-            "Engine config contains company policy, which belongs to "
-            "backend/policy/ (ARCHITECTURE.md §16). Offending keys: "
-            + ", ".join(sorted(set(found)))
-            + ". The engine may only hold perceptual constants."
+
+# Derived from the dataclasses, so the schema cannot drift from what the loader
+# accepts. `detector` and `tracker` are nested objects on EngineConfig and are
+# sections in the file, not keys inside `core`.
+_CORE_KEYS = _field_names(EngineConfig) - {"detector", "tracker"}
+_SECTIONS: Dict[str, Set[str]] = {
+    "core": _CORE_KEYS,
+    "detector": _field_names(DetectorConfig),
+    "tracker": _field_names(TrackerConfig),
+}
+
+
+def _assert_within_the_engines_remit(raw: Dict[str, Any]) -> None:
+    """Refuses any section or key the schema does not declare."""
+    problems = []
+
+    for section in raw:
+        if section not in _SECTIONS:
+            problems.append(
+                f"section '{section}' (the engine accepts only: "
+                f"{', '.join(sorted(_SECTIONS))})"
+            )
+
+    for section, allowed in _SECTIONS.items():
+        body = raw.get(section)
+        if body is None:
+            continue
+        if not isinstance(body, dict):
+            problems.append(f"section '{section}' must be a mapping")
+            continue
+        for key in body:
+            if key not in allowed:
+                problems.append(f"'{section}.{key}'")
+
+    if problems:
+        raise ConfigBoundaryError(
+            "Engine config contains settings the engine does not own: "
+            + "; ".join(problems)
+            + ". The engine may hold perceptual constants only — how long "
+            "before a track counts as gone, how much evidence confirms an "
+            "identity, what similarity counts as a match. Company rules live "
+            "in backend/policy/ and measurement thresholds in bench/ "
+            "(ARCHITECTURE.md §16). If this is a typo, it is now an error "
+            "rather than a silently ignored line."
         )
 
 
@@ -72,7 +120,7 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
     if not isinstance(raw, dict):
         raise ValueError(f"Config root must be a mapping, got {type(raw).__name__}.")
 
-    _assert_no_policy(raw)
+    _assert_within_the_engines_remit(raw)
 
     core = raw.get("core", {}) or {}
     det = raw.get("detector", {}) or {}

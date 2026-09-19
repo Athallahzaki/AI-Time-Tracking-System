@@ -1,5 +1,9 @@
-# B0 — porting only. Pinned loosely on purpose: pinning belongs with the
-# benchmark (B1), where a dependency change has to show up as a measured delta.
+# B0 + B1. Loose pins: from here on, a dependency change must show up as a
+# measured delta in bench-out/baseline.json, not as a surprise.
+#
+# The mock path — which is what CI runs and what `python -m engine.bench --mock`
+# uses — needs only the three below. That is deliberate (§13.9): a benchmark
+# that needs a GPU image to run is a benchmark that stops being run.
 
 numpy>=1.24
 opencv-python>=4.8       # ingest + drawing. Leaves in step 2, when PyAV brings PTS
@@ -9,8 +13,15 @@ PyYAML>=6.0              # config loading
 # Not needed for the mock path, which is what CI runs. Installing these is what
 # makes `--source <file>` work with real weights.
 #
-libreyolo>=0.3          # MIT. D-FINE / RF-DETR / DEIM
-torch>=2.0              # dragged in by libreyolo AND by the tracker adapter
-ultralytics>=8.0        # AGPL-3.0. ONLY still here for BYTETracker; removed in step 11.
+# libreyolo>=0.3          # MIT. D-FINE / RF-DETR / DEIM
+# torch>=2.0              # dragged in by libreyolo AND by the tracker adapter
+# ultralytics>=8.0        # AGPL-3.0. ONLY still here for BYTETracker; removed in step 11.
 #                         # Baseline numbers from step 1 are measured with it present,
 #                         # and the report must say so.
+
+# --- B1 benchmark ----------------------------------------------------------
+# No new runtime dependency. The face probe uses the frontal cascade bundled
+# with opencv-python (a LOWER BOUND — see engine/bench/faceprobe.py), and
+# everything else is stdlib. Swapping in SCRFD later adds onnxruntime.
+#
+# onnxruntime-gpu>=1.17   # when identity/ lands and the face probe uses SCRFD

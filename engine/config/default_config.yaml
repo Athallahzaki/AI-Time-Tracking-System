@@ -1,8 +1,10 @@
 # Engine configuration.
 #
-# Perceptual constants only. No break allowance, no working hours, no warning
-# thresholds — those are company policy and live in backend/policy/.
-# ARCHITECTURE.md §16, enforced by contracts/tools/policy_grep.py.
+# Perceptual constants only: how long before a track counts as gone, how much
+# evidence confirms an identity, what similarity counts as a match. Office rules
+# live in backend/policy/ and measurement thresholds in bench/.
+# ARCHITECTURE.md §16. The loader accepts only the sections and keys the schema
+# declares, so anything else here is a load-time error, not a silent default.
 #
 # Every temporal value is in SECONDS. Conversion to frames happens at
 # construction time using the effective fps (engine/config/schema.py).

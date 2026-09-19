@@ -1,4 +1,26 @@
-# engine/ — B0: port, nothing more
+# engine/ — B0 (port) and B1 (benchmark)
+
+B1 is in `engine/bench/` and has [its own README](bench/README.md). One
+correction to what B0 claimed, stated here rather than quietly fixed: this file
+used to say *"B1 plugs the span recorder in without touching the frame loop
+again."* That was wrong. `Recorder.record_latency(stage, duration_ms)` is a
+timer, and §13.3 asks for a span — `(stage, camera_id, pts, track_uuid,
+t_start, t_end)` — precisely so a stage that later becomes asynchronous still
+lands on a timeline. A recorder handed only `("detector", 4.1)` cannot recover
+which frame that belongs to, so the seam had the wrong shape and B1 widened it
+to `begin_frame()` + `record_span()`. Still zero-effect under `NullRecorder`,
+and re-tested rather than assumed
+(`test_attaching_the_span_recorder_does_not_change_the_output`).
+
+Two other things moved in B1, both pure relocations: the builders left
+`tools/run.py` for `factory.py` (the benchmark needs them too, and importing
+them from `tools/` would be backwards), and the frame loop plus the
+truncated-source check left `tools/run.py` for `streams/local.py`, so the CLI
+and the benchmark share one loop instead of two that drift.
+
+---
+
+## B0: port, nothing more
 
 This is step 0 of `ARCHITECTURE.md` §14 and B0 of `WORKPLAN.md` §3: the old
 `vision_core/` and the parts of `plugins/face_recognizer/` that belong to
@@ -78,10 +100,15 @@ A benchmark that can lie in a flattering direction is worse than no benchmark.
 
 ## Boundaries this code is held to
 
-- **No company policy.** No break allowance, no working hours, no warning
-  threshold. The old `attendance:` config block was not ported; it is dead, and
-  its replacement is born in `backend/policy/`. `config/loader.py` rejects any
-  config file carrying it, and CI runs `contracts/tools/policy_grep.py`.
+- **No company rule, and none of its vocabulary.** The engine holds perceptual
+  constants only. The section of the old config that encoded office rules was
+  not ported; it is dead, and its replacement is born in `backend/policy/`.
+  `config/loader.py` enforces this with an allowlist derived from the schema —
+  it accepts `core`, `detector` and `tracker` and the fields those dataclasses
+  declare, and refuses everything else by name at load time. A denylist was
+  tried first and was wrong twice: it lags whatever leaks in next, and writing
+  the forbidden names into `engine/` is itself the thing §16 tells you to grep
+  for. CI runs `contracts/tools/policy_grep.py`.
 - **No import of `backend/`.** Enforced by a ten-line test.
 - **The mock path needs neither torch nor Ultralytics.** Enforced by a test
   that imports the pipeline in a subprocess and checks `sys.modules`. This is
@@ -96,11 +123,12 @@ recognition to a worker pool, `latency_recognize_ms` stops meaning anything
 while still producing numbers.
 
 What ships instead is `pipeline/instrument.py`: the seam, plus a recorder that
-does nothing. B1 plugs the span recorder into it without touching the frame
-loop again.
+does nothing. B1 plugs `bench/spans.py::SpanRecorder` into it — after widening
+the seam from durations to spans, as noted at the top of this file.
 
 ## Ownership
 
+`bench/`, `streams/`, `factory.py` and `config/` are Engine B's.
 `ports/` and `pipeline/` are shared with Engine A — B0 initialises both,
 including `__init__.py`, so A can pull and continue rather than resolve merge
 conflicts. `identity/`, `store/` and `api/` are A's and are untouched here;

@@ -144,11 +144,17 @@ class VisionEngine:
         if frame is None:
             return None, []
 
-        t_ingest = (time.perf_counter() - t0) * 1000.0
-        self._metrics.record_latency(
-            "source_ingest",
-            t_ingest,
+        t_ingest_end = time.perf_counter()
+
+        # Name the frame before recording anything against it. Without this the
+        # spans below are durations with no camera and no timeline position —
+        # see pipeline/instrument.py for why that distinction is load-bearing.
+        self._metrics.begin_frame(
+            camera_id=frame.metadata.source_id,
+            frame_id=frame.frame_id,
+            pts=self._frame_pts(frame),
         )
+        self._metrics.record_span("source_ingest", t0, t_ingest_end)
 
         self._frame_count += 1
 
@@ -161,11 +167,7 @@ class VisionEngine:
 
             detections = self._detector.detect(frame)
 
-            t_det = (time.perf_counter() - t0) * 1000.0
-            self._metrics.record_latency(
-                "detector",
-                t_det,
-            )
+            self._metrics.record_span("detector", t0, time.perf_counter())
 
             self._cached_detections = detections
         else:
@@ -179,11 +181,7 @@ class VisionEngine:
             frame,
         )
 
-        t_track = (time.perf_counter() - t0) * 1000.0
-        self._metrics.record_latency(
-            "tracker",
-            t_track,
-        )
+        self._metrics.record_span("tracker", t0, time.perf_counter())
 
         # 4. Track lifecycle
         current_track_ids = {
@@ -294,14 +292,7 @@ class VisionEngine:
                     exc_info=True,
                 )
 
-        t_listeners = (
-            time.perf_counter() - t0
-        ) * 1000.0
-
-        self._metrics.record_latency(
-            "listeners",
-            t_listeners,
-        )
+        self._metrics.record_span("listeners", t0, time.perf_counter())
 
         # 6. Sinks
         t0 = time.perf_counter()
@@ -318,28 +309,31 @@ class VisionEngine:
                     exc_info=True,
                 )
 
-        t_sinks = (
-            time.perf_counter() - t0
-        ) * 1000.0
+        self._metrics.record_span("sinks", t0, time.perf_counter())
 
-        self._metrics.record_latency(
-            "sinks",
-            t_sinks,
-        )
-
-        # Metrics
+        self._metrics.record_span("total_pipeline", t_start, time.perf_counter())
         self._metrics.record_frame()
 
-        t_total = (
-            time.perf_counter() - t_start
-        ) * 1000.0
-
-        self._metrics.record_latency(
-            "total_pipeline",
-            t_total,
-        )
-
         return frame, tracks
+
+    @staticmethod
+    def _frame_pts(frame: Frame) -> float:
+        """
+        The frame's position on the source timeline, in seconds.
+
+        cv2.VideoCapture throws the real PTS away (§5.5, §9), so until step B4
+        replaces ingest with PyAV this is derived from the frame index and the
+        declared fps. It is exposed under the name `pts` because that is what it
+        becomes; the bench report records `pts_source` so no one later mistakes
+        a derived number for one that came off the wire.
+        """
+        pts = frame.metadata.extra.get("pts")
+        if pts is not None:
+            return float(pts)
+        fps = float(frame.metadata.fps or 0.0)
+        if fps <= 0.0:
+            return 0.0
+        return (frame.frame_id - 1) / fps
 
     def run(self) -> None:
         """Runs the main processing loop."""

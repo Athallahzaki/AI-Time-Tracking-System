@@ -10,6 +10,12 @@ from .interfaces import (
     TrackListener,
     FrameSink,
 )
+from .observation import (
+    FrameObservation,
+    StreamDescriptor,
+    TrackObservation,
+    TrackStream,
+)
 
 __all__ = [
     "Point",
@@ -28,4 +34,8 @@ __all__ = [
     "FrameSink",
     "TrackResult",
     "EngineResult",
+    "FrameObservation",
+    "TrackObservation",
+    "StreamDescriptor",
+    "TrackStream",
 ]
