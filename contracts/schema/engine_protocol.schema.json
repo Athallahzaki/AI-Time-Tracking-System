@@ -1,0 +1,705 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Athallahzaki/AI-Time-Tracking-System/contracts/schema/engine_protocol.schema.json",
+  "title": "Engine <-> Backend protocol, v1",
+  "description": "Satu file, self-contained, tanpa $ref lintas file. Setiap bahasa bisa memuatnya tanpa resolver. Anotasi x-channel dan x-direction bukan keyword JSON Schema; validator mengabaikannya, tapi alat lain boleh memakainya untuk menurunkan keanggotaan kanal.",
+
+  "oneOf": [
+    { "$ref": "#/$defs/hello" },
+    { "$ref": "#/$defs/hello_ack" },
+    { "$ref": "#/$defs/ack" },
+    { "$ref": "#/$defs/replay_gap" },
+    { "$ref": "#/$defs/set_cameras" },
+    { "$ref": "#/$defs/set_roster" },
+    { "$ref": "#/$defs/enroll" },
+    { "$ref": "#/$defs/enroll_result" },
+
+    { "$ref": "#/$defs/presence_interval" },
+    { "$ref": "#/$defs/track_started" },
+    { "$ref": "#/$defs/track_identified" },
+    { "$ref": "#/$defs/track_heartbeat" },
+    { "$ref": "#/$defs/track_resumed" },
+    { "$ref": "#/$defs/track_identity_changed" },
+    { "$ref": "#/$defs/track_ended" },
+    { "$ref": "#/$defs/person_unidentified_present" },
+    { "$ref": "#/$defs/camera_online" },
+    { "$ref": "#/$defs/camera_failed" },
+    { "$ref": "#/$defs/camera_degraded" },
+    { "$ref": "#/$defs/camera_coverage" },
+    { "$ref": "#/$defs/engine_health" },
+    { "$ref": "#/$defs/snapshot" },
+    { "$ref": "#/$defs/enrollment_needed" },
+
+    { "$ref": "#/$defs/view_frame" }
+  ],
+
+  "$defs": {
+
+    "_scalars": {
+      "description": "Tidak dipakai langsung; hanya wadah dokumentasi tipe dasar."
+    },
+
+    "v": {
+      "const": 1,
+      "description": "Versi amplop pesan. Penambahan field tidak menaikkan angka ini."
+    },
+
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$",
+      "description": "RFC3339 UTC dengan sufiks Z wajib. Waktu pesan dibentuk, bukan waktu kejadian; untuk waktu kejadian pakai *_at. Pattern ada di samping format karena `format` bersifat anotasi di banyak validator dan akan dilewati diam-diam; offset non-Z dilarang supaya dua timestamp bisa dibandingkan sebagai string apa adanya."
+    },
+
+    "seq": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Nomor urut kanal events. Monoton naik, kontigu, tidak pernah diulang kecuali saat replay eksplisit."
+    },
+
+    "pts": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Detik, float, RELATIF terhadap awal stream kamera pada stream_epoch yang berlaku. BUKAN unix epoch. Tidak boleh dibandingkan lintas stream_epoch yang berbeda."
+    },
+
+    "at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$",
+      "description": "Waktu kejadian, RFC3339 UTC dengan sufiks Z wajib, hasil konversi pts oleh engine. Backend tidak pernah menghitung durasi dari jamnya sendiri."
+    },
+
+    "stream_epoch": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Naik satu setiap kali koneksi RTSP ke kamera dibangun ulang. Menandai ruang pts mana yang berlaku. Dua pesan dengan stream_epoch berbeda punya asal pts berbeda dan pts-nya tidak sebanding."
+    },
+
+    "camera_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$"
+    },
+
+    "person_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$",
+      "description": "ID buram milik backend. Engine tidak menafsirkannya."
+    },
+
+    "track_uuid": {
+      "type": "string",
+      "pattern": "^tr_[A-Za-z0-9_-]{1,80}$",
+      "description": "Unik seumur hidup track, tidak pernah didaur ulang. Prefix tr_ wajib supaya tidak mungkin tertukar dengan interval_id."
+    },
+
+    "interval_id": {
+      "type": "string",
+      "pattern": "^iv_[A-Za-z0-9_-]{1,80}$",
+      "description": "Identitas interval kehadiran. Satu track bisa menghasilkan lebih dari satu interval, jadi ini BUKAN track_uuid. Prefix iv_ wajib."
+    },
+
+    "zone": {
+      "enum": ["door", "interior", "frame_edge"],
+      "description": "door = di region pintu, kemungkinan besar benar masuk/keluar. interior = di tengah ruangan, curigai kegagalan tracking. frame_edge = tepi frame di luar region pintu."
+    },
+
+    "boundary_source": {
+      "enum": ["face", "tracking", "forced"],
+      "description": "Asal batas interval. face = identifikasi wajah langsung. tracking = identitas dipegang tracker tanpa wajah (state HELD). forced = terminasi paksa, bukan pengamatan. CATATAN: track_lost BUKAN nilai yang sah di sini; itu end_reason."
+    },
+
+    "end_reason": {
+      "enum": [
+        "left_frame",
+        "occluded_timeout",
+        "merged_into_other_track",
+        "camera_lost",
+        "engine_shutdown",
+        "identity_released"
+      ]
+    },
+
+    "unidentified_reason": {
+      "enum": [
+        "no_face_detected",
+        "quality_gate_rejected",
+        "below_threshold",
+        "margin_too_narrow"
+      ]
+    },
+
+    "image_reject_reason": {
+      "type": "string",
+      "description": "Salah satu dari too_small, blurry, extreme_pose, bad_lighting, no_face, multiple_faces, atau duplicate_of:<id>. Sengaja string bebas, bukan enum tertutup: alasan baru akan muncul saat A8 dikerjakan, dan UI tidak boleh pecah karenanya. Daftar yang dikenal ada di README; UI menampilkan yang tidak dikenal apa adanya.",
+      "minLength": 1
+    },
+
+    "normalized_bbox": {
+      "type": "array",
+      "items": { "type": "number", "minimum": 0, "maximum": 1 },
+      "minItems": 4,
+      "maxItems": 4,
+      "description": "[x1, y1, x2, y2] ternormalisasi 0-1. Wajib ternormalisasi karena engine melihat mainstream sementara browser menampilkan substream."
+    },
+
+    "normalized_region": {
+      "$ref": "#/$defs/normalized_bbox"
+    },
+
+    "similarity": { "type": "number", "minimum": -1, "maximum": 1 },
+    "confidence01": { "type": "number", "minimum": 0, "maximum": 1 },
+
+    "_envelope_control": {
+      "type": "object",
+      "required": ["type", "v", "ts"],
+      "properties": {
+        "type": { "type": "string" },
+        "v": { "$ref": "#/$defs/v" },
+        "ts": { "$ref": "#/$defs/ts" },
+        "channel": { "const": "control" }
+      }
+    },
+
+    "_envelope_event": {
+      "type": "object",
+      "required": ["type", "v", "ts", "seq"],
+      "properties": {
+        "type": { "type": "string" },
+        "v": { "$ref": "#/$defs/v" },
+        "ts": { "$ref": "#/$defs/ts" },
+        "seq": { "$ref": "#/$defs/seq" },
+        "channel": { "const": "events" }
+      }
+    },
+
+    "_envelope_view": {
+      "type": "object",
+      "required": ["type", "v", "ts"],
+      "not": { "required": ["seq"] },
+      "properties": {
+        "type": { "type": "string" },
+        "v": { "$ref": "#/$defs/v" },
+        "ts": { "$ref": "#/$defs/ts" },
+        "channel": { "const": "view" }
+      },
+      "description": "Kanal view tidak punya seq. Kehadiran seq di sini adalah pelanggaran kontrak, bukan field tambahan yang boleh diabaikan."
+    },
+
+    "hello": {
+      "x-channel": "control",
+      "x-direction": "backend->engine",
+      "allOf": [{ "$ref": "#/$defs/_envelope_control" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "protocol_version", "client", "last_event_seq"],
+      "properties": {
+        "type": { "const": "hello" },
+        "protocol_version": { "type": "integer", "minimum": 1 },
+        "client": { "type": "string", "minLength": 1 },
+        "last_event_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0 berarti backend baru dan tidak meminta replay."
+        }
+      }
+    },
+
+    "hello_ack": {
+      "x-channel": "control",
+      "x-direction": "engine->backend",
+      "allOf": [{ "$ref": "#/$defs/_envelope_control" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "protocol_version", "engine_version", "models", "oldest_available_seq"],
+      "properties": {
+        "type": { "const": "hello_ack" },
+        "protocol_version": { "type": "integer", "minimum": 1 },
+        "engine_version": { "type": "string", "minLength": 1 },
+        "models": {
+          "type": "object",
+          "required": ["detector", "embedder", "embedding_version"],
+          "properties": {
+            "detector": { "type": "string" },
+            "embedder": { "type": "string" },
+            "embedding_version": {
+              "type": "string",
+              "description": "Ruang vektor embedding. Versi tidak cocok berarti TOLAK mencocokkan, bukan diam-diam bandingkan."
+            },
+            "tracker": { "type": "string" }
+          }
+        },
+        "oldest_available_seq": { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "ack": {
+      "x-channel": "control",
+      "x-direction": "engine->backend",
+      "allOf": [{ "$ref": "#/$defs/_envelope_control" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "in_reply_to", "accepted"],
+      "properties": {
+        "type": { "const": "ack" },
+        "in_reply_to": { "type": "string", "minLength": 1 },
+        "accepted": { "type": "boolean" },
+        "reason": { "type": "string" }
+      },
+      "description": "Ack hanya berarti perintah diterima, bukan selesai. Hasil sebenarnya menyusul sebagai event."
+    },
+
+    "replay_gap": {
+      "x-channel": "control",
+      "x-direction": "engine->backend",
+      "allOf": [{ "$ref": "#/$defs/_envelope_control" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "from_seq", "to_seq"],
+      "properties": {
+        "type": { "const": "replay_gap" },
+        "from_seq": { "type": "integer", "minimum": 0, "description": "last_event_seq yang diminta backend." },
+        "to_seq": { "type": "integer", "minimum": 0, "description": "oldest_available_seq yang benar-benar dipunyai engine." }
+      },
+      "description": "Backend WAJIB memperlakukan ini sebagai lubang data, bukan sebagai tidak ada kejadian."
+    },
+
+    "set_cameras": {
+      "x-channel": "control",
+      "x-direction": "backend->engine",
+      "allOf": [{ "$ref": "#/$defs/_envelope_control" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "cameras"],
+      "properties": {
+        "type": { "const": "set_cameras" },
+        "cameras": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["camera_id", "uri", "door_region"],
+            "properties": {
+              "camera_id": { "$ref": "#/$defs/camera_id" },
+              "uri": { "type": "string", "minLength": 1 },
+              "door_region": { "$ref": "#/$defs/normalized_region" },
+              "enabled": { "type": "boolean", "default": true }
+            }
+          }
+        }
+      },
+      "description": "Deklaratif: berisi SELURUH himpunan kamera yang diinginkan. Kamera yang tidak ada di daftar ditutup."
+    },
+
+    "set_roster": {
+      "x-channel": "control",
+      "x-direction": "backend->engine",
+      "allOf": [{ "$ref": "#/$defs/_envelope_control" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "persons"],
+      "properties": {
+        "type": { "const": "set_roster" },
+        "persons": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["person_id", "enrollment_version"],
+            "properties": {
+              "person_id": { "$ref": "#/$defs/person_id" },
+              "enrollment_version": { "type": "integer", "minimum": 1 }
+            }
+          }
+        }
+      },
+      "description": "Deklaratif, pola sama dengan set_cameras. Hanya ID dan versi; vektornya tidak pernah dikirim."
+    },
+
+    "enroll": {
+      "x-channel": "control",
+      "x-direction": "backend->engine",
+      "allOf": [{ "$ref": "#/$defs/_envelope_control" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "request_id", "person_id", "enrollment_version", "images"],
+      "properties": {
+        "type": { "const": "enroll" },
+        "request_id": { "type": "string", "minLength": 1 },
+        "person_id": { "$ref": "#/$defs/person_id" },
+        "enrollment_version": { "type": "integer", "minimum": 1 },
+        "images": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["id", "jpeg_b64"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "jpeg_b64": { "type": "string", "minLength": 1 },
+              "camera_id": { "$ref": "#/$defs/camera_id" },
+              "captured_at": { "$ref": "#/$defs/at" }
+            }
+          }
+        }
+      }
+    },
+
+    "enroll_result": {
+      "x-channel": "control",
+      "x-direction": "engine->backend",
+      "allOf": [{ "$ref": "#/$defs/_envelope_control" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "request_id", "accepted", "reason", "images"],
+      "properties": {
+        "type": { "const": "enroll_result" },
+        "request_id": { "type": "string", "minLength": 1 },
+        "accepted": { "type": "boolean" },
+        "reason": { "enum": ["ok", "collision", "insufficient_references"] },
+        "collides_with": { "$ref": "#/$defs/person_id" },
+        "collision_similarity": { "$ref": "#/$defs/similarity" },
+        "embedding_version": { "type": "string" },
+        "images": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "accepted"],
+            "properties": {
+              "id": { "type": "string" },
+              "accepted": { "type": "boolean" },
+              "reason": { "$ref": "#/$defs/image_reject_reason" },
+              "quality": { "$ref": "#/$defs/confidence01" },
+              "similarity": { "$ref": "#/$defs/similarity" }
+            }
+          }
+        }
+      },
+      "if": { "properties": { "reason": { "const": "collision" } }, "required": ["reason"] },
+      "then": { "required": ["collides_with", "collision_similarity"] }
+    },
+
+    "presence_interval": {
+      "x-channel": "events",
+      "x-direction": "engine->backend",
+      "allOf": [{ "$ref": "#/$defs/_envelope_event" }],
+      "type": "object",
+      "required": [
+        "type", "v", "ts", "seq",
+        "interval_id", "person_id", "camera_id", "stream_epoch",
+        "start_pts", "end_pts", "start_at", "end_at",
+        "start_source", "end_source", "start_zone", "end_zone",
+        "end_reason", "identity_confidence", "evidence_count"
+      ],
+      "properties": {
+        "type": { "const": "presence.interval" },
+        "interval_id": { "$ref": "#/$defs/interval_id" },
+        "person_id": { "$ref": "#/$defs/person_id" },
+        "camera_id": { "$ref": "#/$defs/camera_id" },
+        "stream_epoch": { "$ref": "#/$defs/stream_epoch" },
+        "track_uuid": { "$ref": "#/$defs/track_uuid" },
+        "start_pts": { "$ref": "#/$defs/pts" },
+        "end_pts": { "$ref": "#/$defs/pts" },
+        "start_at": { "$ref": "#/$defs/at" },
+        "end_at": { "$ref": "#/$defs/at" },
+        "start_source": { "$ref": "#/$defs/boundary_source" },
+        "end_source": { "$ref": "#/$defs/boundary_source" },
+        "start_zone": { "$ref": "#/$defs/zone" },
+        "end_zone": { "$ref": "#/$defs/zone" },
+        "end_reason": { "$ref": "#/$defs/end_reason" },
+        "identity_confidence": { "$ref": "#/$defs/confidence01" },
+        "evidence_count": { "type": "integer", "minimum": 0 },
+        "prev_interval_id": {
+          "$ref": "#/$defs/interval_id",
+          "description": "Terisi kalau interval ini kelanjutan yang disambung engine (lihat track.resumed). Backend memperlakukan rantai ini sebagai satu kehadiran berkelanjutan tanpa celah."
+        },
+        "evidence_crop": {
+          "type": "object",
+          "properties": {
+            "start": { "type": "string" },
+            "end": { "type": "string" }
+          }
+        }
+      },
+      "description": "Output utama. TIDAK PERNAH berisi akumulasi lintas interval: menjumlahkan interval berarti memutuskan celah mana yang dianggap masih hadir, dan itu kebijakan milik backend."
+    },
+
+    "track_started": {
+      "x-channel": "events",
+      "allOf": [{ "$ref": "#/$defs/_envelope_event" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "seq", "track_uuid", "camera_id", "stream_epoch", "pts", "at", "zone"],
+      "properties": {
+        "type": { "const": "track.started" },
+        "track_uuid": { "$ref": "#/$defs/track_uuid" },
+        "camera_id": { "$ref": "#/$defs/camera_id" },
+        "stream_epoch": { "$ref": "#/$defs/stream_epoch" },
+        "pts": { "$ref": "#/$defs/pts" },
+        "at": { "$ref": "#/$defs/at" },
+        "zone": { "$ref": "#/$defs/zone" }
+      }
+    },
+
+    "track_identified": {
+      "x-channel": "events",
+      "allOf": [{ "$ref": "#/$defs/_envelope_event" }],
+      "type": "object",
+      "required": [
+        "type", "v", "ts", "seq", "track_uuid", "person_id",
+        "pts", "at", "track_started_pts", "similarity", "margin", "evidence_count"
+      ],
+      "properties": {
+        "type": { "const": "track.identified" },
+        "track_uuid": { "$ref": "#/$defs/track_uuid" },
+        "person_id": { "$ref": "#/$defs/person_id" },
+        "pts": { "$ref": "#/$defs/pts" },
+        "at": { "$ref": "#/$defs/at" },
+        "track_started_pts": {
+          "$ref": "#/$defs/pts",
+          "description": "WAJIB. Tanpa ini backend menghitung kehadiran mulai dari saat wajah terbaca, bukan saat orangnya masuk."
+        },
+        "similarity": { "$ref": "#/$defs/similarity" },
+        "margin": {
+          "type": "number",
+          "minimum": 0,
+          "description": "best - second_best, dihitung atas skor per-PERSON (bukan per-referensi). Margin antar dua referensi milik orang yang sama selalu mendekati nol dan tidak berarti apa-apa."
+        },
+        "evidence_count": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "track_heartbeat": {
+      "x-channel": "events",
+      "allOf": [{ "$ref": "#/$defs/_envelope_event" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "seq", "track_uuid", "pts", "at", "identity_source", "confidence"],
+      "properties": {
+        "type": { "const": "track.heartbeat" },
+        "track_uuid": { "$ref": "#/$defs/track_uuid" },
+        "person_id": { "oneOf": [{ "$ref": "#/$defs/person_id" }, { "type": "null" }] },
+        "pts": { "$ref": "#/$defs/pts" },
+        "at": { "$ref": "#/$defs/at" },
+        "identity_source": { "enum": ["face", "tracking"] },
+        "confidence": { "$ref": "#/$defs/confidence01" }
+      }
+    },
+
+    "track_resumed": {
+      "x-channel": "events",
+      "allOf": [{ "$ref": "#/$defs/_envelope_event" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "seq", "track_uuid", "prev_track_uuid", "person_id", "gap_seconds", "pts", "at"],
+      "properties": {
+        "type": { "const": "track.resumed" },
+        "track_uuid": { "$ref": "#/$defs/track_uuid" },
+        "prev_track_uuid": { "$ref": "#/$defs/track_uuid" },
+        "person_id": { "$ref": "#/$defs/person_id" },
+        "gap_seconds": { "type": "number", "minimum": 0 },
+        "pts": { "$ref": "#/$defs/pts" },
+        "at": { "$ref": "#/$defs/at" }
+      },
+      "description": "Penyambungan HANYA atas bukti perseptual: orang yang sama, kamera yang sama, jeda dalam batas wajar tracker. Bukan karena 'tiga menit terlalu singkat untuk dihitung istirahat' -- itu kebijakan dan bukan milik engine."
+    },
+
+    "track_identity_changed": {
+      "x-channel": "events",
+      "allOf": [{ "$ref": "#/$defs/_envelope_event" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "seq", "track_uuid", "to_person_id", "reason", "disagreement_count", "pts", "at"],
+      "properties": {
+        "type": { "const": "track.identity_changed" },
+        "track_uuid": { "$ref": "#/$defs/track_uuid" },
+        "from_person_id": { "oneOf": [{ "$ref": "#/$defs/person_id" }, { "type": "null" }] },
+        "to_person_id": { "oneOf": [{ "$ref": "#/$defs/person_id" }, { "type": "null" }] },
+        "reason": { "enum": ["sustained_disagreement", "dedup_lost_claim", "manual_override"] },
+        "disagreement_count": { "type": "integer", "minimum": 1 },
+        "pts": { "$ref": "#/$defs/pts" },
+        "at": { "$ref": "#/$defs/at" }
+      }
+    },
+
+    "track_ended": {
+      "x-channel": "events",
+      "allOf": [{ "$ref": "#/$defs/_envelope_event" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "seq", "track_uuid", "pts", "at", "reason", "exit_zone"],
+      "properties": {
+        "type": { "const": "track.ended" },
+        "track_uuid": { "$ref": "#/$defs/track_uuid" },
+        "pts": { "$ref": "#/$defs/pts" },
+        "at": { "$ref": "#/$defs/at" },
+        "reason": { "$ref": "#/$defs/end_reason" },
+        "exit_zone": { "$ref": "#/$defs/zone" }
+      },
+      "description": "reason DAN exit_zone dua-duanya wajib. Kamera putus menghasilkan camera_lost, tidak pernah left_frame."
+    },
+
+    "person_unidentified_present": {
+      "x-channel": "events",
+      "allOf": [{ "$ref": "#/$defs/_envelope_event" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "seq", "track_uuid", "camera_id", "duration_seconds", "attempts", "reason"],
+      "properties": {
+        "type": { "const": "person.unidentified_present" },
+        "track_uuid": { "$ref": "#/$defs/track_uuid" },
+        "camera_id": { "$ref": "#/$defs/camera_id" },
+        "duration_seconds": { "type": "number", "minimum": 0 },
+        "attempts": { "type": "integer", "minimum": 0 },
+        "reason": { "$ref": "#/$defs/unidentified_reason" }
+      }
+    },
+
+    "camera_online": {
+      "x-channel": "events",
+      "allOf": [{ "$ref": "#/$defs/_envelope_event" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "seq", "camera_id", "stream_epoch", "fps", "pts_wallclock_offset"],
+      "properties": {
+        "type": { "const": "camera.online" },
+        "camera_id": { "$ref": "#/$defs/camera_id" },
+        "stream_epoch": { "$ref": "#/$defs/stream_epoch" },
+        "fps": { "type": "number", "minimum": 0 },
+        "pts_wallclock_offset": {
+          "type": "number",
+          "description": "Unix epoch detik yang berpadanan dengan pts=0 pada stream_epoch ini. Ditetapkan ulang setiap reconnect; itu sebabnya ia dikirim bersama stream_epoch, bukan sekali di awal hari."
+        }
+      }
+    },
+
+    "camera_failed": {
+      "x-channel": "events",
+      "allOf": [{ "$ref": "#/$defs/_envelope_event" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "seq", "camera_id", "reason", "retry_in_seconds"],
+      "properties": {
+        "type": { "const": "camera.failed" },
+        "camera_id": { "$ref": "#/$defs/camera_id" },
+        "reason": { "type": "string", "minLength": 1 },
+        "retry_in_seconds": { "type": "number", "minimum": 0 }
+      },
+      "description": "BUKAN alasan menandai orang pulang."
+    },
+
+    "camera_degraded": {
+      "x-channel": "events",
+      "allOf": [{ "$ref": "#/$defs/_envelope_event" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "seq", "camera_id", "reason"],
+      "properties": {
+        "type": { "const": "camera.degraded" },
+        "camera_id": { "$ref": "#/$defs/camera_id" },
+        "reason": { "type": "string", "minLength": 1 },
+        "fps": { "type": "number", "minimum": 0 }
+      }
+    },
+
+    "camera_coverage": {
+      "x-channel": "events",
+      "allOf": [{ "$ref": "#/$defs/_envelope_event" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "seq", "camera_id", "observed_regions", "never_observed"],
+      "properties": {
+        "type": { "const": "camera.coverage" },
+        "camera_id": { "$ref": "#/$defs/camera_id" },
+        "observed_regions": { "type": "array", "items": { "$ref": "#/$defs/normalized_region" } },
+        "never_observed": { "type": "array", "items": { "$ref": "#/$defs/normalized_region" } }
+      },
+      "description": "Titik buta menghukum meja tertentu secara sistematis. Ini yang membuatnya ketahuan saat instalasi."
+    },
+
+    "engine_health": {
+      "x-channel": "events",
+      "allOf": [{ "$ref": "#/$defs/_envelope_event" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "seq", "models_loaded", "queue_depth", "drop_rate", "cameras"],
+      "properties": {
+        "type": { "const": "engine.health" },
+        "models_loaded": {
+          "type": "boolean",
+          "description": "false berarti engine berjalan tapi tidak bisa mengenali siapa pun. Mode kegagalan terburuk adalah yang tidak mati tapi berbohong."
+        },
+        "degraded_components": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Komponen yang gagal dimuat, misal face_detector atau embedder atau tracker_native."
+        },
+        "gpu_util": { "$ref": "#/$defs/confidence01" },
+        "vram_mb": { "type": "number", "minimum": 0 },
+        "queue_depth": { "type": "integer", "minimum": 0 },
+        "drop_rate": { "$ref": "#/$defs/confidence01" },
+        "cameras": {
+          "type": "object",
+          "additionalProperties": { "enum": ["online", "degraded", "failed"] }
+        }
+      }
+    },
+
+    "snapshot": {
+      "x-channel": "events",
+      "allOf": [{ "$ref": "#/$defs/_envelope_event" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "seq", "pts_wallclock_offset", "live"],
+      "properties": {
+        "type": { "const": "snapshot" },
+        "pts_wallclock_offset": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["stream_epoch", "offset"],
+            "properties": {
+              "stream_epoch": { "$ref": "#/$defs/stream_epoch" },
+              "offset": { "type": "number" }
+            }
+          },
+          "description": "Dipetakan per camera_id. Berubah setiap reconnect kamera; backend harus memakai yang terbaru, bukan yang di-cache dari awal hari."
+        },
+        "live": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["track_uuid", "camera_id", "since_pts", "stream_epoch"],
+            "properties": {
+              "track_uuid": { "$ref": "#/$defs/track_uuid" },
+              "camera_id": { "$ref": "#/$defs/camera_id" },
+              "stream_epoch": { "$ref": "#/$defs/stream_epoch" },
+              "person_id": { "oneOf": [{ "$ref": "#/$defs/person_id" }, { "type": "null" }] },
+              "identity_source": { "enum": ["face", "tracking"] },
+              "since_pts": { "$ref": "#/$defs/pts" }
+            }
+          }
+        }
+      }
+    },
+
+    "enrollment_needed": {
+      "x-channel": "events",
+      "allOf": [{ "$ref": "#/$defs/_envelope_event" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "seq", "person_ids"],
+      "properties": {
+        "type": { "const": "enrollment_needed" },
+        "person_ids": { "type": "array", "items": { "$ref": "#/$defs/person_id" } }
+      }
+    },
+
+    "view_frame": {
+      "x-channel": "view",
+      "allOf": [{ "$ref": "#/$defs/_envelope_view" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "camera_id", "stream_epoch", "pts", "at", "boxes"],
+      "properties": {
+        "type": { "const": "view.frame" },
+        "camera_id": { "$ref": "#/$defs/camera_id" },
+        "stream_epoch": { "$ref": "#/$defs/stream_epoch" },
+        "pts": { "$ref": "#/$defs/pts" },
+        "at": {
+          "$ref": "#/$defs/at",
+          "description": "Browser menyelaraskan overlay lewat at (dicocokkan ke EXT-X-PROGRAM-DATE-TIME), bukan lewat pts. Dua-duanya wajib."
+        },
+        "boxes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["track_uuid", "bbox"],
+            "properties": {
+              "track_uuid": { "$ref": "#/$defs/track_uuid" },
+              "bbox": { "$ref": "#/$defs/normalized_bbox" },
+              "person_id": { "oneOf": [{ "$ref": "#/$defs/person_id" }, { "type": "null" }] },
+              "identity_source": { "enum": ["face", "tracking"] }
+            }
+          }
+        }
+      }
+    }
+  }
+}
