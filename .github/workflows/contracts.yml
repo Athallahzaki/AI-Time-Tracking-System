@@ -1,0 +1,62 @@
+name: contracts
+
+# Melengkapi `engine.yml`, tidak menduplikasinya. Yang di sana: policy_grep,
+# tes engine, dan bench. Yang di sini: kontrak dan engine palsu — batas antar
+# jalur, bukan isi salah satunya.
+on:
+  push:
+    paths: ["contracts/**", "engine/tools/fake_engine/**", ".github/workflows/contracts.yml"]
+  pull_request:
+    paths: ["contracts/**", "engine/tools/fake_engine/**", ".github/workflows/contracts.yml"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Sengaja ringan: tanpa GPU, tanpa model, tanpa kamera, tanpa torch.
+      # Gerbang yang butuh hardware adalah gerbang yang akhirnya dimatikan.
+      - name: Install
+        run: pip install "jsonschema>=4.18" "PyYAML>=6.0" pytest
+
+      - name: Tes kontrak dan engine palsu
+        run: pytest contracts/tests -q
+
+      - name: Semua fixture lolos skema dan aturan aliran
+        run: |
+          set -e
+          for f in contracts/fixtures/*.events.ndjson; do
+            python -m contracts.validator "$f" --channel events
+          done
+          for f in contracts/fixtures/*.view.ndjson; do
+            python -m contracts.validator "$f" --channel view
+          done
+
+      # Fixture di-commit, bukan dihasilkan ulang saat tes. Merekam ulang lalu
+      # `git diff --exit-code` menangkap perubahan aturan penurunan yang tidak
+      # disengaja. Kalau langkah ini merah, pertanyaannya bukan "bagaimana cara
+      # menghijaukannya" tapi "aku memang bermaksud mengubah arti fixture untuk
+      # tiga jalur sekaligus?"
+      - name: Fixture belum melenceng dari emitter
+        run: |
+          python -m engine.tools.fake_engine --all --record contracts/fixtures
+          git diff --exit-code -- contracts/fixtures
+
+      # Engine palsu tidak boleh memancarkan apa pun yang engine sungguhan
+      # dilarang memancarkan. Kalau ia boleh, ia mengajari backend hal yang
+      # salah selama berbulan-bulan sebelum ketahuan di M3.
+      - name: Engine palsu patuh kontrak lewat socket
+        run: |
+          set -e
+          python -m engine.tools.fake_engine --scenario replay-gap --socket /tmp/e.sock --speed 400 &
+          SRV=$!
+          sleep 2
+          timeout 60 python -m engine.tools.fake_engine.example_client /tmp/e.sock
+          timeout 60 python -m engine.tools.fake_engine.example_client /tmp/e.sock --last-seq 2 \
+            | tee /tmp/second.log
+          grep -q "LUBANG DATA" /tmp/second.log
+          kill $SRV || true

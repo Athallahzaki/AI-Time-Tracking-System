@@ -35,7 +35,10 @@ PATTERNS: List[Tuple[str, re.Pattern]] = [
     ("jatah", re.compile(r"\b(quota|jatah|allowance)\b", re.I)),
     ("jam kerja", re.compile(r"\b(work_start|work_end|shift|jam_kerja|office_hours)\b", re.I)),
     ("kehadiran sebagai kebijakan", re.compile(r"\b(attendance|absen\w*|late|terlambat)\b", re.I)),
-    ("jam dinding literal", re.compile(r"\b(1[0-9]|[0-9])\s*:\s*[0-5][0-9]\b")),
+    # Bukan "ada HH:MM di baris ini" -- itu menandai setiap template anotasi
+    # dan setiap contoh di dokumentasi. Yang berbahaya adalah engine MEMBANDINGKAN
+    # jam dinding dengan sebuah angka, karena itulah bentuk `_is_break_time()`.
+    ("perbandingan jam dinding", re.compile(r"\.hour\s*(==|!=|>=|<=|<|>)|\bhour\s*(==|>=|<=)\s*\d")),
     ("akumulasi harian", re.compile(r"\b(daily_total|total_today|accumulated_\w+)\b", re.I)),
 ]
 
@@ -46,7 +49,60 @@ ALLOWLIST = re.compile(
     re.I,
 )
 
-SKIP_DIRS = {".git", "__pycache__", ".venv", "node_modules", "tests", "data", "models", "weights"}
+# `scenarios/` adalah data uji yang MENGGAMBARKAN situasi, bukan kode yang
+# dijalankan engine. Satu skenario bernama `istirahat-asli` tidak menaruh
+# aturan kantor di dalam sensor; ia menamai keadaan yang harus bisa dibedakan.
+# Carve-out ini sempit dengan sengaja: hanya folder skenario, bukan
+# `engine/tools/fake_engine/` seluruhnya -- emitter dan server tetap dipindai,
+# dan di situlah konstanta kebijakan benar-benar akan berbahaya kalau muncul.
+SKIP_DIRS = {
+    ".git", "__pycache__", ".venv", "node_modules",
+    "tests", "data", "models", "weights", "scenarios",
+}
+
+
+def _prose_lines(source: str) -> set:
+    """Baris yang berisi komentar atau docstring, bukan kode.
+
+    Dipakai untuk melewatkannya. Heuristik "baris yang diawali #" tidak cukup:
+    sebagian besar sebutan `istirahat` atau `attendance` di repo ini ada di
+    tengah paragraf docstring yang justru MENJELASKAN kenapa hal itu tidak
+    boleh ada di engine. Alat yang menandai dokumentasi aturannya sendiri
+    sebagai pelanggaran aturan itu akan dimatikan orang dalam seminggu.
+
+    Karena itu dipakai parser, bukan pola. String literal biasa TIDAK
+    dilewatkan -- `"break_start_hour"` sebagai kunci dict tetap kode.
+    """
+    import ast
+    import io
+    import tokenize
+
+    skip: set = set()
+
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(source).readline):
+            if token.type == tokenize.COMMENT:
+                skip.update(range(token.start[0], token.end[0] + 1))
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        pass
+
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return skip
+
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        body = getattr(node, "body", None)
+        if not body:
+            continue
+        first = body[0]
+        if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) \
+                and isinstance(first.value.value, str):
+            skip.update(range(first.lineno, (first.end_lineno or first.lineno) + 1))
+
+    return skip
 
 
 def scan(root: Path) -> List[str]:
@@ -59,17 +115,20 @@ def scan(root: Path) -> List[str]:
             continue
 
         try:
-            lines = path.read_text(encoding="utf-8").splitlines()
+            source = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
 
+        lines = source.splitlines()
+        skip = _prose_lines(source) if path.suffix == ".py" else set()
+
         for number, line in enumerate(lines, start=1):
+            if number in skip:
+                continue
             stripped = line.strip()
-            # Baris komentar/docstring murni dilewati: sebagian besar sebutan
-            # "attendance" di engine/ justru ada di kalimat yang menyatakan modul
-            # itu TIDAK tahu soal absensi. Konstanta yang sebenarnya ada di kode
-            # dan di YAML, bukan di prosa.
-            if stripped.startswith(("#", "-", '"""', "'''", "*")):
+            # Untuk YAML/JSON tidak ada parser prosa; komentarnya dilewati
+            # dengan cara yang sederhana.
+            if stripped.startswith(("#", "//")):
                 continue
             if ALLOWLIST.search(line):
                 continue

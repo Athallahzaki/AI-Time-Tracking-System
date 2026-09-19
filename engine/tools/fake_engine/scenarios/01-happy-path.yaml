@@ -1,0 +1,30 @@
+name: happy-path
+description: Masuk lewat pintu, dikenali, kerja, keluar lewat pintu
+protocol_version: 1
+
+# Satu-satunya skenario yang merekam kanal view. Frontend butuh satu berkas
+# yang isinya masuk akal untuk membangun overlay; empat belas berkas seperti
+# ini tidak menambah informasi apa pun dan menambah beberapa megabyte.
+view_fps: 5.0
+heartbeat_interval: 30.0
+snapshot_interval: 20.0
+
+cameras:
+  - id: r1
+    pts_offset: 1758240000.0
+    door_region: [0.62, 0.10, 0.95, 0.55]
+
+persons: ["4471"]
+
+timeline:
+  - { at: 0.0,   emit: camera.online, camera: r1 }
+  - { at: 12.0,  emit: track.started, track: r1-t1, camera: r1, zone: door }
+  - { at: 14.4,  emit: track.identified, track: r1-t1, person: "4471", similarity: 0.91, margin: 0.17 }
+  - { at: 240.0, emit: track.ended, track: r1-t1, reason: left_frame, zone: door }
+
+expect:
+  intervals: 1
+  gaps: 0
+  note: >-
+    Batas interval harus mulai di t=12 (track lahir), bukan t=14.4 (wajah
+    terbaca). Selisih 2,4 detik per kejadian adalah yang §4.4 bicarakan.

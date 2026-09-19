@@ -1,0 +1,33 @@
+name: lintas-ruangan
+description: Keluar r1 masuk r2 dalam 8 detik, handoff bukan dua kehadiran
+protocol_version: 1
+heartbeat_interval: 30.0
+snapshot_interval: 20.0
+
+cameras:
+  - id: r1
+    pts_offset: 1758240000.0
+  - id: r2
+    pts_offset: 1758240000.0
+
+persons: ["4471"]
+
+timeline:
+  - { at: 0.0,   emit: camera.online, camera: r1 }
+  - { at: 0.0,   emit: camera.online, camera: r2 }
+  - { at: 10.0,  emit: track.started, track: r1-t1, camera: r1, zone: door }
+  - { at: 12.0,  emit: track.identified, track: r1-t1, person: "4471", similarity: 0.91, margin: 0.17 }
+  - { at: 180.0, emit: track.ended, track: r1-t1, reason: left_frame, zone: door }
+  - { at: 188.0, emit: track.started, track: r2-t1, camera: r2, zone: door }
+  - { at: 189.0, emit: track.identified, track: r2-t1, person: "4471", similarity: 0.90, margin: 0.16 }
+  - { at: 600.0, emit: track.ended, track: r2-t1, reason: left_frame, zone: door }
+
+expect:
+  intervals: 2
+  gaps: 1
+  gap_same_camera: false
+  note: >-
+    Engine TIDAK menyambung ini, dan itu disengaja. Penyambungan lintas kamera
+    adalah penyambungan sesi, yang butuh aturan bisnis dan topologi ruangan --
+    milik backend. Engine cuma melaporkan bahwa celahnya beda kamera dan kedua
+    batasnya di pintu.

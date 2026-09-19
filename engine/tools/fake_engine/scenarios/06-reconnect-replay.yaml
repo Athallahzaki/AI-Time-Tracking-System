@@ -1,0 +1,27 @@
+name: reconnect-replay
+description: Backend putus di tengah, menyambung lagi, tidak ada event hilang
+protocol_version: 1
+heartbeat_interval: 20.0
+snapshot_interval: 20.0
+
+cameras:
+  - id: r1
+    pts_offset: 1758240000.0
+
+persons: ["4471"]
+
+timeline:
+  - { at: 0.0,   emit: camera.online, camera: r1 }
+  - { at: 10.0,  emit: track.started, track: r1-t1, camera: r1, zone: door }
+  - { at: 12.0,  emit: track.identified, track: r1-t1, person: "4471", similarity: 0.90, margin: 0.15 }
+  # Koneksi diputus dari sisi engine. Backend menyambung lagi dengan
+  # last_event_seq terakhir yang ia terima; engine mengulang dari sana.
+  - { at: 60.0,  emit: client.disconnect }
+  - { at: 200.0, emit: track.ended, track: r1-t1, reason: left_frame, zone: door }
+
+expect:
+  intervals: 1
+  gaps: 0
+  note: >-
+    Hanya bisa diuji terhadap socket, bukan terhadap fixture. Rekamannya ada
+    supaya urutan seq yang benar punya acuan.

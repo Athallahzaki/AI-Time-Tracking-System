@@ -1,0 +1,71 @@
+{
+  "scenario": "lintas-ruangan",
+  "description": "Keluar r1 masuk r2 dalam 8 detik, handoff bukan dua kehadiran",
+  "what_this_file_is": "Ringkasan observasional dari rekaman, bukan kesimpulan kebijakan. Celah dilaporkan beserta bukti batasnya; bagaimana ia diperlakukan diputuskan backend.",
+  "counts": {
+    "events": 68,
+    "intervals": 2,
+    "tracks_started": 2,
+    "tracks_ended": 2,
+    "seq_first": 1,
+    "seq_last": 68
+  },
+  "cameras": [
+    "r1",
+    "r2"
+  ],
+  "people": {
+    "4471": {
+      "interval_count": 2,
+      "intervals": [
+        {
+          "interval_id": "iv_r1-0001",
+          "camera_id": "r1",
+          "start_at": "2025-09-19T00:00:10.000Z",
+          "end_at": "2025-09-19T00:03:00.000Z",
+          "start_zone": "door",
+          "end_zone": "door",
+          "start_source": "face",
+          "end_source": "face",
+          "end_reason": "left_frame",
+          "prev_interval_id": null
+        },
+        {
+          "interval_id": "iv_r2-0001",
+          "camera_id": "r2",
+          "start_at": "2025-09-19T00:03:08.000Z",
+          "end_at": "2025-09-19T00:10:00.000Z",
+          "start_zone": "door",
+          "end_zone": "door",
+          "start_source": "face",
+          "end_source": "face",
+          "end_reason": "left_frame",
+          "prev_interval_id": null
+        }
+      ]
+    }
+  },
+  "gaps": [
+    {
+      "person_id": "4471",
+      "after_interval": "iv_r1-0001",
+      "before_interval": "iv_r2-0001",
+      "duration_seconds": 8.0,
+      "same_camera": false,
+      "closed_by_engine": false,
+      "evidence": {
+        "end_zone": "door",
+        "end_reason": "left_frame",
+        "end_source": "face",
+        "next_start_zone": "door",
+        "next_start_source": "face"
+      }
+    }
+  ],
+  "asserts": {
+    "intervals": 2,
+    "gaps": 1,
+    "gap_same_camera": false,
+    "note": "Engine TIDAK menyambung ini, dan itu disengaja. Penyambungan lintas kamera adalah penyambungan sesi, yang butuh aturan bisnis dan topologi ruangan -- milik backend. Engine cuma melaporkan bahwa celahnya beda kamera dan kedua batasnya di pintu."
+  }
+}

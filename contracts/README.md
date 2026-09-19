@@ -10,9 +10,30 @@ contracts/
 ├── schema/engine_protocol.schema.json   # satu berkas, self-contained, tanpa $ref lintas berkas
 ├── validator/                           # validasi bentuk (skema) + aturan aliran (conformance)
 ├── tools/policy_grep.py                 # penegakan "engine mengamati, backend memutuskan" di CI
-├── fixtures/                            # rekaman NDJSON per skenario
+├── fixtures/                            # rekaman NDJSON per skenario, DIHASILKAN fake_engine
 └── tests/                               # tes yang memastikan validatornya benar-benar menolak
 ```
+
+## Fixture
+
+`fixtures/` dihasilkan `engine/tools/fake_engine`, bukan ditulis tangan:
+
+```bash
+python -m engine.tools.fake_engine --all --record contracts/fixtures
+```
+
+Tiga berkas per skenario — `<nama>.events.ndjson`, `<nama>.expected.json`, dan
+untuk `happy-path` juga `<nama>.view.ndjson`. Semuanya di-commit, dan CI
+merekam ulang lalu `git diff --exit-code`: fixture yang dihasilkan ulang saat
+tes berjalan tidak menguji apa pun.
+
+`<nama>.expected.json` **observasional, bukan kesimpulan kebijakan**. Ia
+melaporkan celah beserta bukti batasnya — `end_zone`, `end_reason`,
+`end_source`, dan apakah engine sudah menyambungnya — dan berhenti di situ.
+Tes backend memutar ulang `.ndjson`, menurunkan sesi menurut kebijakan kalian,
+lalu membandingkan celah yang ditemukan dengan `gaps[]`. Kalau jumlah dan
+batasnya berbeda, yang salah parser kalian; kalau perlakuannya yang berbeda,
+itu kebijakan. Dua kegagalan yang sangat berbeda, dan selama ini tercampur.
 
 ## Pakai
 

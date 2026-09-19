@@ -1,0 +1,26 @@
+name: replay-gap
+description: Backend putus terlalu lama, outbox sudah dipangkas, lubang data
+protocol_version: 1
+heartbeat_interval: 20.0
+snapshot_interval: 20.0
+
+cameras:
+  - id: r1
+    pts_offset: 1758240000.0
+
+persons: ["4471"]
+
+timeline:
+  - { at: 0.0,   emit: camera.online, camera: r1 }
+  - { at: 10.0,  emit: track.started, track: r1-t1, camera: r1, zone: door }
+  - { at: 12.0,  emit: track.identified, track: r1-t1, person: "4471", similarity: 0.90, margin: 0.15 }
+  - { at: 40.0,  emit: client.disconnect }
+  # Retensi outbox habis selagi backend mati.
+  - { at: 90.0,  emit: engine.trim_outbox, keep_from_seq: 12 }
+  - { at: 260.0, emit: track.ended, track: r1-t1, reason: left_frame, zone: door }
+
+expect:
+  note: >-
+    Engine mengirim `replay_gap` sebelum event apa pun. Backend WAJIB
+    memperlakukannya sebagai lubang data, bukan sebagai tidak ada kejadian.
+    Kegagalan paling umum: menganggap orangnya tidak hadir selama lubang itu.

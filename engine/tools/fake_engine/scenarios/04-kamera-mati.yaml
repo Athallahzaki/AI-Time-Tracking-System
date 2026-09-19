@@ -1,0 +1,32 @@
+name: kamera-mati
+description: Tiga orang di ruangan, kamera putus, tidak seorang pun pulang
+protocol_version: 1
+heartbeat_interval: 30.0
+snapshot_interval: 20.0
+
+cameras:
+  - id: r1
+    pts_offset: 1758240000.0
+
+persons: ["4471", "4802", "5120"]
+
+timeline:
+  - { at: 0.0,   emit: camera.online, camera: r1 }
+  - { at: 10.0,  emit: track.started, track: r1-t1, camera: r1, zone: door }
+  - { at: 11.0,  emit: track.identified, track: r1-t1, person: "4471", similarity: 0.90, margin: 0.15 }
+  - { at: 30.0,  emit: track.started, track: r1-t2, camera: r1, zone: door }
+  - { at: 31.0,  emit: track.identified, track: r1-t2, person: "4802", similarity: 0.87, margin: 0.12 }
+  - { at: 50.0,  emit: track.started, track: r1-t3, camera: r1, zone: door }
+  - { at: 51.0,  emit: track.identified, track: r1-t3, person: "5120", similarity: 0.89, margin: 0.14 }
+  # Tiga track berakhir pada detik yang sama. Tanpa kode alasan, backend akan
+  # menandai satu ruangan penuh orang sebagai pulang serentak.
+  - { at: 400.0, emit: camera.failed, camera: r1, reason: connection_refused }
+
+expect:
+  intervals: 3
+  gaps: 0
+  all_end_reasons: camera_lost
+  all_end_sources: forced
+  note: >-
+    Ketiga interval wajib berakhir `camera_lost` dan `forced`, bukan
+    `left_frame`. Ini bug yang baru ketahuan saat penggajian.

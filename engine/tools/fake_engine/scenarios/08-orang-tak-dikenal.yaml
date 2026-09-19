@@ -1,0 +1,28 @@
+name: orang-tak-dikenal
+description: Hadir 20 menit tanpa identitas, alert harus muncul
+protocol_version: 1
+heartbeat_interval: 60.0
+snapshot_interval: 30.0
+
+cameras:
+  - id: r1
+    pts_offset: 1758240000.0
+
+persons: ["4471"]
+
+timeline:
+  - { at: 0.0,    emit: camera.online, camera: r1 }
+  - { at: 15.0,   emit: track.started, track: r1-t5, camera: r1, zone: interior }
+  - { at: 255.0,  emit: person.unidentified_present, track: r1-t5,
+      duration_seconds: 240, attempts: 18, reason: no_face_detected }
+  - { at: 915.0,  emit: person.unidentified_present, track: r1-t5,
+      duration_seconds: 900, attempts: 64, reason: no_face_detected }
+  - { at: 1215.0, emit: track.ended, track: r1-t5, reason: left_frame, zone: door }
+
+expect:
+  intervals: 0
+  note: >-
+    Nol interval: tanpa identitas tidak ada kehadiran yang bisa dicatat atas
+    nama siapa pun. Tapi orangnya ADA. Kalau backend sedang menghitung
+    seseorang absen di waktu yang sama, kemungkinan besar ini orangnya, sedang
+    membelakangi kamera.

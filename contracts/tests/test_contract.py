@@ -29,10 +29,26 @@ def validator() -> SchemaValidator:
     return SchemaValidator()
 
 
+def _read(name: str) -> list:
+    lines = (FIXTURES / name).read_text(encoding="utf-8").splitlines()
+    return [json.loads(line) for line in lines if line.strip()]
+
+
 @pytest.fixture(scope="module")
 def berbalik_lama() -> list:
-    lines = (FIXTURES / "berbalik-lama.events.ndjson").read_text(encoding="utf-8").splitlines()
-    return [json.loads(line) for line in lines if line.strip()]
+    """Fixture yang dihasilkan `fake_engine`, bukan tulisan tangan.
+
+    Itu disengaja: validator dan engine palsu saling memeriksa. Kalau salah
+    satunya bergeser, yang lain yang menangkapnya -- dan itu jauh lebih
+    berguna daripada dua berkas yang ditulis orang yang sama dengan asumsi
+    yang sama.
+    """
+    return _read("berbalik-lama.events.ndjson")
+
+
+@pytest.fixture(scope="module")
+def stitching() -> list:
+    return _read("stitching.events.ndjson")
 
 
 def run(messages, allow_replay=False):
@@ -180,15 +196,16 @@ def test_kamera_putus_tidak_boleh_berarti_pulang(berbalik_lama):
     """Bug yang baru ketahuan saat penggajian: satu ruangan penuh orang
     ditandai pulang pada detik yang sama karena kamera mati."""
     messages = copy.deepcopy(berbalik_lama)
-    failed = {
-        "type": "camera.failed", "v": 1, "ts": messages[5]["ts"], "seq": 0,
+    first_end = next(i for i, m in enumerate(messages) if m["type"] == "track.ended")
+
+    messages.insert(first_end, {
+        "type": "camera.failed", "v": 1, "ts": messages[first_end]["ts"], "seq": 0,
         "camera_id": "r1", "reason": "connection_refused", "retry_in_seconds": 5,
-    }
-    messages.insert(5, failed)
+    })
+    messages[first_end + 1]["reason"] = "left_frame"
+    messages[first_end + 1]["exit_zone"] = "door"
     for index, message in enumerate(messages, start=1):
         message["seq"] = index
-    messages[6]["reason"] = "left_frame"
-    messages[6]["exit_zone"] = "door"
 
     errors, _ = run(messages)
     assert any("camera_lost" in error.detail for error in errors)
@@ -241,12 +258,13 @@ def test_snapshot_tanpa_offset_kamera_hidup_ditolak(berbalik_lama):
     assert any("pts_wallclock_offset" in error.path for error in errors)
 
 
-def test_penyambungan_lintas_kamera_ditolak(berbalik_lama):
+def test_penyambungan_lintas_kamera_ditolak(stitching):
     """Lintas ruangan itu handoff — penyambungan sesi milik backend, bukan
     bukti perseptual milik engine."""
-    messages = copy.deepcopy(berbalik_lama)
+    messages = copy.deepcopy(stitching)
+    resumed = next(m for m in messages if m["type"] == "track.resumed")
     for message in messages:
-        if message["type"] == "track.started" and message["track_uuid"].endswith("b02d"):
+        if message["type"] == "track.started" and message["track_uuid"] == resumed["track_uuid"]:
             message["camera_id"] = "r2"
     errors, _ = run(messages)
     assert any("handoff" in error.detail for error in errors)

@@ -74,9 +74,17 @@ class ConformanceChecker:
 
     def __init__(self, allow_replay: bool = False) -> None:
         self._allow_replay = allow_replay
+        self._offsets_expected = True
 
     def check(self, messages: Sequence[Dict[str, Any]]) -> ConformanceReport:
         report = ConformanceReport()
+
+        # Rekaman per kanal itu sah: `contracts/fixtures/*.view.ndjson` tidak
+        # memuat `camera.online`, karena itu event dan tinggal di berkas events.
+        # Memperingatkan tiap baris view bahwa offsetnya tidak diketahui berarti
+        # 1.500 peringatan untuk satu berkas yang sebenarnya benar. Aturan itu
+        # hanya berlaku kalau aliran ini memang aliran yang membawa offset.
+        self._offsets_expected = any(m.get("type") == "camera.online" for m in messages)
 
         tracks: Dict[str, _TrackInfo] = {}
         intervals: Dict[str, Dict[str, Any]] = {}
@@ -245,7 +253,7 @@ class ConformanceChecker:
             )
             return
 
-        if epoch not in camera_offset.get(camera_id, {}):
+        if self._offsets_expected and epoch not in camera_offset.get(camera_id, {}):
             report.warn(
                 line, mtype, "stream_epoch",
                 f"pts dipancarkan untuk kamera `{camera_id}` epoch {epoch} sebelum ada "
@@ -265,10 +273,15 @@ class ConformanceChecker:
 
     # ---------- per jenis pesan ----------
 
-    def _on_camera_online(self, message, *, line, camera_epoch, camera_offset, report, **_) -> None:
+    def _on_camera_online(self, message, *, line, camera_epoch, camera_offset, camera_failed, report, **_) -> None:
         camera_id = message["camera_id"]
         epoch = message["stream_epoch"]
         previous = camera_epoch.get(camera_id)
+
+        # Kamera hidup lagi: track yang berakhir setelah ini boleh berakhir
+        # wajar. Lupa menghapus tanda ini membuat setiap kamera yang pernah
+        # putus sekali dianggap putus selamanya.
+        camera_failed.pop(camera_id, None)
 
         if previous is not None and epoch <= previous:
             report.error(

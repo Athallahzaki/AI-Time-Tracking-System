@@ -1,0 +1,28 @@
+name: identitas-tertukar
+description: Identitas berpindah setelah tiga ketidaksetujuan berturut-turut
+protocol_version: 1
+heartbeat_interval: 30.0
+snapshot_interval: 20.0
+
+cameras:
+  - id: r1
+    pts_offset: 1758240000.0
+
+persons: ["4471", "4802"]
+
+timeline:
+  - { at: 0.0,   emit: camera.online, camera: r1 }
+  - { at: 8.0,   emit: track.started, track: r1-t2, camera: r1, zone: door }
+  - { at: 9.0,   emit: track.identified, track: r1-t2, person: "4471", similarity: 0.71, margin: 0.03 }
+  # Satu track, dua interval. Inilah kenapa interval_id bukan track_uuid.
+  - { at: 120.0, emit: track.identity_changed, track: r1-t2, person: "4802",
+      reason: sustained_disagreement, disagreement_count: 3, zone: interior }
+  - { at: 400.0, emit: track.ended, track: r1-t2, reason: left_frame, zone: door }
+
+expect:
+  intervals: 2
+  gaps: 1
+  note: >-
+    Interval pertama ditutup `identity_released`. Backend harus mengoreksi
+    riwayat 4471, bukan menambahkan kehadiran baru untuk 4802 lalu membiarkan
+    yang lama berdiri.

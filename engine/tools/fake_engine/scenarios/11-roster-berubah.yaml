@@ -1,0 +1,25 @@
+name: roster-berubah
+description: set_roster saat jalan, vektor dibuang, enrollment diminta
+protocol_version: 1
+heartbeat_interval: 30.0
+snapshot_interval: 30.0
+
+cameras:
+  - id: r1
+    pts_offset: 1758240000.0
+
+persons: ["4471", "5120"]
+
+timeline:
+  - { at: 0.0,   emit: camera.online, camera: r1 }
+  - { at: 10.0,  emit: track.started, track: r1-t1, camera: r1, zone: door }
+  - { at: 11.0,  emit: track.identified, track: r1-t1, person: "4471", similarity: 0.90, margin: 0.15 }
+  - { at: 120.0, emit: enrollment_needed, persons: ["5120"] }
+  - { at: 300.0, emit: track.ended, track: r1-t1, reason: left_frame, zone: door }
+
+expect:
+  note: >-
+    Rekonsiliasi deklaratif: backend mengirim SELURUH himpunan yang
+    diinginkan, engine mencocokkan state-nya. Perintah imperatif akan desync
+    begitu satu pesan hilang, dan kalian baru tahu saat ada kamera hantu yang
+    masih diproses padahal sudah dihapus dari UI.

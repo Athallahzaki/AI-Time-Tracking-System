@@ -1,0 +1,58 @@
+{
+  "scenario": "identitas-tertukar",
+  "description": "Identitas berpindah setelah tiga ketidaksetujuan berturut-turut",
+  "what_this_file_is": "Ringkasan observasional dari rekaman, bukan kesimpulan kebijakan. Celah dilaporkan beserta bukti batasnya; bagaimana ia diperlakukan diputuskan backend.",
+  "counts": {
+    "events": 46,
+    "intervals": 2,
+    "tracks_started": 1,
+    "tracks_ended": 1,
+    "seq_first": 1,
+    "seq_last": 46
+  },
+  "cameras": [
+    "r1"
+  ],
+  "people": {
+    "4471": {
+      "interval_count": 1,
+      "intervals": [
+        {
+          "interval_id": "iv_r1-0001",
+          "camera_id": "r1",
+          "start_at": "2025-09-19T00:00:08.000Z",
+          "end_at": "2025-09-19T00:02:00.000Z",
+          "start_zone": "door",
+          "end_zone": "interior",
+          "start_source": "face",
+          "end_source": "tracking",
+          "end_reason": "identity_released",
+          "prev_interval_id": null
+        }
+      ]
+    },
+    "4802": {
+      "interval_count": 1,
+      "intervals": [
+        {
+          "interval_id": "iv_r1-0002",
+          "camera_id": "r1",
+          "start_at": "2025-09-19T00:02:00.000Z",
+          "end_at": "2025-09-19T00:06:40.000Z",
+          "start_zone": "interior",
+          "end_zone": "door",
+          "start_source": "face",
+          "end_source": "face",
+          "end_reason": "left_frame",
+          "prev_interval_id": null
+        }
+      ]
+    }
+  },
+  "gaps": [],
+  "asserts": {
+    "intervals": 2,
+    "gaps": 1,
+    "note": "Interval pertama ditutup `identity_released`. Backend harus mengoreksi riwayat 4471, bukan menambahkan kehadiran baru untuk 4802 lalu membiarkan yang lama berdiri."
+  }
+}

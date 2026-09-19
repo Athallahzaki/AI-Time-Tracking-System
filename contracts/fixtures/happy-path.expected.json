@@ -1,0 +1,41 @@
+{
+  "scenario": "happy-path",
+  "description": "Masuk lewat pintu, dikenali, kerja, keluar lewat pintu",
+  "what_this_file_is": "Ringkasan observasional dari rekaman, bukan kesimpulan kebijakan. Celah dilaporkan beserta bukti batasnya; bagaimana ia diperlakukan diputuskan backend.",
+  "counts": {
+    "events": 28,
+    "intervals": 1,
+    "tracks_started": 1,
+    "tracks_ended": 1,
+    "seq_first": 1,
+    "seq_last": 28
+  },
+  "cameras": [
+    "r1"
+  ],
+  "people": {
+    "4471": {
+      "interval_count": 1,
+      "intervals": [
+        {
+          "interval_id": "iv_r1-0001",
+          "camera_id": "r1",
+          "start_at": "2025-09-19T00:00:12.000Z",
+          "end_at": "2025-09-19T00:04:00.000Z",
+          "start_zone": "door",
+          "end_zone": "door",
+          "start_source": "face",
+          "end_source": "face",
+          "end_reason": "left_frame",
+          "prev_interval_id": null
+        }
+      ]
+    }
+  },
+  "gaps": [],
+  "asserts": {
+    "intervals": 1,
+    "gaps": 0,
+    "note": "Batas interval harus mulai di t=12 (track lahir), bukan t=14.4 (wajah terbaca). Selisih 2,4 detik per kejadian adalah yang §4.4 bicarakan."
+  }
+}

@@ -1,0 +1,34 @@
+name: berbalik-lama
+description: Track putus di interior padahal orangnya masih di ruangan
+protocol_version: 1
+heartbeat_interval: 30.0
+snapshot_interval: 20.0
+
+cameras:
+  - id: r1
+    pts_offset: 1758240000.0
+
+persons: ["4471"]
+
+timeline:
+  - { at: 0.0,   emit: camera.online, camera: r1 }
+  - { at: 2.0,   emit: track.started, track: r1-t7, camera: r1, zone: door }
+  - { at: 2.4,   emit: track.identified, track: r1-t7, person: "4471", similarity: 0.88, margin: 0.11 }
+  # Celah palsu dimulai di sini: track putus di tengah ruangan.
+  - { at: 180.0, emit: track.ended, track: r1-t7, reason: occluded_timeout, zone: interior }
+  # Muncul lagi di tengah ruangan, bukan di pintu. Orangnya tidak ke mana-mana.
+  - { at: 375.0, emit: track.started, track: r1-t9, camera: r1, zone: interior }
+  - { at: 376.0, emit: track.identified, track: r1-t9, person: "4471", similarity: 0.86, margin: 0.09 }
+  - { at: 600.0, emit: track.ended, track: r1-t9, reason: left_frame, zone: door }
+
+expect:
+  intervals: 2
+  gaps: 1
+  gap_evidence:
+    end_zone: interior
+    end_reason: occluded_timeout
+    next_start_zone: interior
+  note: >-
+    Kedua batas celah ada di interior dan engine tidak menyambungnya. Itu
+    seluruh bukti yang backend punya, dan itu cukup untuk membedakannya dari
+    celah yang batasnya di pintu.
