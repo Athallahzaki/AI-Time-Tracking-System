@@ -154,9 +154,17 @@ class IdentityArbiter:
     def observe(self, track_uuid: str, camera_id: str, evidence: Evidence) -> Decision:
         identity = self.open_track(track_uuid, camera_id)
         window = self._windows[track_uuid]
-        window.add(evidence)
+        accepted = window.add(evidence)
+
+        # Diperbarui apa pun hasilnya: wajahnya memang terlihat, dan itu fakta
+        # perseptual. Bukti yang ditolak karena berlebihan tetap membuktikan
+        # orangnya menghadap kamera, jadi ia tidak boleh mendorong track ke
+        # `HELD` seolah wajahnya menghilang.
         identity.last_face_pts = evidence.pts
         identity.evidence_count = len(window)
+
+        if not accepted:
+            return Decision(Outcome.NOTHING, identity, reason="redundant_evidence")
 
         fused = window.fused()
         if fused is None:

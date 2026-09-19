@@ -55,11 +55,23 @@ def build(references=None, **kwargs):
     return store, matcher, IdentityArbiter(matcher, **defaults)
 
 
+def jitter(vector, index: int, amount: float = 0.22):
+    """Vektor yang sama dengan derau kecil, seperti frame yang berbeda.
+
+    Tanpa ini setiap "bukti" di tes adalah salinan byte-per-byte dari yang
+    sebelumnya, dan penjaga redundansi menolaknya -- dengan benar. Mengirim
+    vektor identik berkali-kali bukan cuma tidak realistis, ia persis pola
+    yang §9 butir 3 sebut sebagai bukti berkorelasi.
+    """
+    return blend(vector, unit(900 + index), amount)
+
+
 def feed(arbiter, track, camera, vector, times, quality=0.9, version="test-v1"):
     """Suapi beberapa bukti pada pts yang ditentukan. Kembalikan keputusan terakhir."""
     decision = None
-    for pts in times:
-        decision = arbiter.observe(track, camera, Evidence(vector, pts, quality, version))
+    for index, pts in enumerate(times):
+        evidence = Evidence(jitter(vector, index), pts, quality, version)
+        decision = arbiter.observe(track, camera, evidence)
     return decision
 
 
@@ -162,8 +174,8 @@ def test_tiga_ketidaksetujuan_berturut_turut_melepas_klaim():
     _, _, arbiter = build(disagreements_to_release=3)
     feed(arbiter, "tr_1", "r1", ALICE, [0.0, 0.4, 0.9])
 
-    for pts in (1.2, 1.6, 2.0):
-        decision = arbiter.observe("tr_1", "r1", Evidence(BOB, pts, 0.9, "test-v1"))
+    for index, pts in enumerate((1.2, 1.6, 2.0)):
+        decision = arbiter.observe("tr_1", "r1", Evidence(jitter(BOB, 50 + index), pts, 0.9, "test-v1"))
 
     assert decision.outcome is Outcome.IDENTITY_RELEASED
     assert decision.from_person_id == "alice"
@@ -195,8 +207,8 @@ def test_gagal_mencocokkan_bukan_suara_menentang():
     feed(arbiter, "tr_1", "r1", ALICE, [0.0, 0.4, 0.9])
 
     asing = unit(99)
-    for pts in (1.2, 1.6, 2.0, 2.4):
-        decision = arbiter.observe("tr_1", "r1", Evidence(asing, pts, 0.3, "test-v1"))
+    for index, pts in enumerate((1.2, 1.6, 2.0, 2.4)):
+        decision = arbiter.observe("tr_1", "r1", Evidence(jitter(asing, 60 + index), pts, 0.3, "test-v1"))
 
     assert decision.identity.person_id == "alice"
     assert decision.identity.disagreements == 0

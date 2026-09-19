@@ -12,6 +12,7 @@ jadi keadaan yang punya nama dan kepercayaan yang meluruh, bukan sesuatu yang
 diam-diam terlihat sama meyakinkannya dengan wajah yang baru dibaca.
 """
 
+from .admission import Priority, RecognitionScheduler, Request
 from .arbiter import Decision, IdentityArbiter, Outcome
 from .evidence import EvidenceWindow
 from .matcher import InMemoryReferenceStore, MatrixMatcher, VersionMismatch
@@ -19,6 +20,9 @@ from .ports import Evidence, IdentityState, Match, ReferenceStore, TrackIdentity
 
 __all__ = [
     "Decision",
+    "Priority",
+    "RecognitionScheduler",
+    "Request",
     "Evidence",
     "EvidenceWindow",
     "IdentityArbiter",
