@@ -1,7 +1,17 @@
-"""Engine-local storage: embedding vectors, outbox log.
+"""Penyimpanan lokal milik engine: vektor embedding dan gambar referensinya.
 
-Empty in B0. Nothing about who worked when is ever written here — those records
-belong to the backend (ARCHITECTURE.md §2.2). The engine keeps only what it
-needs to recognise a face again: vectors, reference images, and the outbox of
-events it has not yet handed over.
+TIDAK ADA catatan kehadiran di sini. Sesi kerja, jam istirahat, dan riwayat
+absensi milik backend, dan konsekuensi menyenangkan dari garis itu: engine
+hampir sepenuhnya stateless. Kalau ia restart jam sebelas siang, yang hilang
+cuma track yang sedang hidup — seluruh riwayat aman di backend. Kalau restart
+engine berarti kehilangan data kehadiran, ada state yang salah tempat.
 """
+
+from .references import (
+    ReferenceRecord,
+    RosterDiff,
+    SqliteReferenceStore,
+    StoreError,
+)
+
+__all__ = ["ReferenceRecord", "RosterDiff", "SqliteReferenceStore", "StoreError"]
