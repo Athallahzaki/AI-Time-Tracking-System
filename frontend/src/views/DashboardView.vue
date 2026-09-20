@@ -7,6 +7,7 @@ import LiveFeedSection from '@/components/dashboard/LiveFeedSection.vue';
 import { useDetectionStream } from '@/composables/useDetectionStream';
 import BreakAllowancePanel from '@/components/dashboard/BreakAllowancePanel.vue';
 import UnidentifiedAlertPanel from '@/components/dashboard/UnidentifiedAlertPanel.vue';
+import ManualCorrectionPanel from '@/components/dashboard/ManualCorrectionPanel.vue';
 
 const refreshInterval = ref('5');
 const { stats, isConnected, isStreaming, reconnect } = useDetectionStream();
@@ -32,6 +33,7 @@ function handleConfigure() {
       <LiveFeedSection />
       <BreakAllowancePanel />
       <UnidentifiedAlertPanel />
+      <ManualCorrectionPanel ref="correctionPanelref" />
     </div>
   </DashboardLayout>
 </template>
