@@ -1,6 +1,7 @@
 from .schema import (
     DetectorConfig,
     EngineConfig,
+    IngestConfig,
     TrackerConfig,
     resolve_engine_path,
     seconds_to_frames,
@@ -15,6 +16,7 @@ from .loader import (
 __all__ = [
     "DetectorConfig",
     "EngineConfig",
+    "IngestConfig",
     "TrackerConfig",
     "ConfigBoundaryError",
     "PolicyLeakError",

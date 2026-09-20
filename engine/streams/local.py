@@ -81,10 +81,13 @@ class LocalTrackStream:
             width=int(width or 0),
             height=int(height or 0),
             total_frames=int(getattr(source, "total_frames", 0) or 0) or None,
-            # cv2.VideoCapture discards the real PTS (§5.5). Recording where the
-            # number came from means nobody two months from now reads a derived
-            # timeline as one that came off the wire.
-            pts_source="derived_from_fps",
+            # Where the timeline came from. Provisional until the first frame
+            # says otherwise — the source knows, and it is asked below rather
+            # than assumed here.
+            pts_source="unknown",
+            extra=(
+                source.describe() if hasattr(source, "describe") else {}
+            ),
         )
         return self._descriptor
 
@@ -113,13 +116,20 @@ class LocalTrackStream:
                 width, height = frame.width, frame.height
                 self._descriptor = _with_size(self._descriptor, width, height)
 
+            if self._descriptor.pts_source == "unknown":
+                self._descriptor = _with_pts_source(
+                    self._descriptor, frame.metadata.pts_source
+                )
+
             yield FrameObservation(
                 camera_id=self._camera_id,
                 frame_id=frame.frame_id,
                 pts=_pts_of(frame, fps),
-                wallclock=frame.timestamp,
+                wallclock=frame.metadata.wallclock or frame.timestamp,
                 width=width,
                 height=height,
+                pts_source=frame.metadata.pts_source,
+                stream_epoch=frame.metadata.stream_epoch,
                 tracks=tuple(
                     TrackObservation(
                         track_id=int(track.track_id),
@@ -139,6 +149,18 @@ class LocalTrackStream:
         self._closed = True
         if self._engine is not None:
             self._engine.stop()
+        # describe() is only complete once the source has run: timeline
+        # fidelity and the reconnect count are accumulated, not declared.
+        if self._descriptor is not None and hasattr(self._source, "describe"):
+            import dataclasses
+
+            self._descriptor = dataclasses.replace(
+                self._descriptor, extra=self._source.describe()
+            )
+
+    @property
+    def descriptor(self) -> Optional[StreamDescriptor]:
+        return self._descriptor
 
     # -- internals --------------------------------------------------------
 
@@ -161,6 +183,23 @@ class LocalTrackStream:
         if not expected or self._frames_read >= expected:
             return
 
+        # Tolerance, because since B4 `total_frames` may be an estimate:
+        # many containers do not count frames, so PyAVSource derives the count
+        # from duration x average_rate and can be a frame or two out. The thing
+        # this check exists to catch is a run that covered 6% of a file; half a
+        # percent of slack does not weaken that, and without it every estimated
+        # count would raise on a perfectly complete run.
+        shortfall = expected - self._frames_read
+        if shortfall <= max(2, int(expected * 0.005)):
+            logger.info(
+                "[%s] read %d of an expected %d frames; within the tolerance "
+                "for an estimated frame count.",
+                self._camera_id,
+                self._frames_read,
+                expected,
+            )
+            return
+
         message = (
             f"[{self._camera_id}] source ended after {self._frames_read} of "
             f"{expected} frames ({self._frames_read / expected:.1%}). This is a "
@@ -173,12 +212,18 @@ class LocalTrackStream:
 
 
 def _pts_of(frame: Any, fps: float) -> float:
-    pts = frame.metadata.extra.get("pts")
+    pts = frame.metadata.pts
     if pts is not None:
         return float(pts)
     if fps <= 0.0:
         return 0.0
     return (frame.frame_id - 1) / fps
+
+
+def _with_pts_source(descriptor: StreamDescriptor, pts_source: str) -> StreamDescriptor:
+    import dataclasses
+
+    return dataclasses.replace(descriptor, pts_source=pts_source)
 
 
 def _with_size(descriptor: StreamDescriptor, width: int, height: int) -> StreamDescriptor:

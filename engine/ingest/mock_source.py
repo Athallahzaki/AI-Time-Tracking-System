@@ -5,6 +5,7 @@ from typing import Optional, Tuple
 import numpy as np
 
 from .base import BaseFrameSource
+from .timeline import PTS_DERIVED, derived_pts
 from ..ports.frame import Frame, FrameMetadata
 
 
@@ -54,6 +55,9 @@ class MockFrameSource(BaseFrameSource):
             fps=self._fps,
             width=self._width,
             height=self._height,
+            pts=derived_pts(self._frame_count, self._fps),
+            pts_source=PTS_DERIVED,
+            stream_epoch=0,
         )
         return Frame(image=img, metadata=metadata)
 

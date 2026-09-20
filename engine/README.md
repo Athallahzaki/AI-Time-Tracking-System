@@ -1,4 +1,12 @@
-# engine/ — B0 (port) and B1 (benchmark)
+# engine/ — B0 (port), B1 (benchmark), B4 (ingest)
+
+B4 is in `engine/ingest/` and has [its own README](ingest/README.md). Two things
+from it that touch the rest of the tree: `FrameMetadata` gained `pts`,
+`pts_source`, `stream_epoch` and `wallclock` (additive, and `ports/` is shared
+with Engine A, so A should know even though nothing of A's breaks), and B4 was
+deliberately taken **before** B1's baseline recording — the reasoning is in that
+README rather than in a commit message.
+
 
 B1 is in `engine/bench/` and has [its own README](bench/README.md). One
 correction to what B0 claimed, stated here rather than quietly fixed: this file
@@ -53,7 +61,7 @@ asked for.
 | Skipped frames feed the tracker stale detections | `pipeline/engine.py` §2 | step 5 |
 | `target_fps: 30` wastes ~3× the detection budget | `config/default_config.yaml` | step 10 |
 | Tracker adapter still wraps Ultralytics (AGPL-3.0) and drags in torch | `perception/bytetrack_tracker.py` | step 11 |
-| `cv2.VideoCapture` throws away PTS | `ingest/cv_stream.py` | step 2 |
+| ~~`cv2.VideoCapture` throws away PTS~~ | `ingest/cv_stream.py` | **done in B4** — PyAV backend, `ingest.backend: pyav` |
 | bbox on the wire is still pixel-space | everywhere | step 8 wires `NormalizedBox` in |
 
 `tests/test_b0_port.py::test_stale_detection_bug_is_still_present` asserts the
@@ -104,8 +112,8 @@ A benchmark that can lie in a flattering direction is worse than no benchmark.
   constants only. The section of the old config that encoded office rules was
   not ported; it is dead, and its replacement is born in `backend/policy/`.
   `config/loader.py` enforces this with an allowlist derived from the schema —
-  it accepts `core`, `detector` and `tracker` and the fields those dataclasses
-  declare, and refuses everything else by name at load time. A denylist was
+  it accepts `core`, `ingest`, `detector` and `tracker` and the fields those
+  dataclasses declare, and refuses everything else by name at load time. A denylist was
   tried first and was wrong twice: it lags whatever leaks in next, and writing
   the forbidden names into `engine/` is itself the thing §16 tells you to grep
   for. CI runs `contracts/tools/policy_grep.py`.
@@ -128,7 +136,7 @@ the seam from durations to spans, as noted at the top of this file.
 
 ## Ownership
 
-`bench/`, `streams/`, `factory.py` and `config/` are Engine B's.
+`bench/`, `ingest/`, `streams/`, `factory.py` and `config/` are Engine B's.
 `ports/` and `pipeline/` are shared with Engine A — B0 initialises both,
 including `__init__.py`, so A can pull and continue rather than resolve merge
 conflicts. `identity/`, `store/` and `api/` are A's and are untouched here;

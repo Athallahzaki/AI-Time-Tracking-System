@@ -6,7 +6,12 @@
 # that needs a GPU image to run is a benchmark that stops being run.
 
 numpy>=1.24
-opencv-python>=4.8       # ingest + drawing. Leaves in step 2, when PyAV brings PTS
+av>=11.0                 # B4: real PTS. Binds libav* directly (§5.5). The PyPI
+                         # wheel carries its own FFmpeg, built WITHOUT CUDA —
+                         # this gives the timeline, not hardware decode.
+opencv-python>=4.8       # drawing, the overlay tool, and the ingest backend
+                         # being measured against. The ingest half leaves once
+                         # B4's delta is committed.
 PyYAML>=6.0              # config loading
 
 # --- real detector / tracker path -----------------------------------------

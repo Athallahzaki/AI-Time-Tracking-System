@@ -436,13 +436,20 @@ def test_every_key_in_the_shipped_config_is_declared_by_the_schema():
 # Report schema
 # --------------------------------------------------------------------------
 
-def test_report_schema_keys_are_frozen():
+def test_report_schema_only_ever_gains_fields():
     """
-    §13.4. Removing or renaming one of these silently invalidates every
-    baseline already committed, and §16 ("every step measured with the same
-    bench") becomes decoration. Adding is fine; this list may grow.
+    §13.4. The rule is not "this list never changes" — it is that a field may
+    be ADDED and an existing one may never be removed or renamed, because every
+    baseline already committed was written against the older set. So the lists
+    below are the keys as of the step that froze them, and the assertion is a
+    subset check.
+
+    When a later step adds a field, this test keeps passing. When someone
+    deletes one, it fails, and the three months of baselines that quietly
+    became incomparable get noticed on the pull request instead of in an
+    argument about a regression.
     """
-    assert FROZEN_TOP_LEVEL_KEYS == (
+    frozen_at_b1_top_level = (
         "schema_version",
         "generated_at",
         "run",
@@ -456,7 +463,7 @@ def test_report_schema_keys_are_frozen():
         "go_no_go",
         "caveats",
     )
-    assert FROZEN_METRIC_KEYS == (
+    frozen_at_b1_metrics = (
         "throughput",
         "latency",
         "track_lifetime",
@@ -466,6 +473,18 @@ def test_report_schema_keys_are_frozen():
         "end_to_end_accuracy",
         "detector_throughput_probe",
     )
+    # Added by B4. Listed separately so the history of the schema is readable
+    # from the test rather than from the git log.
+    added_by_b4_metrics = ("timeline",)
+
+    missing_top = [k for k in frozen_at_b1_top_level if k not in FROZEN_TOP_LEVEL_KEYS]
+    missing_metrics = [
+        k
+        for k in frozen_at_b1_metrics + added_by_b4_metrics
+        if k not in FROZEN_METRIC_KEYS
+    ]
+    assert not missing_top, f"removed from the report schema: {missing_top}"
+    assert not missing_metrics, f"removed from the metrics schema: {missing_metrics}"
 
 
 def test_report_records_the_config_contents_not_its_path(tmp_path):
@@ -900,3 +919,20 @@ def test_a_gap_inside_one_track_id_becomes_two_segments(tmp_path):
     path.write_text("\n".join(lines), encoding="utf-8")
     segments = segments_from_log(path, max_gap_seconds=0.5)
     assert len(segments) == 2
+
+
+def test_a_mock_run_is_not_labelled_as_the_opencv_backend(tmp_path):
+    """
+    The mock source opens no container and decodes nothing, so a caveat telling
+    the reader that cv2 discarded the PTS is simply false. It printed anyway,
+    because `timeline_summary` defaulted the backend name to "opencv" whenever
+    a source did not describe itself. A caveat that is wrong is worse than no
+    caveat: it is the report lying about itself in the section whose whole job
+    is honesty.
+    """
+    report = run_bench(BenchOptions(mock=True, frames=20, out_dir=tmp_path / "out"))
+
+    assert report["metrics"]["timeline"]["per_camera"][0]["backend"] == "unknown"
+    joined = " ".join(report["caveats"])
+    assert "OpenCV backend" not in joined
+    assert "Synthetic source" in joined

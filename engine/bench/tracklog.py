@@ -9,12 +9,16 @@ re-run with different parameters without re-running a long recording.
 Schema, deliberately terse because a half-hour five-camera run writes
 hundreds of thousands of lines:
 
-    {"cam":"cam0","f":412,"pts":16.48,"w":1920,"h":1080,
+    {"cam":"cam0","f":412,"pts":16.48,"e":0,"w":1920,"h":1080,
      "tr":[[7,0.104,0.233,0.191,0.712,"TRACKED",0.91]]}
 
     cam  camera id
     f    frame id as the source numbered it
     pts  seconds on the source timeline (see StreamDescriptor.pts_source)
+    e    stream epoch, added in B4: increments on every reconnect. Two PTS
+         values from different epochs must never be subtracted — RTP restarts
+         from a fresh random base, so the difference is not a wrong duration,
+         it is a meaningless one that still prints.
     w,h  frame size, so normalized boxes can be put back into pixels
     tr   [track_id, x1, y1, x2, y2, state, confidence], box NORMALIZED to [0,1]
 
@@ -53,6 +57,7 @@ class TrackLogWriter:
             "cam": observation.camera_id,
             "f": observation.frame_id,
             "pts": round(observation.pts, 4),
+            "e": observation.stream_epoch,
             "w": observation.width,
             "h": observation.height,
             "tr": [
@@ -154,7 +159,16 @@ class TrackSegment:
     continuous would hide exactly the interruption §4.7 asks us to count.
     """
 
-    __slots__ = ("camera_id", "track_id", "start_pts", "end_pts", "frames", "first_box", "last_box")
+    __slots__ = (
+        "camera_id",
+        "track_id",
+        "start_pts",
+        "end_pts",
+        "frames",
+        "first_box",
+        "last_box",
+        "epoch",
+    )
 
     def __init__(
         self,
@@ -162,6 +176,7 @@ class TrackSegment:
         track_id: int,
         start_pts: float,
         first_box: List[float],
+        epoch: int = 0,
     ) -> None:
         self.camera_id = camera_id
         self.track_id = track_id
@@ -170,6 +185,7 @@ class TrackSegment:
         self.frames = 1
         self.first_box = first_box
         self.last_box = first_box
+        self.epoch = epoch
 
     def extend(self, pts: float, box: List[float]) -> None:
         self.end_pts = pts
@@ -188,6 +204,7 @@ class TrackSegment:
             "end_pts": round(self.end_pts, 4),
             "duration_s": round(self.duration, 4),
             "frames": self.frames,
+            "epoch": self.epoch,
         }
 
 
@@ -209,6 +226,7 @@ def segments_from_log(
     for record in read_track_log(path):
         cam = record["cam"]
         pts = float(record["pts"])
+        epoch = int(record.get("e", 0))
         seen = set()
 
         for entry in record["tr"]:
@@ -218,10 +236,18 @@ def segments_from_log(
             seen.add(key)
 
             segment = open_segments.get(key)
-            if segment is None or (pts - segment.end_pts) > max_gap_seconds:
+            # A reconnect always ends a segment, whatever the PTS says. After
+            # it, PTS is on a new timebase, so `pts - segment.end_pts` is not a
+            # gap — it is two unrelated numbers being subtracted.
+            crossed_epoch = segment is not None and segment.epoch != epoch
+            if (
+                segment is None
+                or crossed_epoch
+                or (pts - segment.end_pts) > max_gap_seconds
+            ):
                 if segment is not None:
                     finished.append(segment)
-                open_segments[key] = TrackSegment(cam, track_id, pts, box)
+                open_segments[key] = TrackSegment(cam, track_id, pts, box, epoch)
             else:
                 segment.extend(pts, box)
 
