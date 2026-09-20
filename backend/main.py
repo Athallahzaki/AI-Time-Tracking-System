@@ -10,8 +10,11 @@ from backend.core.config import settings
 from backend.core.database import init_database
 from backend.routers import (
     attendance,
+    cameras,
     enrollments,
+    stats,
     streams,
+    system,
 )
 from backend.services.engine_client import (
     EngineConnectionError,
@@ -79,9 +82,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=(
-        settings.cors_origins + ["*"]
-    ),
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -89,8 +90,11 @@ app.add_middleware(
 
 
 app.include_router(attendance.router)
+app.include_router(cameras.router)
 app.include_router(enrollments.router)
+app.include_router(stats.router)
 app.include_router(streams.router)
+app.include_router(system.router)
 
 
 @app.get("/")

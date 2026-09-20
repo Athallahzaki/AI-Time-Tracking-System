@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from backend.services.camera_manager import camera_manager
+from backend.services.engine_client import engine_client
 
 
 router = APIRouter(
@@ -26,13 +26,8 @@ def system_status():
     """
     Current backend worker status.
     """
-    active_workers = camera_manager.get_active_workers()
-
     return {
         "backend": "online",
-        "active_workers": len(active_workers),
-        "active_camera_ids": [
-            worker.camera_id
-            for worker in active_workers
-        ],
+        "engine": "connected" if engine_client.connected else "disconnected",
+        "last_event_seq": engine_client.last_event_seq,
     }

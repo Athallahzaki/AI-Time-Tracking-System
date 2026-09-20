@@ -347,4 +347,19 @@ def save_protocol_event(
 
         conn.commit()
 
-    return True
+        return True
+
+
+def get_protocol_events(event_type: str | None = None, limit: int = 1000) -> List[Dict[str, Any]]:
+    init_database()
+    query = "SELECT seq, timestamp, type, payload FROM protocol_events"
+    params: list[Any] = []
+    if event_type is not None:
+        query += " WHERE type = ?"
+        params.append(event_type)
+    query += " ORDER BY seq ASC LIMIT ?"
+    params.append(limit)
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(query, params).fetchall()
+    return [{"seq": seq, "timestamp": timestamp, "type": stored_type,
+             "payload": json.loads(payload)} for seq, timestamp, stored_type, payload in rows]

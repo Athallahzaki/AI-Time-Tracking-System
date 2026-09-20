@@ -72,6 +72,10 @@ class EngineIntegration:
                 self.handle_control
             )
 
+        set_replay_gap_handler = getattr(self.client, "set_replay_gap_handler", None)
+        if callable(set_replay_gap_handler):
+            set_replay_gap_handler(self.handle_control)
+
 
 engine_integration = EngineIntegration(
     client=engine_client,

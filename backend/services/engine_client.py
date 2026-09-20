@@ -12,6 +12,7 @@ from backend.services.protocol_adapter import (
 )
 
 from backend.core.database import get_integration_state
+from backend.core.config import settings
 from backend.schemas.protocol import HelloMessage
 from backend.services.protocol_adapter import protocol_adapter
 
@@ -582,4 +583,4 @@ class EngineClient:
                     pass
 
 
-engine_client = EngineClient()
+engine_client = EngineClient(host=settings.engine_host, port=settings.engine_port)

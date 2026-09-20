@@ -198,7 +198,7 @@ class EngineApi:
             # akan kehilangan event tanpa sadar. Menolak di sini lebih baik
             # daripada melayani koneksi yang sudah salah sejak baris pertama.
             self._write(connection, {
-                "type": "ack", "v": 1, "ts": _now(),
+                "type": "ack", "v": 1, "ts": _now(), "channel": "control",
                 "in_reply_to": hello.get("type", "?"), "accepted": False,
                 "reason": "hello wajib pesan pertama",
             })
@@ -208,7 +208,7 @@ class EngineApi:
         last_event_seq = int(hello.get("last_event_seq", 0))
 
         self._write(connection, {
-            "type": "hello_ack", "v": 1, "ts": _now(),
+            "type": "hello_ack", "v": 1, "ts": _now(), "channel": "control",
             "protocol_version": self._protocol_version,
             "engine_version": self._engine_version,
             "models": dict(self._models),
@@ -218,6 +218,7 @@ class EngineApi:
         gap = self._outbox.gap_for(last_event_seq)
         if gap is not None:
             gap["ts"] = _now()
+            gap["channel"] = "control"
             self._write(connection, gap)
             logger.warning("lubang data: seq %s..%s", gap["from_seq"], gap["to_seq"])
 
@@ -286,7 +287,7 @@ class EngineApi:
         handler = self._handlers.get(message_type or "")
         if handler is None:
             self._write(connection, {
-                "type": "ack", "v": 1, "ts": _now(),
+                "type": "ack", "v": 1, "ts": _now(), "channel": "control",
                 "in_reply_to": message_type or "?", "accepted": False, "reason": "tidak dikenal",
             })
             return
@@ -295,13 +296,14 @@ class EngineApi:
             reply = handler(message)
         except Exception:
             logger.exception("penangan `%s` gagal", message_type)
-            reply = {"type": "ack", "v": 1, "ts": _now(),
+            reply = {"type": "ack", "v": 1, "ts": _now(), "channel": "control",
                      "in_reply_to": message_type, "accepted": False, "reason": "kesalahan internal"}
 
         if reply is None:
-            reply = {"type": "ack", "v": 1, "ts": _now(),
+            reply = {"type": "ack", "v": 1, "ts": _now(), "channel": "control",
                      "in_reply_to": message_type, "accepted": True}
 
+        reply.setdefault("channel", "control")
         self._write(connection, reply)
 
     def _send_loop(self) -> None:

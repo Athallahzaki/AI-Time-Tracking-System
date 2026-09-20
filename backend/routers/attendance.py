@@ -7,10 +7,12 @@ import time
 
 from fastapi import APIRouter, HTTPException, Query
 
-from backend.core.database import save_event
+from backend.core.database import get_protocol_events
 from backend.core.state import system_state
 from backend.schemas.attendance import GapClassification
 from backend.schemas.corrections import CorrectionCreate
+from backend.services.break_policy import break_policy
+from backend.services.session_deriver import session_deriver
 
 
 router = APIRouter(
@@ -81,17 +83,26 @@ def create_manual_correction(req: CorrectionCreate):
         payload,
     )
 
-    save_event(
-        timestamp=time.time(),
-        event_type="ManualCorrectionEvent",
-        payload=payload,
-    )
-
     return {
         "status": "success",
         "message": "Manual correction recorded",
         "correction": payload,
     }
+
+
+@router.get("/derived")
+def get_derived_attendance(person_id: str | None = None):
+    intervals = [item["payload"] for item in get_protocol_events("presence.interval")]
+    if person_id is not None:
+        intervals = [item for item in intervals if item.get("person_id") == person_id]
+    grouped: dict[str, list[dict]] = {}
+    for interval in intervals:
+        grouped.setdefault(interval["person_id"], []).append(interval)
+    people = {}
+    for current_person_id, person_intervals in grouped.items():
+        person_intervals.sort(key=lambda item: item["start_at"])
+        people[current_person_id] = session_deriver.classify_gaps(person_intervals, break_policy)
+    return {"status": "success", "people": people, "interval_count": len(intervals)}
 
 
 @router.get("/events")

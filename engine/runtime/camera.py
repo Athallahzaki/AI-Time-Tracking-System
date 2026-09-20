@@ -260,17 +260,15 @@ class CameraSupervisor:
             )
             # Consumer and key together, from the same object — see UUIDS in
             # pipeline/zoning.py for what happens when they come apart.
-            self._queue.set_consumer(
-                self._count_attempt, uuid_provider=self._binding.uuid_for
-            )
+            self._queue.set_consumer(self._count_attempt)
 
         engine, source, source_fps = factory.build_engine(
             config,
             source_id=camera_id,
             max_frames=self._max_frames,
-            zoner=self._zoner,
-            recognition_queue=self._queue,
         )
+        engine._zoner = self._zoner
+        engine._recognition_queue = self._queue
         engine.add_listener(self._binding)
 
         self._engine = engine

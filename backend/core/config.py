@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
+import os
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -64,11 +65,13 @@ def load_cameras_from_yaml(yaml_path: Path) -> Dict[str, CameraConfig]:
 @dataclass
 class Settings:
     project_root: Path = PROJECT_ROOT
-    engine_config_path: Path = PROJECT_ROOT / "engine" / "configs" / "default_config.yaml"
+    engine_config_path: Path = PROJECT_ROOT / "engine" / "config" / "default_config.yaml"
     cameras_yaml_path: Path = PROJECT_ROOT / "backend" / "configs" / "cameras.yaml"
     headless: bool = True
     no_face_recognition: bool = False
     device: Optional[str] = None
+    engine_host: str = field(default_factory=lambda: os.getenv("ENGINE_HOST", "127.0.0.1"))
+    engine_port: int = field(default_factory=lambda: int(os.getenv("ENGINE_PORT", "8765")))
     cors_origins: List[str] = field(default_factory=lambda: [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
