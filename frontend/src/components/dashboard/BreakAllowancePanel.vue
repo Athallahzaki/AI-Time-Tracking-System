@@ -100,7 +100,7 @@ function evidenceUrl(filename) {
               {{ emp.name }}
             </p>
             <div
-              class="mt-1.5 h-1.5 w-full max-w-[220px] overflow-hidden rounded-full bg-slate-100"
+              class="mt-1.5 h-1.5 w-full max-w-55 overflow-hidden rounded-full bg-slate-100"
             >
               <div
                 class="h-full rounded-full transition-all"
