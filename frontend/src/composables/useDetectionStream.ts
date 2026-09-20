@@ -15,6 +15,16 @@ export interface DetectionItem {
   track_id?: number;
 }
 
+/**
+ * Satu frame deteksi yang sudah dinormalisasi, ditandai waktu kejadiannya.
+ * `atMs` dipakai untuk mencari frame yang paling cocok dengan posisi
+ * playback video saat ini (lihat resolveDetectionsAt / CameraFeedCard.vue).
+ */
+export interface DetectionFrame {
+  atMs: number;
+  detections: DetectionItem[];
+}
+
 export interface CameraItem {
   id: string;
   code: string;
@@ -24,6 +34,8 @@ export interface CameraItem {
   is_running?: boolean;
   active_people?: number;
   detections: DetectionItem[];
+  /** Buffer beberapa detik terakhir, dipakai untuk sinkronisasi overlay ke video (bukan ke waktu SSE tiba). */
+  frameBuffer: DetectionFrame[];
 }
 
 export interface DashboardStats {
@@ -57,11 +69,23 @@ interface BackendPerson {
 interface BackendDetectionPayload {
   camera_id: string;
   frame_id: number;
+  /**
+   * ISO8601 wall-clock, sama dengan `at` di kontrak `view.frame`
+   * (ENGINE_PROTOCOL.md §5) — dipakai menyelaraskan ke EXT-X-PROGRAM-DATE-TIME.
+   * Optional untuk sekarang: kalau backend belum mengirimnya, kita fallback
+   * ke waktu tiba SSE (kurang presisi, tapi tidak mematahkan apa pun).
+   */
+  at?: string;
+  /** Presentation timestamp dari engine, detik. Belum dipakai di frontend, disiapkan untuk nanti. */
+  pts?: number;
   width: number;
   height: number;
   fps: number;
   people: BackendPerson[];
 }
+
+/** Seberapa jauh ke belakang kita menyimpan frame — cukup untuk menutupi latensi HLS biasa. */
+const DETECTION_BUFFER_WINDOW_MS = 8000;
 
 function formatDuration(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));
@@ -69,6 +93,27 @@ function formatDuration(seconds: number): string {
   const m = Math.floor(s / 60);
   const rem = s % 60;
   return `${m}m ${rem}s`;
+}
+
+/**
+ * Cari frame deteksi yang atMs-nya paling dekat dengan targetMs.
+ * targetMs biasanya "posisi waktu yang sedang tampil di video sekarang",
+ * BUKAN "waktu sekarang" — lihat computeTargetMs() di CameraFeedCard.vue.
+ */
+export function resolveDetectionsAt(camera: CameraItem, targetMs: number): DetectionItem[] {
+  const buf = camera.frameBuffer;
+  if (!buf || buf.length === 0) return camera.detections || [];
+
+  let best = buf[0];
+  let bestDiff = Math.abs(best.atMs - targetMs);
+  for (let i = 1; i < buf.length; i++) {
+    const diff = Math.abs(buf[i].atMs - targetMs);
+    if (diff < bestDiff) {
+      best = buf[i];
+      bestDiff = diff;
+    }
+  }
+  return best.detections;
 }
 
 // Reactive list of cameras dynamically loaded from backend GET /api/cameras
@@ -122,6 +167,7 @@ export function useDetectionStream() {
               is_running: backendCam.is_running || false,
               active_people: backendCam.active_people || 0,
               detections: [],
+              frameBuffer: [],
             };
             liveCameras.push(match);
           } else {
@@ -190,6 +236,7 @@ export function useDetectionStream() {
               is_running: true,
               active_people: 0,
               detections: [],
+              frameBuffer: [],
             };
             liveCameras.push(targetCam);
           }
@@ -198,6 +245,9 @@ export function useDetectionStream() {
           const frameH = data.height || 1080;
 
           // Convert backend detections to frontend percentage coordinates
+          // (persentase ini relatif ke SELURUH FRAME SUMBER — lihat
+          // videoContentRect di CameraFeedCard.vue untuk pemetaan yang benar
+          // ke area video yang benar-benar tampil setelah object-fit).
           const mappedDetections: DetectionItem[] = (data.people || []).map(
             (person) => {
               const bbox = person.bbox || { x1: 0, y1: 0, x2: 0, y2: 0 };
@@ -263,6 +313,21 @@ export function useDetectionStream() {
             }
           );
 
+          // ── Frame buffer untuk sinkronisasi overlay (Bug B) ──────────────
+          // Kalau backend belum mengirim `at`, fallback ke waktu tiba SSE.
+          // Ini kurang presisi untuk HLS, tapi tidak mematahkan apa pun,
+          // dan otomatis membaik begitu backend menambahkan field `at`.
+          const atMs = data.at ? new Date(data.at).getTime() : Date.now();
+
+          targetCam.frameBuffer.push({ atMs, detections: mappedDetections });
+          const cutoff = Date.now() - DETECTION_BUFFER_WINDOW_MS;
+          while (targetCam.frameBuffer.length && targetCam.frameBuffer[0].atMs < cutoff) {
+            targetCam.frameBuffer.shift();
+          }
+
+          // `detections` tetap dipakai sebagai "state terbaru" untuk hal-hal
+          // yang tidak butuh presisi spasial (jumlah orang, label, dwell time).
+          // Untuk posisi kotak overlay, komponen video memakai resolveDetectionsAt().
           targetCam.detections = mappedDetections;
           if (data.fps) {
             targetCam.fps = data.fps.toFixed(1);
