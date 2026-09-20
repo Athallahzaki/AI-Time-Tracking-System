@@ -1,50 +1,80 @@
-import { onMounted, reactive, ref } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 
-export type IntervalSource = 'face' | 'tracking' | 'forced';
-export type IntervalZone = 'door' | 'interior' | 'frame_edge';
-export type EndReason =
-  | 'left_frame'
-  | 'occluded_timeout'
-  | 'merged_into_other_track'
-  | 'camera_lost'
-  | 'engine_shutdown'
-  | 'identity_released';
+/**
+ * Tipe-tipe di bawah ini disalin PERSIS dari schemas/attendance.py backend
+ * (field snake_case dipertahankan apa adanya, sesuai konvensi Pydantic yang
+ * sudah dipakai di endpoint lain seperti track_id, person_id).
+ */
 
-export interface PresenceGap {
-  interval_id: string;
-  camera_id: string;
+export type GapClassification =
+  | 'tracking_loss'
+  | 'break'
+  | 'departure'
+  | 'camera_failure'
+  | 'system_event'
+  | 'official_break'
+  | 'unknown';
+
+export interface BreakEntry {
+  gap_id: string;
   start_at: string;
   end_at: string;
   duration_seconds: number;
-  start_source: IntervalSource;
-  end_source: IntervalSource;
-  start_zone: IntervalZone;
-  end_zone: IntervalZone;
-  end_reason: EndReason;
-  identity_confidence: number;
-  evidence_crop?: { start?: string; end?: string };
+  camera_id: string;
+  end_zone: string;
+  end_reason: string;
+  corrected: boolean;
+  original_duration_seconds?: number;
 }
 
-export interface EmployeeAllowance {
+export interface BreakUsage {
   person_id: string;
-  name: string;
-  quota_minutes: number;
+  date: string;
+  allowance_minutes: number;
   used_minutes: number;
   remaining_minutes: number;
-  gaps: PresenceGap[];
+  break_count: number;
+  breaks: BreakEntry[];
+  suspicious_gap_count: number;
+  status: 'ok' | 'warning' | 'exceeded';
 }
 
-export type GapReliability = 'reliable' | 'uncertain';
+/**
+ * ENDPOINT INI BELUM ADA DI BACKEND.
+ *
+ * schemas/attendance.py sudah punya BreakUsage, tapi routers/attendance.py
+ * yang saya lihat baru: /active, /corrections, /events, /summary — belum ada
+ * yang mengembalikan BreakUsage.
+ *
+ * Usulan untuk backend (kecil, karena logikanya di session_deriver.py /
+ * break_policy.py sudah ada — tinggal dibungkus jadi route):
+ *
+ *   GET /api/attendance/breaks?date=YYYY-MM-DD
+ *   → { "status": "success", "data": BreakUsage[] }
+ *
+ * Sampai endpoint ini ada, composable akan menampilkan status error apa
+ * adanya — BUKAN data rekaan. Sistem ini jadi dasar sanksi karyawan; angka
+ * palsu yang terlihat asli lebih berbahaya daripada layar "gagal memuat".
+ */
+const BREAKS_ENDPOINT = '/api/attendance/breaks';
 
-export function classifyGapReliability(gap: PresenceGap): GapReliability {
-  if (gap.end_zone === 'interior') return 'uncertain';
-  if (gap.end_reason === 'camera_lost') return 'uncertain';
-  if (gap.end_source === 'tracking' && gap.identity_confidence < 0.6)
-    return 'uncertain';
-  return 'reliable';
+const usages = reactive<BreakUsage[]>([]);
+const employeeNames = reactive<Record<string, string>>({});
+
+export function getEmployeeName(personId: string): string {
+  return employeeNames[personId] || personId;
 }
 
-const employees = reactive<EmployeeAllowance[]>([]);
+/**
+ * Peringkat status untuk sorting — orang yang paling butuh perhatian HR
+ * (exceeded) ditaruh paling atas, memakai status yang SUDAH DIHITUNG backend,
+ * bukan ambang batas yang saya tebak sendiri seperti sebelumnya.
+ */
+const STATUS_RANK: Record<BreakUsage['status'], number> = {
+  exceeded: 0,
+  warning: 1,
+  ok: 2,
+};
 
 export function useEmployeeAllowance() {
   const isLoading = ref(false);
@@ -54,27 +84,59 @@ export function useEmployeeAllowance() {
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let activeClientsCount = 0;
 
-  async function fetchAllowanceData() {
-    isLoading.value = employees.length === 0;
+  async function fetchEmployeeNames() {
     try {
-      const res = await fetch('/api/attendence/allowance');
+      const res = await fetch('/api/enrollments');
+      if (!res.ok) return;
+      const json = await res.json();
+      // Bentuk pasti /api/enrollments belum saya lihat — jaga-jaga dua kemungkinan bentuk.
+      const list: any[] = Array.isArray(json?.data)
+        ? json.data
+        : Array.isArray(json)
+          ? json
+          : [];
+      list.forEach((item) => {
+        if (item?.person_id) {
+          employeeNames[item.person_id] = item.name || item.person_id;
+        }
+      });
+    } catch {
+      // Nama tinggal fallback ke person_id kalau ini gagal — bukan data kritis.
+    }
+  }
+
+  async function fetchAllowanceData() {
+    isLoading.value = usages.length === 0;
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const res = await fetch(`${BREAKS_ENDPOINT}?date=${today}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       if (json.status === 'success' && Array.isArray(json.data)) {
-        employees.splice(0, employees.length, ...json.data);
+        usages.splice(0, usages.length, ...json.data);
         loadError.value = null;
         lastFetchedAt.value = new Date();
       } else {
-        throw new Error('Bentuk respons tidak sesuai kontrak yang diharapkan');
+        throw new Error('Bentuk respons tidak sesuai skema BreakUsage');
       }
     } catch (err: any) {
-      loadError.value = err?.message || 'gagal memuat data jatah istirahat';
+      // Sengaja tidak fallback ke data palsu — lihat komentar di atas BREAKS_ENDPOINT.
+      loadError.value = err?.message || 'Gagal memuat data jatah istirahat';
     } finally {
       isLoading.value = false;
     }
   }
 
   onMounted(() => {
+    activeClientsCount++;
+    fetchEmployeeNames();
+    fetchAllowanceData();
+    if (!pollTimer) {
+      pollTimer = setInterval(fetchAllowanceData, 10000);
+    }
+  });
+
+  onUnmounted(() => {
     activeClientsCount--;
     if (activeClientsCount <= 0 && pollTimer) {
       clearInterval(pollTimer);
@@ -82,11 +144,21 @@ export function useEmployeeAllowance() {
     }
   });
 
+  const sortedUsages = computed(() =>
+    [...usages].sort((a, b) => {
+      const rankDiff = STATUS_RANK[a.status] - STATUS_RANK[b.status];
+      if (rankDiff !== 0) return rankDiff;
+      return a.remaining_minutes - b.remaining_minutes;
+    })
+  );
+
   return {
-    employees,
+    usages,
+    sortedUsages,
     isLoading,
     loadError,
     lastFetchedAt,
-    refetch: fetchAllowanceData
-  }
+    refetch: fetchAllowanceData,
+    getEmployeeName,
+  };
 }

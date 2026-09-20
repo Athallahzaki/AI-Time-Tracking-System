@@ -1,32 +1,17 @@
 <script setup>
-import { reactive, computed } from 'vue';
-import { ChevronDown, Image as ImageIcon } from '@lucide/vue';
-import GapReliabilityBadge from './GapReliabilityBadge.vue';
-import {
-  useEmployeeAllowance,
-  classifyGapReliability,
-} from '@/composables/useEmployeeAllowance';
+import { reactive } from 'vue';
+import { ChevronDown } from '@lucide/vue';
+import { useEmployeeAllowance } from '@/composables/useEmployeeAllowance';
 
-const { employees, isLoading, loadError, refetch } = useEmployeeAllowance();
+const { sortedUsages, isLoading, loadError, refetch, getEmployeeName } =
+  useEmployeeAllowance();
 
 const expandedIds = reactive(new Set());
-const expandedEvidence = reactive(new Set()); // key: interval_id
 
 function toggleExpanded(personId) {
   if (expandedIds.has(personId)) expandedIds.delete(personId);
   else expandedIds.add(personId);
 }
-
-function toggleEvidence(intervalId) {
-  if (expandedEvidence.has(intervalId)) expandedEvidence.delete(intervalId);
-  else expandedEvidence.add(intervalId);
-}
-
-// Karyawan dengan sisa jatah paling sedikit ditaruh paling atas —
-// itu yang paling butuh perhatian HR duluan.
-const sortedEmployees = computed(() =>
-  [...employees].sort((a, b) => a.remaining_minutes - b.remaining_minutes),
-);
 
 function formatTimeRange(startAt, endAt) {
   const fmt = (iso) =>
@@ -43,18 +28,21 @@ function formatDurationShort(seconds) {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
-function usagePct(emp) {
-  if (!emp.quota_minutes) return 0;
+function usagePct(u) {
+  if (!u.allowance_minutes) return 0;
   return Math.min(
     100,
-    Math.round((emp.used_minutes / emp.quota_minutes) * 100),
+    Math.round((u.used_minutes / u.allowance_minutes) * 100),
   );
 }
 
-// Asumsi path evidence crop di backend — sesuaikan kalau berbeda.
-function evidenceUrl(filename) {
-  return `/api/evidence/${filename}`;
-}
+// Warna dari status yang SUDAH DIHITUNG backend (session_deriver.py / break_policy.py) —
+// bukan ambang batas yang ditebak sendiri di frontend.
+const STATUS_BAR_COLOR = {
+  ok: 'bg-emerald-500',
+  warning: 'bg-amber-500',
+  exceeded: 'bg-red-500',
+};
 </script>
 
 <template>
@@ -80,142 +68,117 @@ function evidenceUrl(filename) {
       class="px-4 py-6 text-center text-sm text-red-500"
     >
       Gagal memuat: {{ loadError }}
+      <p class="mt-1 text-[11px] text-slate-400">
+        (Endpoint GET /api/attendance/breaks mungkin belum tersedia di backend)
+      </p>
     </div>
 
     <div
-      v-else-if="sortedEmployees.length === 0"
+      v-else-if="sortedUsages.length === 0"
       class="px-4 py-6 text-center text-sm text-slate-400"
     >
-      Belum ada data jatah istirahat.
+      Belum ada data jatah istirahat hari ini.
     </div>
 
     <ul v-else class="divide-y">
-      <li v-for="emp in sortedEmployees" :key="emp.person_id">
+      <li v-for="u in sortedUsages" :key="u.person_id">
         <button
           class="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-slate-50"
-          @click="toggleExpanded(emp.person_id)"
+          @click="toggleExpanded(u.person_id)"
         >
           <div class="min-w-0 flex-1">
             <p class="truncate text-sm font-medium text-slate-800">
-              {{ emp.name }}
+              {{ getEmployeeName(u.person_id) }}
             </p>
             <div
               class="mt-1.5 h-1.5 w-full max-w-55 overflow-hidden rounded-full bg-slate-100"
             >
               <div
                 class="h-full rounded-full transition-all"
-                :class="
-                  usagePct(emp) >= 100
-                    ? 'bg-red-500'
-                    : usagePct(emp) >= 70
-                      ? 'bg-amber-500'
-                      : 'bg-emerald-500'
-                "
-                :style="{ width: usagePct(emp) + '%' }"
+                :class="STATUS_BAR_COLOR[u.status] || 'bg-slate-400'"
+                :style="{ width: usagePct(u) + '%' }"
               />
             </div>
+            <p
+              v-if="u.suspicious_gap_count > 0"
+              class="mt-1 text-[11px] text-amber-600"
+            >
+              ⚠ {{ u.suspicious_gap_count }} celah mencurigakan tidak dihitung —
+              perlu ditinjau manual
+            </p>
           </div>
           <div class="shrink-0 text-right">
             <p class="text-sm font-semibold text-slate-800">
-              {{ emp.remaining_minutes }}m
+              {{ u.remaining_minutes }}m
               <span class="font-normal text-slate-400"
-                >/ {{ emp.quota_minutes }}m</span
+                >/ {{ u.allowance_minutes }}m</span
               >
             </p>
             <p class="text-[11px] text-slate-400">
-              {{ emp.gaps.length }} celah
+              {{ u.break_count }} istirahat
             </p>
           </div>
           <ChevronDown
             class="h-4 w-4 shrink-0 text-slate-400 transition-transform"
-            :class="{ 'rotate-180': expandedIds.has(emp.person_id) }"
+            :class="{ 'rotate-180': expandedIds.has(u.person_id) }"
           />
         </button>
 
         <div
-          v-if="expandedIds.has(emp.person_id)"
+          v-if="expandedIds.has(u.person_id)"
           class="bg-slate-50/60 px-4 pb-3"
         >
-          <div v-if="emp.gaps.length === 0" class="py-3 text-xs text-slate-400">
-            Tidak ada celah tercatat hari ini.
+          <div v-if="u.breaks.length === 0" class="py-3 text-xs text-slate-400">
+            Tidak ada istirahat tercatat hari ini.
           </div>
           <ul v-else class="space-y-2 pt-2">
             <li
-              v-for="gap in emp.gaps"
-              :key="gap.interval_id"
+              v-for="b in u.breaks"
+              :key="b.gap_id"
               class="rounded-lg border bg-white p-2.5"
             >
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <div class="text-xs text-slate-600">
                   <span class="font-medium text-slate-800">{{
-                    formatTimeRange(gap.start_at, gap.end_at)
+                    formatTimeRange(b.start_at, b.end_at)
                   }}</span>
                   <span class="text-slate-400">
-                    · {{ formatDurationShort(gap.duration_seconds) }}</span
+                    · {{ formatDurationShort(b.duration_seconds) }}</span
                   >
-                  <span class="text-slate-400"> · {{ gap.camera_id }}</span>
+                  <span class="text-slate-400"> · {{ b.camera_id }}</span>
                 </div>
-                <GapReliabilityBadge
-                  :reliability="classifyGapReliability(gap)"
-                />
+                <div class="flex items-center gap-1.5">
+                  <GapClassificationBadge classification="break" />
+                  <span
+                    v-if="b.corrected"
+                    class="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-700"
+                  >
+                    Dikoreksi
+                  </span>
+                </div>
               </div>
+
+              <p
+                v-if="b.corrected && b.original_duration_seconds != null"
+                class="mt-1.5 text-[11px] text-slate-400"
+              >
+                Durasi asli sebelum koreksi:
+                {{ formatDurationShort(b.original_duration_seconds) }}
+              </p>
 
               <div
                 class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400"
               >
                 <span
                   >Keluar via:
-                  <strong class="text-slate-600">{{
-                    gap.end_zone
-                  }}</strong></span
-                >
-                <span
-                  >Sumber:
-                  <strong class="text-slate-600">{{
-                    gap.end_source
-                  }}</strong></span
+                  <strong class="text-slate-600">{{ b.end_zone }}</strong></span
                 >
                 <span
                   >Alasan:
                   <strong class="text-slate-600">{{
-                    gap.end_reason
+                    b.end_reason
                   }}</strong></span
                 >
-              </div>
-
-              <button
-                v-if="gap.evidence_crop?.start || gap.evidence_crop?.end"
-                class="mt-1.5 flex items-center gap-1 text-[11px] font-medium text-sky-600 hover:text-sky-700"
-                @click="toggleEvidence(gap.interval_id)"
-              >
-                <ImageIcon class="h-3 w-3" />
-                {{
-                  expandedEvidence.has(gap.interval_id)
-                    ? 'Sembunyikan bukti'
-                    : 'Lihat bukti'
-                }}
-              </button>
-
-              <div
-                v-if="expandedEvidence.has(gap.interval_id)"
-                class="mt-2 flex gap-2"
-              >
-                <div v-if="gap.evidence_crop?.start" class="text-center">
-                  <img
-                    :src="evidenceUrl(gap.evidence_crop.start)"
-                    class="h-20 w-20 rounded border object-cover"
-                    alt="Crop sesaat sebelum celah dimulai"
-                  />
-                  <p class="mt-0.5 text-[10px] text-slate-400">Sebelum celah</p>
-                </div>
-                <div v-if="gap.evidence_crop?.end" class="text-center">
-                  <img
-                    :src="evidenceUrl(gap.evidence_crop.end)"
-                    class="h-20 w-20 rounded border object-cover"
-                    alt="Crop saat celah berakhir"
-                  />
-                  <p class="mt-0.5 text-[10px] text-slate-400">Setelah celah</p>
-                </div>
               </div>
             </li>
           </ul>
