@@ -16,10 +16,8 @@ from backend.routers import (
     streams,
     system,
 )
-from backend.services.engine_client import (
-    EngineConnectionError,
-    engine_client,
-)
+from backend.services.engine_client import engine_client
+from backend.services.engine_connection_manager import engine_connection_manager
 from backend.services.engine_integration import (
     engine_integration,
 )
@@ -49,19 +47,7 @@ async def lifespan(app: FastAPI):
 
     engine_integration.configure()
 
-    try:
-        engine_client.connect()
-        engine_client.start_receiver()
-
-        logger.info(
-            "Connected to AI Vision Engine."
-        )
-
-    except EngineConnectionError as exc:
-        logger.warning(
-            "AI Vision Engine unavailable: %s",
-            exc,
-        )
+    engine_connection_manager.start()
 
     yield
 
@@ -69,7 +55,7 @@ async def lifespan(app: FastAPI):
         "Shutting down AI Time Tracking Backend..."
     )
 
-    engine_client.close()
+    engine_connection_manager.stop()
 
 
 app = FastAPI(

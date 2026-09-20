@@ -1,0 +1,8 @@
+# Kebijakan sementara untuk development. Minta HRD mengesahkan nilai produksi.
+timezone: "Asia/Jakarta"
+daily_break_allowance_minutes: 30
+official_break:
+  start: "12:00"
+  end: "13:00"
+tracking_loss_threshold_seconds: 30
+warning_remaining_minutes: 5

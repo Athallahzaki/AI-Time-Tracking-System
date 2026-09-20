@@ -61,3 +61,24 @@ Endpoint utama: `/api/system/status`, `/api/cameras`,
 Proyek belum siap produksi penuh: model nyata, benchmark rekaman representatif,
 kebijakan HRD, MediaMTX, autentikasi, dan deployment masih perlu diselesaikan.
 Lihat `WORKPLAN_STATUS.md`.
+
+## Mode demo satu perintah
+
+```bash
+python scripts/run_demo.py
+```
+
+Tambahkan `--frontend` untuk ikut menjalankan Vite. Mode ini memakai
+`backend/configs/cameras.demo.yaml`, otomatis reconnect ke engine, lalu mengirim
+`set_cameras` dan `set_roster` setiap koneksi baru.
+
+## Konfigurasi
+
+- Kamera: `backend/configs/cameras.yaml`, atau set `CAMERAS_CONFIG` ke YAML lain.
+- Kebijakan: `backend/configs/policy.yaml`, atau set `POLICY_CONFIG`.
+- Engine: `ENGINE_HOST`, `ENGINE_PORT`, dan `ENGINE_RECONNECT_SECONDS`.
+- Pemakaian istirahat: `GET /api/attendance/break-usage?person_id=4471&date=2026-09-20`.
+
+`source_uri` dapat berupa `mock`, path video, atau URL RTSP. Untuk RTSP gunakan
+`rtsp://user:password@alamat:554/path` dan jangan commit password produksi.
+Nilai `policy.yaml` masih template dan wajib disahkan HRD sebelum dipakai.

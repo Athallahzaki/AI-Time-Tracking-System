@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date as date_type, datetime, timezone
 from uuid import uuid4
 import time
 
@@ -103,6 +103,56 @@ def get_derived_attendance(person_id: str | None = None):
         person_intervals.sort(key=lambda item: item["start_at"])
         people[current_person_id] = session_deriver.classify_gaps(person_intervals, break_policy)
     return {"status": "success", "people": people, "interval_count": len(intervals)}
+
+
+@router.get("/break-usage")
+def get_break_usage(person_id: str, date: str | None = None):
+    """Calculate daily break usage from classified gaps."""
+    target_date = date or datetime.now(break_policy.timezone).date().isoformat()
+    try:
+        date_type.fromisoformat(target_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="date must use YYYY-MM-DD") from exc
+
+    intervals = [
+        item["payload"] for item in get_protocol_events("presence.interval")
+        if item["payload"].get("person_id") == person_id
+    ]
+    intervals.sort(key=lambda item: item["start_at"])
+    result = session_deriver.classify_gaps(intervals, break_policy)
+    breaks = []
+    suspicious = 0
+    for gap in result["gaps"]:
+        local_date = datetime.fromisoformat(
+            gap["gap_started_at"].replace("Z", "+00:00")
+        ).astimezone(break_policy.timezone).date().isoformat()
+        if local_date != target_date:
+            continue
+        if gap["classification"] == "break":
+            breaks.append(gap)
+        elif gap["classification"] in {"tracking_loss", "unknown"}:
+            suspicious += 1
+
+    used_minutes = sum(gap["gap_seconds"] for gap in breaks) / 60.0
+    remaining = max(0.0, break_policy.daily_allowance_minutes - used_minutes)
+    if used_minutes > break_policy.daily_allowance_minutes:
+        status = "exceeded"
+    elif remaining <= break_policy.warning_remaining_minutes:
+        status = "warning"
+    else:
+        status = "ok"
+    return {
+        "person_id": person_id,
+        "date": target_date,
+        "timezone": break_policy.timezone_name,
+        "allowance_minutes": break_policy.daily_allowance_minutes,
+        "used_minutes": round(used_minutes, 2),
+        "remaining_minutes": round(remaining, 2),
+        "break_count": len(breaks),
+        "breaks": breaks,
+        "suspicious_gap_count": suspicious,
+        "status": status,
+    }
 
 
 @router.get("/events")

@@ -8,7 +8,7 @@ Review 20 September 2026: implementasi sesuai arah arsitektur, tetapi belum M5
 | 0.1 schema/validator | Selesai | JSON Schema dan validator tersedia |
 | 0.2 fake engine + 14 skenario | Selesai | fixture dan fake engine tersedia |
 | 0.3 OpenAPI | Selesai runtime | `/openapi.json` dan `/docs` |
-| 0.4 kebijakan HRD | Belum | default ada; keputusan resmi belum tertulis |
+| 0.4 kebijakan HRD | Siap dikonfigurasi | YAML tervalidasi; keputusan resmi HRD masih diperlukan |
 | 0.5 benchmark/rekaman | Sebagian | harness ada; baseline lapangan belum ada |
 | 0.6 PROGRAM-DATE-TIME | Belum | MediaMTX belum tersedia |
 | A2–A7 engine | Mayoritas selesai | identity, presence, outbox, runtime diuji |
@@ -17,8 +17,8 @@ Review 20 September 2026: implementasi sesuai arah arsitektur, tetapi belum M5
 | B7–B9 model/NVDEC | Belum/opsional | harus berbasis benchmark |
 | C1–C4 API/protokol/storage | Selesai minimum | replay dan event mentah tersedia |
 | C5 session derivation | Selesai minimum | endpoint `/api/attendance/derived` |
-| C6 break quota/alert | Sebagian | klasifikasi ada; kuota final belum lengkap |
-| C7 camera/roster reconcile | Sebagian | kamera tersambung; roster startup belum |
+| C6 break quota/alert | Selesai minimum | kuota, warning, timezone, dan endpoint tersedia |
+| C7 camera/roster reconcile | Selesai minimum | otomatis saat startup dan reconnect |
 | C8 MediaMTX/auth | Belum | konfigurasi deploy belum ada |
 | C9 koreksi append-only | Selesai minimum | double-write diperbaiki |
 | C10 enrollment API | Selesai minimum | request/result tersedia |
