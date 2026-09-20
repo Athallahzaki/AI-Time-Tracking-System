@@ -14,8 +14,10 @@ the vocabulary of company rules inside the engine, which is the exact thing
 and it was right to.
 
 What replaced it is an **allowlist derived from the schema itself**. The engine
-accepts four sections — `core`, `ingest`, `detector`, `tracker` — and within
-each, only the fields its dataclass declares. Everything else is refused by name at load
+accepts the sections its dataclasses declare — `core`, `ingest`, `detector`,
+`tracker`, and since B5 `zones` and `recognition` — and within each, only the
+fields that dataclass declares. The list is computed, not written down, so a new
+section cannot be added to the schema and forgotten here. Everything else is refused by name at load
 time. No list of forbidden words exists anywhere in this package; the offending
 name comes from the user's file at runtime and appears only in the error.
 
@@ -44,7 +46,9 @@ from .schema import (
     DetectorConfig,
     EngineConfig,
     IngestConfig,
+    RecognitionConfig,
     TrackerConfig,
+    ZoneConfig,
     resolve_engine_path,
 )
 
@@ -68,14 +72,17 @@ def _field_names(cls: type) -> Set[str]:
 
 
 # Derived from the dataclasses, so the schema cannot drift from what the loader
-# accepts. `ingest`, `detector` and `tracker` are nested objects on EngineConfig
-# and are sections in the file, not keys inside `core`.
-_CORE_KEYS = _field_names(EngineConfig) - {"ingest", "detector", "tracker"}
+# accepts. These are nested objects on EngineConfig and sections in the file,
+# not keys inside `core`.
+_NESTED = {"ingest", "detector", "tracker", "zones", "recognition"}
+_CORE_KEYS = _field_names(EngineConfig) - _NESTED
 _SECTIONS: Dict[str, Set[str]] = {
     "core": _CORE_KEYS,
     "ingest": _field_names(IngestConfig),
     "detector": _field_names(DetectorConfig),
     "tracker": _field_names(TrackerConfig),
+    "zones": _field_names(ZoneConfig),
+    "recognition": _field_names(RecognitionConfig),
 }
 
 
@@ -133,6 +140,8 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
     ing = raw.get("ingest", {}) or {}
     det = raw.get("detector", {}) or {}
     trk = raw.get("tracker", {}) or {}
+    zon = raw.get("zones", {}) or {}
+    rec = raw.get("recognition", {}) or {}
 
     return EngineConfig(
         source_uri=str(core.get("source_uri", "0")),
@@ -157,6 +166,7 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
             ),
             decoder_thread_type=str(ing.get("decoder_thread_type", "AUTO")),
             decoder_threads=int(ing.get("decoder_threads", 0)),
+            colour_conversion=str(ing.get("colour_conversion", "to_ndarray")),
         ),
         detector=DetectorConfig(
             model_path=str(det.get("model_path", "LibreDFINEs.pt")),
@@ -172,4 +182,29 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
             match_threshold=float(trk.get("match_threshold", 0.8)),
             track_buffer_seconds=float(trk.get("track_buffer_seconds", 1.0)),
         ),
+        zones=ZoneConfig(
+            # Kept as given, including the camera ids, which are the backend's
+            # names for rooms and not something this loader may normalise.
+            door_regions=dict(zon.get("door_regions") or {}),
+            edge_margin=float(zon.get("edge_margin", 0.03)),
+        ),
+        recognition=RecognitionConfig(
+            enabled=bool(rec.get("enabled", False)),
+            max_age_seconds=_optional_float(rec.get("max_age_seconds")),
+            retry_interval_seconds=_optional_float(rec.get("retry_interval_seconds")),
+            reverify_interval_seconds=_optional_float(
+                rec.get("reverify_interval_seconds")
+            ),
+            per_camera_quota=_optional_int(rec.get("per_camera_quota")),
+            max_requests_per_frame=int(rec.get("max_requests_per_frame", 2)),
+        ),
     )
+
+
+def _optional_float(value: Any) -> Optional[float]:
+    """None stays None: it means "use the scheduler's own default", not zero."""
+    return None if value is None else float(value)
+
+
+def _optional_int(value: Any) -> Optional[int]:
+    return None if value is None else int(value)

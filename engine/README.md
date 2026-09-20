@@ -1,4 +1,4 @@
-# engine/ — B0 (port), B1 (benchmark), B4 (ingest)
+# engine/ — B0 (port), B1 (benchmark), B4 (ingest), B5 (zones & queue priority)
 
 B4 is in `engine/ingest/` and has [its own README](ingest/README.md). Two things
 from it that touch the rest of the tree: `FrameMetadata` gained `pts`,
@@ -6,6 +6,71 @@ from it that touch the rest of the tree: `FrameMetadata` gained `pts`,
 with Engine A, so A should know even though nothing of A's breaks), and B4 was
 deliberately taken **before** B1's baseline recording — the reasoning is in that
 README rather than in a commit message.
+
+## What Engine A needs to read before pulling
+
+Three things, two of which are corrections to B4 rather than new work.
+
+**`pts` changed meaning, to the one A's code already assumed.** It is now
+seconds since the start of the current epoch's stream — what the frozen schema
+and `ENGINE_PROTOCOL.md` §1 define, and what `PtsClock.at()` computes with. It
+used to be the container's raw value, which on an RTSP camera differs by a
+random RTP base and would have made every `*_at` wrong while every `*_pts`
+looked fine. Nothing in `api/` or `presence/` needs changing; the point is that
+it was going to be wrong and now is not. Full account in the ingest README.
+
+**`pts_wallclock_offset` is available and should be used instead of
+`time.time()`.** `presence.PresenceAssembler.camera_online(...)` takes
+`wallclock_now` and turns it into `PtsClock.offset`. When ingest is wired to the
+event layer in A5/A6, that argument should be
+`source.timeline.wallclock_offset` — the offset the stream was actually anchored
+with, re-established on every reconnect. Sampling the clock at the moment
+`camera_online` happens to be called is correct only for a stream whose first
+frame arrived at that instant, which after a reconnect it did not.
+
+**`pipeline/` gained one file, and `pipeline/` is a shared zone.**
+`pipeline/zoning.py` is B5: it is the wiring that finally calls `presence/zones.py`
+and `identity/admission.py` from the frame loop. `PROJECT STRUCTURE.md` §4 rule 1
+says shared zones are announced rather than taken, so consider this the
+announcement. The frame loop gained two optional stages and behaves exactly as
+before when they are absent — see B5 below for why that matters.
+
+## B5: `door_region` and queue priority
+
+The step is wiring, and the interesting part is that both halves already
+existed. `presence/zones.py` (A's) knows the zone rule; `identity/admission.py`
+(A's) knows the queue policy; before B5 neither was reachable from a frame loop,
+which is B's half. What B5 adds:
+
+| Piece | Where |
+|---|---|
+| `zones:` / `recognition:` config sections | `config/schema.py`, validated at load |
+| Zone on every track, exit zone remembered past its death | `pipeline/zoning.py::TrackZoner` |
+| Scheduler driven from the loop, door-born tracks first | `pipeline/zoning.py::ZonePriorityQueue` |
+| `exit_zone` / `entry_zone` on `TrackRemovedEvent` | `pipeline/events.py` |
+| `zone` on the observation boundary and in the track log | `ports/observation.py`, `bench/tracklog.py` |
+| `zone_exits` and `recognition_queue` in the report | `bench/metrics.py`, `bench/runner.py` |
+
+**Two deliberate absences.** The queue is off by default
+(`recognition.enabled: false`): B1's committed baseline was measured with no
+queue in the loop, and turning one on by default would move the numbers every
+later step is compared against, in the same commit that introduced the
+comparison (§16). And nothing consumes the queue, because the worker pool is the
+last step in the B track (§5.2) — so B5 decides an **order**, and the report says
+so instead of presenting a queue depth as a performance result.
+
+**What B5 buys the benchmark, immediately.** §13.8 defines the cheap half of the
+product metric in terms of the door region: a track that ends inside somebody's
+presence and not at the door is a false gap, with no need to know whose track it
+was. `metrics.zone_exits` is that, and it works with the cheapest annotation
+there is — presence timelines, no track map. It counts **events, not minutes**;
+minutes still need the track map, and the report keeps the two apart on purpose.
+
+Even with no annotation at all, the breakdown of where appearances end is new
+information: if most tracks on a recording die mid-room, the answer to §4.7 is
+visible before anybody has labelled anything. With no `door_region` configured
+the line prints a caveat instead of a conclusion, because nothing can be labelled
+`door` and 100% `interior` would otherwise read as a catastrophe.
 
 
 B1 is in `engine/bench/` and has [its own README](bench/README.md). One
@@ -112,7 +177,8 @@ A benchmark that can lie in a flattering direction is worse than no benchmark.
   constants only. The section of the old config that encoded office rules was
   not ported; it is dead, and its replacement is born in `backend/policy/`.
   `config/loader.py` enforces this with an allowlist derived from the schema —
-  it accepts `core`, `ingest`, `detector` and `tracker` and the fields those
+  it accepts the sections its dataclasses declare — `core`, `ingest`, `detector`,
+  `tracker`, and since B5 `zones` and `recognition` — plus the fields those
   dataclasses declare, and refuses everything else by name at load time. A denylist was
   tried first and was wrong twice: it lags whatever leaks in next, and writing
   the forbidden names into `engine/` is itself the thing §16 tells you to grep
@@ -137,7 +203,8 @@ the seam from durations to spans, as noted at the top of this file.
 ## Ownership
 
 `bench/`, `ingest/`, `streams/`, `factory.py` and `config/` are Engine B's.
-`ports/` and `pipeline/` are shared with Engine A — B0 initialises both,
+`ports/` and `pipeline/` are shared with Engine A — B0 initialises both, B5 adds
+`pipeline/zoning.py` to the shared half,
 including `__init__.py`, so A can pull and continue rather than resolve merge
 conflicts. `identity/`, `store/` and `api/` are A's and are untouched here;
 `store/` exists only as an empty package so the tree matches the document.

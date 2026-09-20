@@ -10,11 +10,22 @@ small enough to read in one sitting.
 
 ## Three rules, all from ARCHITECTURE.md §6.6
 
-**PTS is passed through raw, never rebased.** It is tempting to normalise each
-stream so it starts at zero. Do not: the whole reason §6.6 chose PTS is that
-the engine and the backend pull the same stream and therefore read *the same
-number* for the same frame, with nothing to agree on. Rebasing destroys exactly
-that property and leaves a number that looks just as usable.
+**PTS is stream-relative, and the container's own value is kept beside it.**
+The first version of this module passed the raw container value straight
+through and argued, from §6.6, that rebasing destroys the property that the
+engine and the backend read *the same number* for the same frame. The argument
+is sound and it was applied to the wrong field. `contracts/schema/…` defines
+`pts` as "detik, float, RELATIF terhadap awal stream kamera pada `stream_epoch`
+yang berlaku", `ENGINE_PROTOCOL.md` §1 repeats it, and `api/events.PtsClock`
+computes `at()` as `offset + pts` on exactly that assumption. RTP starts from a
+random base, so on a real camera the raw value made every `*_at` wrong by that
+base while every `*_pts` still looked plausible — a file starting at PTS 0
+hides it completely, which is why the tests and the probe were both happy.
+
+So `pts` now means what the frozen schema says it means, and `container_pts`
+carries the unrebased value for anyone who wants §6.6's shared-number property.
+Nothing downstream lost information, and no duration changed: subtraction
+cancels the base.
 
 **The wallclock offset is set once per epoch, at the first frame.** All interval
 arithmetic happens in PTS — precise, no drift — and conversion to absolute time
@@ -29,7 +40,21 @@ in the wrong year — and only that camera. There is a second consequence the
 document does not spell out: after a reconnect PTS can go *backwards*, and any
 code that subtracts two PTS values must know they are from different epochs or
 it produces a duration that is not wrong so much as meaningless. Hence
-`stream_epoch`, which every consumer is expected to compare before subtracting.
+`stream_epoch`, which every consumer is expected to compare before subtracting
+(`epochs_are_comparable` below is that comparison, and it is called rather than
+re-implemented: a rule spelled out in four places is a rule with four chances to
+be spelled differently).
+
+## The offset is a number, and it leaves this module as one
+
+§4.4 and §4.5 of the protocol put `pts_wallclock_offset` on the wire, per camera
+per epoch, and the conformance checklist in §7 requires it to be re-established
+on every reconnect. The first version computed the offset internally, added it
+to the frame's wallclock and then threw the addend away, so the only layer that
+had to emit the number had no way to obtain it and reached for `time.time()`
+instead. Both halves were internally consistent and their sum was wrong. Hence
+`wallclock_offset`, which is exactly the value satisfying
+`wallclock == offset + pts`.
 
 ## On anomalies: count, do not crash
 
@@ -54,6 +79,34 @@ logger = logging.getLogger("engine.ingest.timeline")
 PTS_CONTAINER = "container"
 PTS_DERIVED = "derived_from_fps"
 PTS_NONE = "none"
+
+
+@dataclass(frozen=True)
+class Stamp:
+    """
+    One frame's position in time, in the three forms anyone needs.
+
+    Returned as an object rather than a tuple because the two PTS values differ
+    by a base that is zero in every test file and arbitrary on every real
+    camera. A tuple invites unpacking them in the wrong order, and the failure
+    would be invisible on a file and confined to reconnected cameras in
+    production — the single worst shape a bug can have in this codebase.
+    """
+
+    pts: Optional[float]
+    """Seconds since the start of this epoch's stream. What the schema calls `pts`."""
+
+    container_pts: Optional[float]
+    """The container's own value, unrebased. §6.6's shared-number property."""
+
+    wallclock: Optional[float]
+    """Absolute time: `offset + pts`."""
+
+    offset: Optional[float]
+    """
+    The epoch's `pts_wallclock_offset` (§4.5). Re-established on every
+    reconnect, and the value the wire field must carry.
+    """
 
 
 @dataclass
@@ -96,17 +149,18 @@ class StreamTimeline:
         self._frames_in_epoch = 0
         return self.epoch
 
-    def stamp(self, raw_pts: Optional[float]) -> Tuple[Optional[float], Optional[float]]:
+    def stamp(self, raw_pts: Optional[float]) -> Stamp:
         """
-        Turns one container PTS into `(pts, wallclock)`.
+        Turns one container PTS into a `Stamp`.
 
-        `pts` is returned unchanged — see the module docstring. `wallclock` is
-        the epoch's wall start plus the elapsed PTS within the epoch.
+        The first frame of an epoch defines the base, so `pts` starts at 0.0 for
+        every epoch — which is what the schema requires and what makes
+        `PtsClock.at()` correct without knowing anything about RTP.
         """
         self._frames_in_epoch += 1
 
         if raw_pts is None:
-            return None, None
+            return Stamp(None, None, None, self.wallclock_offset)
 
         if self._epoch_first_pts is None:
             self._epoch_first_pts = raw_pts
@@ -125,10 +179,33 @@ class StreamTimeline:
                 )
         self._last_pts = raw_pts
 
-        wall = None
-        if self._epoch_wall_start is not None:
-            wall = self._epoch_wall_start + (raw_pts - self._epoch_first_pts)
-        return raw_pts, wall
+        pts = raw_pts - self._epoch_first_pts
+        # Guards the schema's `minimum: 0` rather than trusting it. A PTS below
+        # the epoch base can only come from a stream whose first frame was not
+        # its earliest, and a negative pts makes `PtsClock.at()` raise in the
+        # event layer — far from here, where the cause is no longer visible.
+        if pts < 0.0:
+            pts = 0.0
+
+        offset = self.wallclock_offset
+        wall = None if offset is None else offset + pts
+        return Stamp(pts=pts, container_pts=raw_pts, wallclock=wall, offset=offset)
+
+    @property
+    def wallclock_offset(self) -> Optional[float]:
+        """
+        This epoch's `pts_wallclock_offset`: the value where `wallclock == offset + pts`.
+
+        Because `pts` is now stream-relative, the offset is simply the epoch's
+        wall start — no subtraction of a container base, and nothing for a
+        caller to reconstruct.
+        """
+        return self._epoch_wall_start
+
+    @property
+    def epoch_base_pts(self) -> Optional[float]:
+        """The container PTS the current epoch was anchored to. Diagnostics only."""
+        return self._epoch_first_pts
 
     @property
     def backwards_count(self) -> int:
@@ -144,6 +221,12 @@ class StreamTimeline:
             "epoch": self.epoch,
             "epochs_opened": self._epochs_opened,
             "pts_backwards_within_epoch": self._backwards,
+            # On the wire this is `pts_wallclock_offset` (§4.4, §4.5). In the
+            # report it is here so that a recorded run can be re-derived into
+            # absolute time months later, when nobody remembers what time it
+            # started.
+            "pts_wallclock_offset": self.wallclock_offset,
+            "epoch_base_container_pts": self._epoch_first_pts,
         }
 
 

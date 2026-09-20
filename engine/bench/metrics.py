@@ -20,6 +20,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from ..ingest.timeline import epochs_are_comparable
 from .annotation import Annotation, PresenceInterval
 from .tracklog import TrackSegment
 
@@ -321,7 +322,9 @@ def stitch(
             # one is two unrelated numbers subtracted. Never stitch across it —
             # the result would look like a plausible short gap and be nothing
             # of the kind.
-            if getattr(chain, "epoch", 0) != getattr(segment, "epoch", 0):
+            if not epochs_are_comparable(
+                getattr(chain, "epoch", 0), getattr(segment, "epoch", 0)
+            ):
                 continue
             gap = segment.start_pts - chain.end_pts
             if gap < 0 or gap > window_seconds:
@@ -601,6 +604,102 @@ def false_gaps(
         entry = evaluate(chains)
         entry["basis"] = basis
         result["stitched"][f"N={window:g}s"] = entry
+    return result
+
+
+# ---------------------------------------------------------------------------
+# where tracks end (B5)
+# ---------------------------------------------------------------------------
+
+def zone_exits(
+    segments: Sequence[TrackSegment],
+    annotation: Optional[Annotation] = None,
+    door_configured: bool = False,
+) -> Dict[str, Any]:
+    """
+    Where appearances ended, which is §13.8's cheap half of the product metric.
+
+    §4.2 in one table. A track ending **at the door** is somebody leaving. A
+    track ending **mid-room** is the tracker losing somebody who never moved,
+    and every one of those becomes a gap the layer above has to interpret. The
+    ratio between them is the earliest warning this benchmark can give, and it
+    costs no annotation at all: if most appearances on a recording end in
+    `interior`, the answer to §4.7 is already visible before anybody has
+    labelled a single presence interval.
+
+    **What this is not.** It counts *events*, not minutes, and the go/no-go in
+    `bench/gonogo.yaml` is in minutes. Turning a broken ending into a duration
+    requires knowing which person the track belonged to — otherwise there is no
+    way to say how long they went untracked, only that something ended where it
+    should not have. That is the expensive `track_map` annotation and
+    `false_gaps()` above is where it is used. The two are reported side by side
+    on purpose; conflating "how often" with "how long" is how a promising ratio
+    turns into a number nobody can defend.
+
+    With presence intervals alone — the cheapest annotation there is, no track
+    map — the count is narrowed to endings that happened **while somebody was
+    demonstrably in the room**, which removes the ordinary case of a person
+    walking out and takes nothing more to produce.
+    """
+    if not segments:
+        return withheld("no track segments in this run")
+
+    by_zone: Dict[str, int] = {}
+    for segment in segments:
+        zone = getattr(segment, "last_zone", "interior")
+        by_zone[zone] = by_zone.get(zone, 0) + 1
+
+    total = len(segments)
+    interior = by_zone.get("interior", 0)
+    result: Dict[str, Any] = {
+        "endings_by_zone": dict(sorted(by_zone.items())),
+        "total_endings": total,
+        "interior_ending_fraction": round(interior / total, 4),
+        "door_region_configured": door_configured,
+    }
+
+    if not door_configured:
+        # Without a region nothing can be labelled `door`, so the fraction above
+        # is arithmetic rather than evidence. Saying so here is the difference
+        # between a caveat and a number somebody quotes in two months.
+        result["caveat"] = (
+            "no door_region was configured for any camera in this run, so no "
+            "ending could be labelled `door` and `interior_ending_fraction` "
+            "carries no information about departures. Set zones.door_regions "
+            "(or send set_cameras) before reading this line as anything."
+        )
+
+    if annotation is None:
+        result["while_person_present"] = withheld(
+            "needs presence intervals to tell an ending mid-room from somebody "
+            "who had already left the room (§13.8). This is the CHEAP "
+            "annotation — presence timelines only, no track map"
+        )
+        return result
+
+    inside = 0
+    inside_interior = 0
+    for segment in segments:
+        present = any(
+            _containing_interval(person.presence, segment.end_pts) is not None
+            for person in annotation.persons
+        )
+        if not present:
+            continue
+        inside += 1
+        if getattr(segment, "last_zone", "interior") == "interior":
+            inside_interior += 1
+
+    result["while_person_present"] = {
+        "endings": inside,
+        "endings_in_interior": inside_interior,
+        "interior_fraction": (round(inside_interior / inside, 4) if inside else None),
+        "basis": "annotated_presence_only",
+        "note": (
+            "count of suspicious endings, NOT the go/no-go number. Minutes lost "
+            "need track_map (see false_gaps)."
+        ),
+    }
     return result
 
 

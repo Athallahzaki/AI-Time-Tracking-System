@@ -134,6 +134,58 @@ rather than by this argument.
 | `video_file.py`, `cv_stream.py` | The OpenCV originals. Kept for one step. |
 | `mock_source.py` | Synthetic frames for CI. |
 
+## Correction: what `pts` means (and the bug it was hiding)
+
+**The first version of B4 passed the container's PTS through unrebased**, and
+argued from §6.6 that rebasing would destroy the property that the engine and
+the backend read *the same number* for the same frame. The argument is sound.
+It was applied to the wrong field.
+
+`contracts/schema/engine_protocol.schema.json` defines `pts` as *"detik, float,
+RELATIF terhadap awal stream kamera pada `stream_epoch` yang berlaku"*, with
+`minimum: 0`. `ENGINE_PROTOCOL.md` §1 says the same. And `api/events.PtsClock`
+— Engine A's, already written — computes `at()` as `offset + pts` on exactly
+that basis, with a docstring that says *"pts kembali nol"*.
+
+RTP starts from a random base. So on a real camera the unrebased value made
+every `*_at` in every event wrong by that base — hours, days, whatever the base
+happened to be — while every `*_pts` stayed plausible. **A file starting at PTS
+0 hides this completely**, which is why the fake container, the unit tests and
+`probe_ingest` were all happy: none of them had a base.
+
+Fixed by making `pts` mean what the frozen contract says, and keeping the
+container's value beside it:
+
+| Field | What |
+|---|---|
+| `pts` | seconds since the start of this epoch's stream. Starts at 0.0, every epoch. |
+| `container_pts` | the container's own number, unrebased. §6.6's shared-number property lives here. |
+| `pts_wallclock_offset` | this epoch's offset, such that `wallclock == offset + pts`. |
+
+No duration changed — subtraction cancels the base — so no committed number
+moves. Two things did get better on the way: `TimelineFidelity` now compares
+against the relative timeline (measuring `derived_pts` against a container base
+would have reported the base itself as deviation, and condemned a constant-rate
+stream as variable), and a PTS below the epoch base is clamped at the source
+rather than arriving in the event layer as a negative `pts` that makes
+`PtsClock.at()` raise a long way from the cause.
+
+## The offset is now a number, and it leaves this module as one
+
+§4.4 and §4.5 put `pts_wallclock_offset` on the wire, per camera per epoch, and
+§7's conformance checklist requires it to be re-established on every reconnect.
+The first version computed the offset here, folded it into `wallclock`, and
+threw the addend away — so the only layer that has to emit the number had no way
+to get it, and `presence/assembler.py` reaches for `time.time()` instead. Both
+halves were internally consistent; their sum was wrong for the same reason as
+above.
+
+`StreamTimeline.wallclock_offset` is that number, it is in `describe()` and in
+the bench report, and it is on every frame. **When ingest is wired to the event
+layer (A5/A6), `camera_online(camera_id, wallclock_now=...)` should be handed
+`source.timeline.wallclock_offset`, not a fresh `time.time()`.** On a file the
+two are indistinguishable. On a camera that has reconnected they are not.
+
 Both backends fill `FrameMetadata.pts`. Only one of them earned it, and
 `pts_source` says which:
 
@@ -195,6 +247,43 @@ instead of suffered accidentally.
 
 **The comparison is therefore still open.** Re-run the probe on the fixed code
 before quoting any decode figure.
+
+### And on the fixed code it is still 29% — so B4 is not finished
+
+The probe on the threading fix: PyAV 80.2 fps (spread 3.3%) against OpenCV
+113.6 (spread 2.2%), with threading confirmed applied to both `codec_context`
+and `stream`. 29%, well outside the noise. The tool's own conclusion said *"if
+that is PyAV losing, it is per-frame Python overhead and should be fixed rather
+than accepted"* — and then nothing was done with it, which is the one outcome
+§16 does not allow: a step is either measured-and-fixed or measured-and-accepted
+in writing, never measured-and-shrugged-at.
+
+The remaining per-frame work after decode is the colour conversion, and
+`to_ndarray(format="bgr24")` builds a libswscale context and allocates a
+destination on **every call**. So there is now a second path and the probe times
+both:
+
+```yaml
+ingest:
+  colour_conversion: "to_ndarray"   # what B4 shipped. Still the default.
+  # colour_conversion: "reformatter"  # one VideoReformatter, reused for the file
+```
+
+Identical pixels either way — this is not a quality trade-off, it is how many
+times libswscale is asked to set itself up. `probe_ingest` reports a
+`colour_conversion_delta` block with a verdict, and the default stays on
+`to_ndarray` until that verdict says otherwise, because switching it in the same
+commit that measured it would be the same one-variable violation in the other
+direction.
+
+**What to do, in order.** Run `probe_ingest` on the real clip. If the
+reformatter wins outside the spread, flip the default in its own commit with the
+number in the message. If it does not, the conversion was never the cost and the
+next suspect is decoder frame-threading depth (`decoder_thread_type: SLICE`
+against `AUTO`, and `decoder_threads` explicitly pinned) — and if that is not it
+either, then 80 fps for 1080p HEVC is what this binding costs, and *that
+sentence goes in the baseline report* rather than staying an open question in a
+README.
 
 ## The epoch, and the bug it prevents
 

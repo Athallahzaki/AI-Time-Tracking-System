@@ -174,7 +174,9 @@ def test_the_opencv_file_source_labels_its_timeline_as_derived():
     """
     from engine.ingest.video_file import VideoFileSource
 
-    clip = ENGINE_ROOT / "samples" / "synthetic_24fps.mp4"
+    from engine.tests.assets import ensure_synthetic_clip
+
+    clip = ensure_synthetic_clip()
     source = VideoFileSource(filepath=str(clip), realtime_pacing=False)
     source.start()
     frame = source.read()
@@ -712,3 +714,221 @@ def test_an_unknown_thread_type_is_refused():
 
     with pytest.raises(ValueError, match="decoder_thread_type"):
         IngestConfig(decoder_thread_type="MANY")
+
+
+# --------------------------------------------------------------------------
+# What `pts` means, which is not what B4 first shipped
+# --------------------------------------------------------------------------
+#
+# RTP starts its timestamps from a random base. Every fake stream above starts
+# at tick 0, which is what a file does, and that is why the original B4 passed
+# its own tests while being wrong on a camera: the two meanings of `pts` — the
+# container's number and seconds-since-the-stream-started — are the same number
+# for a file and differ by an arbitrary constant for RTSP.
+#
+# The frozen schema (`contracts/schema/engine_protocol.schema.json`) settles
+# which one `pts` is: "RELATIF terhadap awal stream kamera pada stream_epoch
+# yang berlaku", minimum 0. `api/events.PtsClock.at()` computes `offset + pts`
+# on that basis. The tests below pin it down.
+
+RTP_BASE_TICKS = 2_147_483_000      # a plausible random RTP base, in 1/90000 s
+
+
+def test_pts_is_relative_to_the_stream_start_not_the_container_base():
+    ticks = [RTP_BASE_TICKS + t for t in _ticks_at(25.0, 4)]
+    av = FakeAv([FakeContainer(FakeStream(ticks))])
+    source = _source(av, uri="rtsp://camera/stream", reconnect_attempts=0)
+    source.start()
+    frames = [source.read() for _ in range(4)]
+    source.stop()
+
+    # What the schema requires, and what PtsClock assumes.
+    assert frames[0].metadata.pts == pytest.approx(0.0)
+    assert frames[1].metadata.pts == pytest.approx(0.04)
+    assert frames[3].metadata.pts == pytest.approx(0.12)
+
+    # And §6.6's shared-number property is not lost, it just moved to the field
+    # that can afford it.
+    assert frames[0].metadata.container_pts == pytest.approx(
+        RTP_BASE_TICKS / 90000.0
+    )
+    assert frames[0].metadata.pts_source == PTS_CONTAINER
+
+
+def test_the_rebase_changes_no_duration():
+    """The whole point: subtraction cancels the base, so no metric moves."""
+    ticks = [RTP_BASE_TICKS + t for t in _ticks_at(25.0, 10)]
+    av = FakeAv([FakeContainer(FakeStream(ticks))])
+    source = _source(av, uri="rtsp://camera/stream")
+    source.start()
+    frames = [source.read() for _ in range(10)]
+    source.stop()
+
+    from_pts = frames[9].metadata.pts - frames[0].metadata.pts
+    from_container = (
+        frames[9].metadata.container_pts - frames[0].metadata.container_pts
+    )
+    assert from_pts == pytest.approx(from_container)
+    assert from_pts == pytest.approx(0.36)
+
+
+def test_the_offset_is_exposed_so_nobody_has_to_invent_one():
+    """
+    §4.4 and §4.5 put `pts_wallclock_offset` on the wire and §7 requires it to
+    be re-established per reconnect. Before this, the offset was computed here,
+    folded into `wallclock` and discarded, so the event layer sampled its own
+    clock and assumed pts started at zero. Two correct halves, one wrong sum.
+    """
+    ticks = [RTP_BASE_TICKS + t for t in _ticks_at(25.0, 3)]
+    av = FakeAv([FakeContainer(FakeStream(ticks))])
+    source = _source(av, uri="rtsp://camera/stream")
+    source.start()
+    frames = [source.read() for _ in range(3)]
+    described = source.describe()
+    source.stop()
+
+    offset = frames[0].metadata.pts_wallclock_offset
+    assert offset is not None
+    assert described["timeline"]["pts_wallclock_offset"] == pytest.approx(offset)
+
+    # The identity the wire field exists to satisfy, on every frame.
+    for frame in frames:
+        assert frame.metadata.wallclock == pytest.approx(
+            frame.metadata.pts_wallclock_offset + frame.metadata.pts
+        )
+
+
+def test_a_reconnect_restarts_pts_at_zero_and_moves_the_offset():
+    """
+    The new stream has a different random base and a later wall time. If pts did
+    not restart, `PtsClock.at()` on the new epoch would be wrong by the
+    difference of two random numbers — and only for cameras that dropped.
+    """
+    first = FakeContainer(FakeStream([RTP_BASE_TICKS, RTP_BASE_TICKS + 3600]))
+    second = FakeContainer(FakeStream([90_000_000, 90_000_000 + 3600]))
+    av = FakeAv([first, second])
+    source = _source(av, uri="rtsp://camera/stream", reconnect_attempts=1,
+                     reconnect_backoff_seconds=0.0)
+    source.start()
+    before = [source.read(), source.read()]
+    after = [source.read(), source.read()]
+    source.stop()
+
+    assert [f.metadata.stream_epoch for f in before] == [0, 0]
+    assert [f.metadata.stream_epoch for f in after] == [1, 1]
+
+    assert before[0].metadata.pts == pytest.approx(0.0)
+    assert after[0].metadata.pts == pytest.approx(0.0), (
+        "pts must restart at the new stream's own start, not continue the old "
+        "timeline — the schema forbids comparing across epochs at all"
+    )
+    assert after[0].metadata.container_pts == pytest.approx(1000.0)
+    assert (
+        after[0].metadata.pts_wallclock_offset
+        >= before[0].metadata.pts_wallclock_offset
+    ), "the offset was not re-established on reconnect (§6.6, §7)"
+    for frame in before + after:
+        assert frame.metadata.wallclock == pytest.approx(
+            frame.metadata.pts_wallclock_offset + frame.metadata.pts
+        )
+
+
+def test_fidelity_is_measured_against_the_relative_timeline():
+    """
+    `derived_pts` counts from zero. Comparing it against a container value that
+    starts at an RTP base would report the base itself as deviation — a
+    twenty-three-thousand-second "error" and a verdict of "variable rate" on a
+    perfectly constant stream.
+    """
+    ticks = [RTP_BASE_TICKS + t for t in _ticks_at(25.0, 200)]
+    # A genuinely constant 25 fps stream, so any deviation reported is the base
+    # leaking into the measurement rather than the recorder skipping frames.
+    av = FakeAv([FakeContainer(FakeStream(ticks, average_rate=Fraction(25, 1)))])
+    source = _source(av, uri="rtsp://camera/stream")
+    source.start()
+    while source.read() is not None:
+        pass
+    fidelity = source.fidelity.as_dict()
+    source.stop()
+
+    assert fidelity["samples"] == 200
+    assert fidelity["max_abs_deviation_s"] == pytest.approx(0.0, abs=1e-6)
+    assert "usable as-is" in fidelity["verdict"]
+
+
+def test_a_pts_below_the_epoch_base_is_clamped_rather_than_sent_negative():
+    """
+    `PtsClock.at()` raises on a negative pts, far from here, where the cause is
+    no longer visible. The schema's `minimum: 0` is guarded at the source.
+    """
+    timeline = StreamTimeline(source_id="cam0")
+    timeline.begin_epoch(wall_now=1_000.0)
+    assert timeline.stamp(10.0).pts == pytest.approx(0.0)
+    earlier = timeline.stamp(9.0)
+    assert earlier.pts == pytest.approx(0.0)
+    assert earlier.container_pts == pytest.approx(9.0)
+    assert timeline.backwards_count == 1
+
+
+# --------------------------------------------------------------------------
+# The colour conversion, which exists to be measured rather than believed
+# --------------------------------------------------------------------------
+
+class _FakeReformatter:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def reformat(self, frame, format: str = "bgr24"):
+        assert format == "bgr24"
+        self.calls += 1
+        return frame
+
+
+def test_the_reformatter_path_reuses_one_context_for_the_whole_file():
+    """
+    `to_ndarray(format=...)` builds a conversion context and a destination
+    buffer per frame. This path is the same pixels with one context, and the
+    only claim made for it here is that it is reused — whether that is faster is
+    for probe_ingest to say on a real file, not for a fake to assert.
+    """
+    import types
+
+    av = FakeAv([FakeContainer(FakeStream(_ticks_at(25.0, 5)))])
+    reformatter = _FakeReformatter()
+    av.video = types.SimpleNamespace(
+        reformatter=types.SimpleNamespace(VideoReformatter=lambda: reformatter)
+    )
+
+    source = _source(av, colour_conversion="reformatter")
+    source.start()
+    frames = [source.read() for _ in range(5)]
+    source.stop()
+
+    assert all(frame is not None for frame in frames)
+    assert reformatter.calls == 5
+    assert source.describe()["colour_conversion"] == "reformatter"
+
+
+def test_an_unknown_colour_conversion_is_refused_at_construction():
+    av = FakeAv([FakeContainer(FakeStream([0]))])
+    with pytest.raises(ValueError, match="colour_conversion"):
+        _source(av, colour_conversion="swscale_please")
+
+
+def test_the_colour_conversion_key_is_accepted_and_validated(tmp_path):
+    from engine.config import ConfigBoundaryError, IngestConfig, load_config
+
+    path = tmp_path / "c.yaml"
+    path.write_text(
+        "core:\n  source_type: mock\ningest:\n  colour_conversion: reformatter\n",
+        encoding="utf-8",
+    )
+    assert load_config(path).ingest.colour_conversion == "reformatter"
+
+    with pytest.raises(ValueError, match="colour_conversion"):
+        IngestConfig(colour_conversion="nearest_neighbour_vibes")
+
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("ingest:\n  color_conversion: reformatter\n", encoding="utf-8")
+    with pytest.raises(ConfigBoundaryError, match="color_conversion"):
+        load_config(bad)

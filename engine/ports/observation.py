@@ -46,6 +46,18 @@ class TrackObservation:
     state: str
     confidence: float = 1.0
 
+    # Added in B5. Which zone this box is in: `door`, `interior` or
+    # `frame_edge` (§4.2). It travels with the observation rather than being
+    # recomputed downstream so that there is exactly one door definition in the
+    # run — the same labeller that will fill `exit_zone` on the wire. A consumer
+    # that recomputed it from the box would need the door region too, and would
+    # eventually be given a different one.
+    #
+    # Default `interior`, which is the pre-B5 behaviour spelled out: no region
+    # configured means nothing is ever called `door`, because guessing `door`
+    # marks every gap as a real departure (see presence/zones.py).
+    zone: str = "interior"
+
     # Reserved for the identity layer. Present so that adding it later is a
     # field gaining a value, not a schema change.
     person_id: Optional[str] = None

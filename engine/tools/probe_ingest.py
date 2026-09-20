@@ -52,6 +52,7 @@ def probe_pyav(video: Path, max_frames: Optional[int] = None) -> Dict[str, Any]:
     frames = 0
     first_pts = None
     last_pts = None
+    first_container_pts = None
     pts_source = "none"
     epochs = set()
     t0 = time.perf_counter()
@@ -67,6 +68,7 @@ def probe_pyav(video: Path, max_frames: Optional[int] = None) -> Dict[str, Any]:
         if frame.metadata.pts is not None:
             if first_pts is None:
                 first_pts = frame.metadata.pts
+                first_container_pts = frame.metadata.container_pts
             last_pts = frame.metadata.pts
     decode_seconds = time.perf_counter() - t0
 
@@ -84,6 +86,11 @@ def probe_pyav(video: Path, max_frames: Optional[int] = None) -> Dict[str, Any]:
             "epochs_seen": sorted(epochs),
             "first_pts": first_pts,
             "last_pts": last_pts,
+            # The two meanings of PTS, side by side. On a file they are equal
+            # and nothing distinguishes them; on an RTSP camera the second
+            # carries the random RTP base, and confusing the two made every
+            # `*_at` wrong while every `*_pts` looked fine.
+            "first_container_pts": first_container_pts,
             "pts_span_seconds": (
                 None if first_pts is None or last_pts is None else round(last_pts - first_pts, 4)
             ),
@@ -129,11 +136,12 @@ def probe_opencv(video: Path, max_frames: Optional[int] = None) -> Dict[str, Any
     }
 
 
-def _decode_once_pyav(video: Path) -> tuple:
+def _decode_once_pyav(video: Path, colour_conversion: str = "to_ndarray") -> tuple:
     from ..ingest.pyav_source import PyAVSource
 
     source = PyAVSource(uri=str(video), source_id="timing",
-                        measure_timeline_fidelity=False)
+                        measure_timeline_fidelity=False,
+                        colour_conversion=colour_conversion)
     source.start()
     frames = 0
     t0 = time.perf_counter()
@@ -176,15 +184,40 @@ def time_backends(video: Path, repeats: int = 3) -> Dict[str, Any]:
     during the measurement hurts both equally. The result is the median, the
     full spread, and an explicit refusal to call a winner when the spread is
     larger than the difference.
+
+    **Three contenders, not two**, since the first real run put OpenCV 29% ahead
+    with threading verified as applied. That number is a question, not a result,
+    and the cheapest answer is to time the one piece of per-frame work that
+    differs: the colour conversion. `pyav` calls `to_ndarray(format="bgr24")`,
+    which sets up a conversion context and allocates a destination every frame;
+    `pyav_reformatter` reuses one `VideoReformatter` for the whole file. Same
+    pixels either way, so whichever wins, nothing about the timeline changes —
+    and if they tie, `to_ndarray` was never the problem and the next suspect is
+    decoder frame-threading depth.
     """
-    per_backend: Dict[str, List[float]] = {"pyav": [], "opencv": []}
+    contenders = (
+        ("pyav", lambda v: _decode_once_pyav(v, "to_ndarray")),
+        ("pyav_reformatter", lambda v: _decode_once_pyav(v, "reformatter")),
+        ("opencv", _decode_once_opencv),
+    )
+    per_backend: Dict[str, List[float]] = {name: [] for name, _ in contenders}
 
-    _decode_once_pyav(video)        # warm the page cache; result discarded
-    _decode_once_opencv(video)
+    for _, fn in contenders:        # warm the page cache; results discarded
+        try:
+            fn(video)
+        except Exception:
+            pass
 
+    failures: Dict[str, str] = {}
     for _ in range(max(1, repeats)):
-        for name, fn in (("pyav", _decode_once_pyav), ("opencv", _decode_once_opencv)):
-            frames, seconds = fn(video)
+        for name, fn in contenders:
+            try:
+                frames, seconds = fn(video)
+            except Exception as exc:
+                # A variant that cannot run is reported as such, not silently
+                # left out of the table where its absence reads as a tie.
+                failures[name] = repr(exc)
+                continue
             if seconds > 0:
                 per_backend[name].append(frames / seconds)
 
@@ -201,35 +234,81 @@ def time_backends(video: Path, repeats: int = 3) -> Dict[str, Any]:
             "runs": len(values),
         }
 
-    result = {
+    result: Dict[str, Any] = {
         "repeats": max(1, repeats),
         "method": (
-            "one discarded warm-up pass per backend, then interleaved timed "
+            "one discarded warm-up pass per contender, then interleaved timed "
             "passes; median reported"
         ),
-        "pyav": summarise(per_backend["pyav"]),
-        "opencv": summarise(per_backend["opencv"]),
     }
+    for name, _ in contenders:
+        result[name] = summarise(per_backend[name])
+    if failures:
+        result["failed"] = failures
 
-    a, b = result["pyav"]["median_fps"], result["opencv"]["median_fps"]
+    def _noise(*names: str) -> float:
+        return max(
+            [result[name].get("spread_percent") or 0.0 for name in names] or [0.0]
+        )
+
+    # Which PyAV variant is the honest representative of "PyAV": the faster one.
+    # Comparing the slower variant against OpenCV would be measuring a decision
+    # already made rather than the backend.
+    variants = [n for n in ("pyav", "pyav_reformatter") if result[n]["median_fps"]]
+    best_pyav = max(variants, key=lambda n: result[n]["median_fps"]) if variants else None
+
+    if len(variants) == 2:
+        plain = result["pyav"]["median_fps"]
+        reused = result["pyav_reformatter"]["median_fps"]
+        delta = abs(reused - plain) / max(reused, plain) * 100
+        noise = _noise("pyav", "pyav_reformatter")
+        result["colour_conversion_delta"] = {
+            "to_ndarray_fps": plain,
+            "reformatter_fps": reused,
+            "difference_percent": round(delta, 1),
+            "noise_percent": round(noise, 1),
+            "verdict": (
+                f"no measurable difference ({delta:.1f}% against {noise:.1f}% "
+                f"spread): the per-frame colour conversion is not where the "
+                f"decode cost is. Leave ingest.colour_conversion at to_ndarray "
+                f"and look at decoder frame threading next."
+                if delta <= noise
+                else (
+                    f"reformatter is {delta:.1f}% faster than to_ndarray, "
+                    f"outside the {noise:.1f}% spread. Switch "
+                    f"ingest.colour_conversion to reformatter in ITS OWN commit "
+                    f"with this number in the message (§16: one variable per "
+                    f"step)."
+                    if reused > plain
+                    else
+                    f"reformatter is {delta:.1f}% SLOWER; keep to_ndarray and "
+                    f"stop considering this line of attack."
+                )
+            ),
+        }
+
+    a = result[best_pyav]["median_fps"] if best_pyav else None
+    b = result["opencv"]["median_fps"]
     if a and b:
         difference = abs(a - b) / max(a, b) * 100
-        noise = max(
-            result["pyav"].get("spread_percent") or 0.0,
-            result["opencv"].get("spread_percent") or 0.0,
-        )
+        noise = _noise(best_pyav, "opencv")
         result["difference_percent"] = round(difference, 1)
         result["noise_percent"] = round(noise, 1)
+        result["compared_variant"] = best_pyav
         result["conclusion"] = (
             f"not resolvable: the {difference:.1f}% difference is inside the "
             f"{noise:.1f}% run-to-run spread. Treat decode cost as unchanged by "
             f"B4, which is what both backends going through FFmpeg predicts."
             if difference <= noise
             else (
-                f"{'PyAV' if a > b else 'OpenCV'} is {difference:.1f}% faster, "
-                f"which is outside the {noise:.1f}% run-to-run spread. If that "
-                f"is PyAV losing, it is per-frame Python overhead and should be "
-                f"fixed rather than accepted."
+                f"{'PyAV (' + best_pyav + ')' if a > b else 'OpenCV'} is "
+                f"{difference:.1f}% faster, which is outside the {noise:.1f}% "
+                f"run-to-run spread. If that is PyAV losing, read "
+                f"colour_conversion_delta above before blaming the binding: it "
+                f"says whether the per-frame conversion accounts for it. If it "
+                f"does not, the gap is decoder threading depth, and B4 is not "
+                f"finished until this number is either recovered or written into "
+                f"the baseline report as an accepted cost."
             )
         )
     return result
@@ -348,11 +427,18 @@ def main(argv: Optional[list] = None) -> int:
     if timing:
         print("  Decode throughput (interleaved, warm cache, median of "
               f"{timing['repeats']}):")
-        for name in ("pyav", "opencv"):
-            entry = timing[name]
-            print(f"    {name:<8} {entry['median_fps']} fps  "
+        for name in ("pyav", "pyav_reformatter", "opencv"):
+            entry = timing.get(name)
+            if not entry:
+                continue
+            print(f"    {name:<17} {entry['median_fps']} fps  "
                   f"(range {entry['min_fps']}–{entry['max_fps']}, "
                   f"spread {entry.get('spread_percent')}%)")
+        for name, error in (timing.get("failed") or {}).items():
+            print(f"    {name:<17} did not run: {error}")
+        delta = timing.get("colour_conversion_delta")
+        if delta:
+            print(f"    -> colour conversion: {delta['verdict']}")
         print(f"    -> {timing.get('conclusion')}")
         print()
 

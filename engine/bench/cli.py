@@ -174,6 +174,46 @@ def summarize(report: Dict[str, Any]) -> str:
                 f"-> {data['projected_minutes_per_person_per_day']} min/day"
             )
 
+    exits = metrics.get("zone_exits")
+    if isinstance(exits, dict) and "endings_by_zone" in exits:
+        by_zone = exits["endings_by_zone"]
+        breakdown = "  ".join(f"{zone}={count}" for zone, count in by_zone.items())
+        lines.append(
+            f"  where tracks end {breakdown}  "
+            f"(interior {exits['interior_ending_fraction']:.0%} of "
+            f"{exits['total_endings']})"
+        )
+        if exits.get("caveat"):
+            # Printed, not buried in the JSON: an interior fraction of 100% on a
+            # camera with no door region looks alarming and means nothing.
+            lines.append(f"    !! {exits['caveat']}")
+        present = exits.get("while_person_present")
+        if isinstance(present, dict) and present.get("endings"):
+            lines.append(
+                f"    while someone was present: {present['endings_in_interior']}"
+                f"/{present['endings']} ended mid-room — count, not minutes"
+            )
+
+    queue = metrics.get("recognition_queue")
+    if isinstance(queue, dict) and "submitted_total" in queue:
+        lines.append(
+            f"  recognition q   submitted={queue['submitted_total']:.0f}  "
+            f"handed_out={queue['handed_out_total']:.0f}  "
+            f"aged_out={queue['dropped_stale_total']:.0f}  "
+            f"depth_at_end={queue['depth_at_end']:.0f}"
+        )
+        if not queue.get("had_consumer", False):
+            # Staleness is swept when a request is popped, and with nothing
+            # consuming the queue nothing is ever popped — so `aged_out` being
+            # zero does NOT mean requests were fresh. Depth and age below
+            # describe an unconsumed queue, which is what B5 built on purpose:
+            # the worker pool is the last step in the B track (§5.2).
+            lines.append(
+                "    nothing consumes the queue yet (§5.2): depth only grows and "
+                "aged_out stays 0 because staleness is swept at pop, not in the "
+                "queue. Order is what B5 measures here, not throughput"
+            )
+
     faces = metrics.get("recognizable_faces")
     if isinstance(faces, dict) and faces.get("per_person_hour") is not None:
         lines.append(

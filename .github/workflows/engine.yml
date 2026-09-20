@@ -69,6 +69,40 @@ jobs:
           print("report ok:", report["go_no_go"]["verdict"])
           PY
 
+      # B5. The mock path can prove the wiring even though it cannot prove the
+      # ordering is useful: a zone is assigned, a request is queued with a
+      # priority, and both land in the report. Cheap, and it catches the one
+      # thing that would otherwise be found on a real recording — a queue that
+      # silently never ran because the source has no PTS.
+      - name: Benchmark smoke run (B5 zones and queue enabled)
+        run: |
+          cat > "$RUNNER_TEMP/b5.yaml" <<'YAML'
+          core:
+            source_type: "mock"
+            auto_warmup: false
+          zones:
+            door_regions:
+              cam0: [0.0, 0.0, 0.35, 0.35]
+          recognition:
+            enabled: true
+            max_requests_per_frame: 1
+          YAML
+          python -m engine.bench --mock --config "$RUNNER_TEMP/b5.yaml" \
+            --frames 100 --quiet --out "$RUNNER_TEMP/bench-b5"
+          python - "$RUNNER_TEMP/bench-b5/baseline.json" <<'PY'
+          import json, sys
+          metrics = json.load(open(sys.argv[1]))["metrics"]
+          exits, queue = metrics["zone_exits"], metrics["recognition_queue"]
+          assert exits["door_region_configured"] is True, exits
+          assert "caveat" not in exits, exits
+          assert queue["submitted_total"] >= 1, queue
+          assert queue["had_consumer"] is False, (
+              "something is consuming the recognition queue; the worker pool is "
+              "step §5.2 and is not supposed to exist yet"
+          )
+          print("b5 ok:", exits["endings_by_zone"], queue["submitted_total"])
+          PY
+
       - name: Upload bench artefacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -93,6 +127,15 @@ jobs:
       - name: Install (ingest path)
         run: pip install numpy "opencv-python-headless>=4.8" "PyYAML>=6.0" pytest av
 
+      # The clip is generated, not committed: `*.mp4` is gitignored because
+      # recordings in this project are biometric data about colleagues (§7.4),
+      # and a rule with an exception carved into it invites the next exception to
+      # be a real recording. Before this step existed, this job and five tests
+      # depended on a file that only ever existed on one laptop.
+      - name: Generate the synthetic test clip
+        run: |
+          python -c "from engine.tests.assets import ensure_synthetic_clip as e; print(e())"
+
       - name: PyAV opens a real file and reports a real timeline
         run: |
           python -m engine.tools.probe_ingest \
@@ -109,6 +152,13 @@ jobs:
           assert pyav["frames_read"] > 0, "PyAV decoded nothing"
           assert pyav["pts_source"] != "derived_from_fps", pyav
           assert pyav["timeline"]["pts_backwards_within_epoch"] == 0, pyav["timeline"]
+
+          # `pts` is stream-relative (the schema's definition), so the first
+          # frame of an epoch is 0.0 whatever base the container used, and the
+          # offset that converts it to wallclock is a number the event layer can
+          # read rather than guess.
+          assert pyav["first_pts"] == 0.0, pyav
+          assert pyav["timeline"]["pts_wallclock_offset"] is not None, pyav["timeline"]
 
           # The sample clip is written at a constant rate, so the two decoders
           # must agree exactly. A disagreement here means the binding is

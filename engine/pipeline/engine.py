@@ -43,11 +43,25 @@ class VisionEngine:
         tracker: ObjectTracker,
         config: Optional[EngineConfig] = None,
         recorder: Optional[Recorder] = None,
+        zoner: Optional[Any] = None,
+        recognition_queue: Optional[Any] = None,
     ) -> None:
+        """
+        `zoner` and `recognition_queue` arrived with B5 and are both optional.
+
+        Left out, this loop behaves exactly as it did before B5 — which is not
+        politeness, it is §16: the baseline every later step is compared against
+        was measured without them, and a default that quietly changed the loop
+        would make that comparison meaningless in the same commit that
+        introduced the thing being compared. `factory.build_engine` supplies
+        them from the config.
+        """
         self._source = source
         self._detector = detector
         self._tracker = tracker
         self._config = config or EngineConfig()
+        self._zoner = zoner
+        self._recognition_queue = recognition_queue
 
         self._listeners: List[TrackListener] = []
         self._sinks: List[FrameSink] = []
@@ -183,6 +197,22 @@ class VisionEngine:
 
         self._metrics.record_span("tracker", t0, time.perf_counter())
 
+        # 3b. Zones (B5). Before the lifecycle block, because a track that ends
+        # this frame must already carry the zone it ended in — afterwards there
+        # is no box left to label (§4.2, ENGINE_PROTOCOL.md §7).
+        if self._zoner is not None:
+            t0 = time.perf_counter()
+            self._zoner.label(frame, tracks)
+            self._metrics.record_span("zoning", t0, time.perf_counter())
+
+        # 3c. Recognition queue (B5). Ordering only: door-born tracks first
+        # (§3.2). Nothing is handed out unless a consumer is attached, which will
+        # not exist until the worker pool of §5.2.
+        if self._recognition_queue is not None:
+            t0 = time.perf_counter()
+            self._recognition_queue.step(frame, tracks)
+            self._metrics.record_span("recognition_queue", t0, time.perf_counter())
+
         # 4. Track lifecycle
         current_track_ids = {
             track.track_id
@@ -258,12 +288,34 @@ class VisionEngine:
         for track_id in removed_track_ids:
             removed_track = self._known_tracks.pop(track_id)
 
+            # Read the zone before forgetting it, and forget it here rather than
+            # never: a long run with a busy camera would otherwise keep one entry
+            # per track id for ever, which is a leak that only shows up on the
+            # kind of multi-hour run nobody does until production.
+            exit_zone = (
+                self._zoner.zone_of(track_id) if self._zoner is not None else "interior"
+            )
+            entry_zone = (
+                self._zoner.entry_zone_of(track_id)
+                if self._zoner is not None
+                else "interior"
+            )
+            removed_track.attributes.setdefault("exit_zone", exit_zone)
+
             self._emit_event(
                 TrackRemovedEvent(
                     track_id=track_id,
                     dwell_time=removed_track.dwell_time,
+                    exit_zone=exit_zone,
+                    entry_zone=entry_zone,
+                    camera_id=frame.metadata.source_id,
                 )
             )
+
+            if self._zoner is not None:
+                self._zoner.forget(track_id)
+            if self._recognition_queue is not None:
+                self._recognition_queue.forget(track_id, frame.metadata.source_id)
 
             for listener in self._listeners:
                 try:
@@ -411,6 +463,16 @@ class VisionEngine:
     @property
     def metrics(self) -> Recorder:
         return self._metrics
+
+    @property
+    def zoner(self) -> Optional[Any]:
+        """B5's zone labeller, or None. Public so the bench need not reach inside."""
+        return self._zoner
+
+    @property
+    def recognition_queue(self) -> Optional[Any]:
+        """B5's priority queue, or None."""
+        return self._recognition_queue
 
     @property
     def is_running(self) -> bool:

@@ -21,7 +21,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from ..config import EngineConfig, load_config
 from . import metrics as M
@@ -75,6 +75,7 @@ class CameraRun:
     frames: int = 0
     error: Optional[BaseException] = None
     offset_frames: int = 0
+    queue_metrics: Optional[Dict[str, Any]] = None
 
 
 def _build_config(options: BenchOptions) -> EngineConfig:
@@ -137,6 +138,66 @@ def _run_one_camera(
         # snapshot of the beginning, not of the run.
         if stream.descriptor is not None:
             run.descriptor = stream.descriptor
+        run.queue_metrics = stream.recognition_queue_metrics
+
+
+def _recognition_queue_metrics(
+    runs: Sequence[CameraRun], config: EngineConfig
+) -> Dict[str, Any]:
+    """
+    What B5's priority queue did, aggregated across cameras.
+
+    Withheld rather than zeroed when the queue is off, because "no queue ran"
+    and "a queue ran and never dropped anything" are different facts and only
+    one of them is good news. §5.2 asks for four numbers; worker utilisation is
+    absent until there are workers, and the report says so instead of reporting
+    a zero that reads like an idle pool.
+    """
+    if not config.recognition.enabled:
+        return M.withheld(
+            "recognition.enabled is false, so no queue ran. It is off by "
+            "default: B1's baseline was measured without one, and turning it on "
+            "in the same commit that introduced it would move the numbers every "
+            "later step is compared against (§16)"
+        )
+
+    per_camera = {
+        run.camera_id: run.queue_metrics
+        for run in runs
+        if run.queue_metrics is not None
+    }
+    if not per_camera:
+        return M.withheld(
+            "the queue was enabled but reported nothing, which usually means "
+            "the source has no PTS (a mock run): request ages are measured in "
+            "PTS (§6.6) and a fabricated clock would produce fabricated queue "
+            "numbers"
+        )
+
+    def total(key: str) -> float:
+        return round(sum(float(m.get(key) or 0.0) for m in per_camera.values()), 4)
+
+    return {
+        "per_camera": per_camera,
+        "submitted_total": total("submitted_total"),
+        "handed_out_total": total("handed_out_total"),
+        "dropped_stale_total": total("dropped_stale"),
+        "depth_at_end": total("queue_depth"),
+        "worker_utilisation": M.withheld(
+            "there is no worker pool yet (§5.2, last step in the B track), so "
+            "there is no utilisation to report. Left out rather than 0.0, which "
+            "would read as an idle pool"
+        ),
+        # Read this before reading dropped_stale_total. The scheduler drops a
+        # stale request when one is POPPED; with no consumer nothing is popped,
+        # so a zero here means "nothing was ever examined", not "nothing went
+        # stale". `depth_at_end` and the per-camera `oldest_queued_age` are the
+        # numbers that describe what actually happened.
+        "had_consumer": any(
+            bool(m.get("has_consumer")) for m in per_camera.values()
+        ),
+        "priority_order_is_door_first": True,
+    }
 
 
 def _detector_throughput_probe(
@@ -334,6 +395,25 @@ def run_bench(options: BenchOptions) -> Dict[str, Any]:
     descriptors = [dataclasses.asdict(run.descriptor) for run in runs if run.descriptor]
     pts_source = descriptors[0]["pts_source"] if descriptors else "unknown"
     results["timeline"] = M.timeline_summary(descriptors, segments)
+
+    # --- B5: where appearances ended, and what the queue did ---------------
+    # Zone exits are valid under the same restriction as every other track
+    # metric (§13.2): in realtime mode a dropped frame ends an appearance
+    # wherever the person happened to be, so the zone describes the test machine
+    # rather than the room.
+    if identity_ok:
+        results["zone_exits"] = M.zone_exits(
+            segments,
+            annotation,
+            door_configured=bool(config.zones.door_regions),
+        )
+    else:
+        results["zone_exits"] = M.withheld(
+            "valid in throughput mode with N=1 only: a dropped frame ends an "
+            "appearance wherever the person happened to be, so the exit zone "
+            "would describe the test machine (§13.2)"
+        )
+    results["recognition_queue"] = _recognition_queue_metrics(runs, config)
 
     # Every frozen key must be present before the report is built — a run that
     # silently omits one produces a baseline that cannot be compared with the

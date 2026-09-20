@@ -10,7 +10,7 @@ Schema, deliberately terse because a half-hour five-camera run writes
 hundreds of thousands of lines:
 
     {"cam":"cam0","f":412,"pts":16.48,"e":0,"w":1920,"h":1080,
-     "tr":[[7,0.104,0.233,0.191,0.712,"TRACKED",0.91]]}
+     "tr":[[7,0.104,0.233,0.191,0.712,"TRACKED",0.91,"interior"]]}
 
     cam  camera id
     f    frame id as the source numbered it
@@ -20,7 +20,12 @@ hundreds of thousands of lines:
          from a fresh random base, so the difference is not a wrong duration,
          it is a meaningless one that still prints.
     w,h  frame size, so normalized boxes can be put back into pixels
-    tr   [track_id, x1, y1, x2, y2, state, confidence], box NORMALIZED to [0,1]
+    tr   [track_id, x1, y1, x2, y2, state, confidence, zone], box NORMALIZED
+         to [0,1]. `zone` was appended in B5 — `door`, `interior` or
+         `frame_edge` (§4.2). It is written rather than recomputed at analysis
+         time so the file carries the same door definition the run used; a log
+         written before B5 has seven entries and reads as `interior`, which is
+         what it implicitly was.
 
 Boxes are normalized because this file is a boundary (ENGINE_PROTOCOL.md §5)
 and because the annotator's overlay video and the engine's mainstream may not
@@ -37,6 +42,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
+from ..ingest.timeline import epochs_are_comparable
 from ..ports.observation import FrameObservation
 
 TRACKLOG_SCHEMA_VERSION = 1
@@ -69,6 +75,7 @@ class TrackLogWriter:
                     round(track.box.y2, 5),
                     track.state,
                     round(track.confidence, 4),
+                    track.zone,
                 ]
                 for track in observation.tracks
             ],
@@ -168,6 +175,8 @@ class TrackSegment:
         "first_box",
         "last_box",
         "epoch",
+        "first_zone",
+        "last_zone",
     )
 
     def __init__(
@@ -177,6 +186,7 @@ class TrackSegment:
         start_pts: float,
         first_box: List[float],
         epoch: int = 0,
+        zone: str = "interior",
     ) -> None:
         self.camera_id = camera_id
         self.track_id = track_id
@@ -186,10 +196,19 @@ class TrackSegment:
         self.first_box = first_box
         self.last_box = first_box
         self.epoch = epoch
+        # Where this appearance began and ended (B5). `last_zone` is the one
+        # §4.2 cares about: a segment ending at the door is somebody leaving, a
+        # segment ending mid-room is the tracker losing somebody who is still
+        # there. `first_zone` is the other direction of the same field (§3.2) —
+        # an appearance starting at the door is an entry rather than a track
+        # re-materialising in the middle of the room.
+        self.first_zone = zone
+        self.last_zone = zone
 
-    def extend(self, pts: float, box: List[float]) -> None:
+    def extend(self, pts: float, box: List[float], zone: str = "interior") -> None:
         self.end_pts = pts
         self.last_box = box
+        self.last_zone = zone
         self.frames += 1
 
     @property
@@ -205,6 +224,8 @@ class TrackSegment:
             "duration_s": round(self.duration, 4),
             "frames": self.frames,
             "epoch": self.epoch,
+            "first_zone": self.first_zone,
+            "last_zone": self.last_zone,
         }
 
 
@@ -232,6 +253,9 @@ def segments_from_log(
         for entry in record["tr"]:
             track_id = int(entry[0])
             box = [float(v) for v in entry[1:5]]
+            # Position 7 is B5's zone. A pre-B5 log stops at 6, and additive-only
+            # (§13.4) means that has to keep loading rather than raising.
+            zone = str(entry[7]) if len(entry) > 7 else "interior"
             key = (cam, track_id)
             seen.add(key)
 
@@ -239,7 +263,9 @@ def segments_from_log(
             # A reconnect always ends a segment, whatever the PTS says. After
             # it, PTS is on a new timebase, so `pts - segment.end_pts` is not a
             # gap — it is two unrelated numbers being subtracted.
-            crossed_epoch = segment is not None and segment.epoch != epoch
+            crossed_epoch = segment is not None and not epochs_are_comparable(
+                segment.epoch, epoch
+            )
             if (
                 segment is None
                 or crossed_epoch
@@ -247,9 +273,11 @@ def segments_from_log(
             ):
                 if segment is not None:
                     finished.append(segment)
-                open_segments[key] = TrackSegment(cam, track_id, pts, box, epoch)
+                open_segments[key] = TrackSegment(
+                    cam, track_id, pts, box, epoch, zone
+                )
             else:
-                segment.extend(pts, box)
+                segment.extend(pts, box, zone)
 
     finished.extend(open_segments.values())
     finished.sort(key=lambda s: (s.camera_id, s.start_pts, s.track_id))

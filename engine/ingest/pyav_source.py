@@ -72,8 +72,14 @@ class PyAVSource(BaseFrameSource):
         measure_timeline_fidelity: bool = True,
         decoder_thread_type: str = "AUTO",
         decoder_threads: int = 0,
+        colour_conversion: str = "to_ndarray",
         av_module: Any = None,
     ) -> None:
+        if colour_conversion not in ("to_ndarray", "reformatter"):
+            raise ValueError(
+                f"Unknown colour_conversion {colour_conversion!r}. Expected "
+                f"'to_ndarray' or 'reformatter'."
+            )
         super().__init__(source_id=source_id)
         self._uri = str(uri)
         self._rtsp_transport = rtsp_transport
@@ -84,6 +90,8 @@ class PyAVSource(BaseFrameSource):
         self._thread_type = decoder_thread_type
         self._thread_count = int(decoder_threads)
         self._threading: Dict[str, Any] = {}
+        self._colour_conversion = colour_conversion
+        self._reformatter: Any = None
         self._av = av_module
 
         self._container: Any = None
@@ -308,12 +316,15 @@ class PyAVSource(BaseFrameSource):
         elif getattr(av_frame, "time", None) is not None:
             raw_pts = float(av_frame.time)
 
-        pts, wallclock = self.timeline.stamp(raw_pts)
+        stamp = self.timeline.stamp(raw_pts)
 
-        if self.fidelity is not None and pts is not None and self._fps > 0:
-            self.fidelity.observe(self._frame_count, pts, self._fps)
+        if self.fidelity is not None and stamp.pts is not None and self._fps > 0:
+            # The stream-relative value, which is what `(index - 1) / fps` also
+            # measures from. Comparing the container base against a timeline
+            # that starts at zero would report the base itself as deviation.
+            self.fidelity.observe(self._frame_count, stamp.pts, self._fps)
 
-        image = av_frame.to_ndarray(format="bgr24")
+        image = self._to_bgr(av_frame)
         if not self._width or not self._height:
             self._height, self._width = image.shape[:2]
 
@@ -326,12 +337,50 @@ class PyAVSource(BaseFrameSource):
                 fps=self._fps,
                 width=self._width,
                 height=self._height,
-                pts=pts,
-                pts_source=PTS_CONTAINER if pts is not None else "none",
+                pts=stamp.pts,
+                pts_source=PTS_CONTAINER if stamp.pts is not None else "none",
                 stream_epoch=self.timeline.epoch,
-                wallclock=wallclock,
+                wallclock=stamp.wallclock,
+                container_pts=stamp.container_pts,
+                pts_wallclock_offset=stamp.offset,
             ),
         )
+
+    def _to_bgr(self, av_frame: Any):
+        """
+        The decoded frame as a BGR ndarray — by one of two routes, on purpose.
+
+        `probe_ingest` measured PyAV at 80 fps against OpenCV's 113 on the same
+        1080p HEVC file, with decoder threading verified as applied to both the
+        codec context and the stream. A 29% gap outside a 3.3% run-to-run spread
+        is not noise, and "PyAV is slower" is not a finding — it is where the
+        investigation starts. The remaining per-frame work after decode is the
+        colour conversion, and `to_ndarray(format=...)` builds its conversion
+        context and its destination buffer on every single call.
+
+        So there are two paths and the probe times both, because §16 says a
+        step is measured rather than argued about, and because I am not going to
+        assert a speedup I cannot reproduce on this machine:
+
+        `to_ndarray` — what B4 shipped. Unchanged, and still the default, so
+        nothing about the committed baseline moves under anyone's feet.
+
+        `reformatter` — one `VideoReformatter` reused for the lifetime of the
+        source, converting into its own cached context. Same pixels; the
+        difference is how many times libswscale is asked to set itself up.
+
+        If the second wins on the real recording, it becomes the default in its
+        own commit with the delta recorded. If it does not, `to_ndarray` was
+        never the problem and the next suspect is frame threading depth.
+        """
+        if self._colour_conversion == "to_ndarray":
+            return av_frame.to_ndarray(format="bgr24")
+
+        if self._reformatter is None:
+            av = self._import_av()
+            self._reformatter = av.video.reformatter.VideoReformatter()
+        converted = self._reformatter.reformat(av_frame, format="bgr24")
+        return converted.to_ndarray()
 
     def _reconnect(self) -> bool:
         """
@@ -418,6 +467,7 @@ class PyAVSource(BaseFrameSource):
             "declared_frames": self._declared_frames,
             "duration_seconds": round(self._duration_seconds, 4),
             "decoder_threading": self._threading,
+            "colour_conversion": self._colour_conversion,
             "timeline": self.timeline.as_dict(),
         }
         if self.fidelity is not None:

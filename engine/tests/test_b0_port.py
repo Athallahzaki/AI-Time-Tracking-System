@@ -409,7 +409,9 @@ def test_tracker_is_configured_from_the_file_not_the_placeholder_fps():
     from engine.factory import build_tracker
     from engine.ingest import VideoFileSource
 
-    clip = ENGINE_ROOT / "samples" / "synthetic_24fps.mp4"
+    from engine.tests.assets import ensure_synthetic_clip
+
+    clip = ensure_synthetic_clip()
     source = VideoFileSource(filepath=str(clip), realtime_pacing=False)
 
     assert source.fps == 30.0, "placeholder assumption changed; this test is stale"

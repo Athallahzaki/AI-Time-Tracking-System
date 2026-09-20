@@ -18,12 +18,25 @@ class FrameMetadata:
     timeline leaves them at their defaults. `ports/` is shared with Engine A, so
     this is a change A should know about even though nothing of A's breaks.
 
-    **`pts`** — seconds on the source's own timeline. ARCHITECTURE.md §6.6: the
-    engine and the backend pull the same stream, so for the same frame both read
-    the same number, and nobody has to agree on a clock. It was living in
-    `extra["pts"]` between B1 and B4, which is where things go to be forgotten:
-    not greppable with confidence, invisible to a type checker, easy to
-    misspell into silence.
+    **`pts`** — seconds since the start of the current epoch's stream, which is
+    what `contracts/schema` and `ENGINE_PROTOCOL.md` §1 both define `pts` to
+    mean, and what `api/events.PtsClock.at()` assumes when it computes
+    `offset + pts`. It was living in `extra["pts"]` between B1 and B4, which is
+    where things go to be forgotten: not greppable with confidence, invisible to
+    a type checker, easy to misspell into silence.
+
+    **`container_pts`** — the container's unrebased value. ARCHITECTURE.md §6.6
+    wants the engine and the backend to read *the same number* for the same
+    frame, with nothing to agree on; that property belongs to this field, not to
+    `pts`, because the wire contract had already fixed what `pts` means. On a
+    file the two are equal and nothing distinguishes them, which is exactly why
+    conflating them survived until the first camera.
+
+    **`pts_wallclock_offset`** — the epoch's offset, such that
+    `wallclock == pts_wallclock_offset + pts`. It is here so the layer that puts
+    `pts_wallclock_offset` on the wire (§4.4, §4.5) reads it from the source
+    that established it instead of sampling its own clock and hoping PTS starts
+    at zero.
 
     **`pts_source`** — where that number came from, and this is the field that
     stops a later reader from over-trusting it:
@@ -61,6 +74,8 @@ class FrameMetadata:
     pts_source: str = "none"
     stream_epoch: int = 0
     wallclock: Optional[float] = None
+    container_pts: Optional[float] = None
+    pts_wallclock_offset: Optional[float] = None
 
     extra: Dict[str, Any] = field(default_factory=dict)
 

@@ -52,6 +52,8 @@ class LocalTrackStream:
         self._descriptor: Optional[StreamDescriptor] = None
         self._frames_read = 0
         self._closed = False
+        self._last_pts = 0.0
+        self._queue_metrics: Optional[dict] = None
 
     # -- TrackStream ------------------------------------------------------
 
@@ -121,6 +123,8 @@ class LocalTrackStream:
                     self._descriptor, frame.metadata.pts_source
                 )
 
+            self._last_pts = _pts_of(frame, fps)
+
             yield FrameObservation(
                 camera_id=self._camera_id,
                 frame_id=frame.frame_id,
@@ -136,6 +140,10 @@ class LocalTrackStream:
                         box=NormalizedBox.from_pixels(track.bbox, width, height),
                         state=str(getattr(track.state, "value", track.state)),
                         confidence=float(track.confidence),
+                        # B5. Filled by the pipeline's zoner when one is wired
+                        # up; `interior` when it is not, which is what every
+                        # pre-B5 observation meant implicitly.
+                        zone=str(track.attributes.get("zone", "interior")),
                     )
                     for track in tracks
                 ),
@@ -148,6 +156,13 @@ class LocalTrackStream:
             return
         self._closed = True
         if self._engine is not None:
+            # Read before stopping: the queue's depth and its stale-drop count
+            # describe the run, and a stopped engine has neither. Through the
+            # public property, because §13.9 forbids the observer side from
+            # reaching into the engine's internals — including this one.
+            queue = getattr(self._engine, "recognition_queue", None)
+            if queue is not None:
+                self._queue_metrics = queue.metrics(self._last_pts)
             self._engine.stop()
         # describe() is only complete once the source has run: timeline
         # fidelity and the reconnect count are accumulated, not declared.
@@ -161,6 +176,19 @@ class LocalTrackStream:
     @property
     def descriptor(self) -> Optional[StreamDescriptor]:
         return self._descriptor
+
+    @property
+    def recognition_queue_metrics(self) -> Optional[dict]:
+        """
+        B5's queue state at the end of the run, or None if no queue was wired.
+
+        §5.2 calls four of these mandatory — depth, drop rate, request age at
+        dequeue, worker utilisation — and only the first three exist yet, because
+        there are no workers. The ones that do exist are reported; the ones that
+        do not are absent rather than zero, which is the difference between "not
+        measured" and "measured as nothing happening".
+        """
+        return self._queue_metrics
 
     # -- internals --------------------------------------------------------
 

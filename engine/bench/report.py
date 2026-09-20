@@ -69,6 +69,9 @@ FROZEN_METRIC_KEYS = (
     # Added in B4. The schema may gain fields; it may never change what an
     # existing one means (§13.4, and §6.8 for the same rule on the protocol).
     "timeline",
+    # Added in B5. Same rule.
+    "zone_exits",
+    "recognition_queue",
 )
 
 

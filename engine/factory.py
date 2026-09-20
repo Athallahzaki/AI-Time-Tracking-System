@@ -59,6 +59,7 @@ def build_source(
             measure_timeline_fidelity=config.ingest.measure_timeline_fidelity,
             decoder_thread_type=config.ingest.decoder_thread_type,
             decoder_threads=config.ingest.decoder_threads,
+            colour_conversion=config.ingest.colour_conversion,
         )
     elif config.source_type == "video_file":
         # realtime_pacing=False always. Pacing is a benchmark mode decision
@@ -172,6 +173,54 @@ def resolve_source_fps(config: EngineConfig, source: Any) -> float:
     return source_fps
 
 
+def build_zoner(config: EngineConfig) -> Any:
+    """
+    B5's zone labeller, always built.
+
+    Always, even with no `door_region` configured, because a camera with no
+    region still distinguishes `frame_edge` from `interior` — a track that dies
+    at the edge of the frame died for a geometric reason, and that is worth
+    knowing even when nobody has drawn the door yet. An unconfigured camera never
+    reports `door`; `presence/zones.py` explains why that default is the safe
+    direction to be wrong in.
+    """
+    from .pipeline.zoning import TrackZoner
+
+    return TrackZoner(
+        door_regions=config.zones.door_regions,
+        edge_margin=config.zones.edge_margin,
+    )
+
+
+def build_recognition_queue(config: EngineConfig, zoner: Any) -> Optional[Any]:
+    """
+    B5's priority queue, or None when `recognition.enabled` is false.
+
+    Default off. B1's committed baseline was measured with no queue in the loop,
+    and §16 asks that one variable move per step; the queue's own numbers come
+    from runs that turn it on.
+    """
+    if not config.recognition.enabled:
+        return None
+
+    from .identity import RecognitionScheduler
+    from .pipeline.zoning import ZonePriorityQueue
+
+    scheduler = RecognitionScheduler(**config.recognition.scheduler_kwargs())
+    logger.info(
+        "Recognition queue enabled: %s, max %d request(s) per frame. No consumer "
+        "is attached — until the worker pool of §5.2 exists this orders requests "
+        "and measures the queue, it does not recognise anything.",
+        scheduler.__class__.__name__,
+        config.recognition.max_requests_per_frame,
+    )
+    return ZonePriorityQueue(
+        scheduler=scheduler,
+        zoner=zoner,
+        max_requests_per_frame=config.recognition.max_requests_per_frame,
+    )
+
+
 def build_engine(
     config: EngineConfig,
     max_frames: Optional[int] = None,
@@ -199,11 +248,15 @@ def build_engine(
 
     engine_source = source if wrap_source is None else wrap_source(source, source_fps)
 
+    zoner = build_zoner(config)
+
     engine = VisionEngine(
         source=engine_source,
         detector=detector,
         tracker=tracker,
         config=config,
         recorder=recorder,
+        zoner=zoner,
+        recognition_queue=build_recognition_queue(config, zoner),
     )
     return engine, source, source_fps

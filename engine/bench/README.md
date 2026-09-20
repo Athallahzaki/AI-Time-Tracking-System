@@ -170,6 +170,14 @@ the last week.
 - **`streams[].pts_source: derived_from_fps`** — `cv2.VideoCapture` discards the
   real PTS (§5.5). For a file off disk, index ÷ fps is the same thing. For a
   live RTSP camera it is not. Step B4 fixes it.
+- **`zone_exits.caveat`** — present whenever no `door_region` was configured. The
+  interior fraction is then arithmetic rather than evidence: nothing *can* be
+  labelled `door`, so 100% mid-room endings means only that nobody drew the door.
+- **`recognition_queue.had_consumer: false`** — read it before reading
+  `dropped_stale_total`. The scheduler discards a stale request when one is
+  popped, and with no worker pool nothing is ever popped, so a zero there means
+  "nothing was examined", not "nothing went stale". `depth_at_end` and the
+  per-camera `oldest_queued_age` are the numbers that describe the run.
 - **`engine.git.dirty_warning`** — a dirty tree means the SHA does not describe
   the code that ran.
 
@@ -180,6 +188,28 @@ the last week.
 | `end_to_end_accuracy` | enrollment + identity layer (§10, A8) |
 | `throughput.queue_depth` | the recognition worker pool (step 18) |
 | `recognizable_faces` (real figure) | a ported face detector — see below |
+| `recognition_queue.worker_utilisation` | the same worker pool (§5.2) |
+| `zone_exits.while_person_present` | presence intervals — the CHEAP annotation |
+
+## B5: where appearances end, and why it is not the go/no-go number
+
+`zone_exits` is §13.8's cheap half. A track that ends **at the door** is somebody
+leaving; one that ends **mid-room** is the tracker losing somebody who never
+moved, and the ratio is the earliest warning this harness can give — available
+with **no annotation at all**, because the zone comes from the run rather than
+from a label.
+
+It counts **events, not minutes**, and the go/no-go in `bench/gonogo.yaml` is in
+minutes. Turning a broken ending into a duration means knowing whose track it
+was; that is `track_map`, and `false_gaps` is where it is used. The two sit side
+by side in the report and are never added together: conflating "how often" with
+"how long" is how a promising ratio becomes a number nobody can defend in a
+meeting.
+
+With presence intervals only — no track map, the cheapest annotation there is —
+the count narrows to endings that happened while somebody was demonstrably in
+the room, which removes the ordinary case of a person walking out and costs
+nothing extra to produce.
 
 **The face metric is a known hole.** §13.5 makes "how often a recognizable face
 appears, per person per hour" a go/no-go metric, and B0 did not port a face

@@ -41,5 +41,21 @@ class TrackLostEvent(CoreEvent):
 
 @dataclass(frozen=True)
 class TrackRemovedEvent(CoreEvent):
+    """
+    A track the tracker has stopped reporting.
+
+    `exit_zone` was added in B5 and is additive — it defaults to `interior`,
+    which is what an unlabelled ending has always implicitly been. It is here
+    rather than derived later because by the time anyone handles this event the
+    box is gone: the tracker no longer reports the track, so the last position it
+    was seen in cannot be recovered. ENGINE_PROTOCOL.md §7 requires every
+    `track.ended` to carry an exit zone, and §4.2 is the reason — a track ending
+    at the door is a departure, one ending mid-room is a tracking failure, and
+    the layer above cannot tell them apart from a track id and a duration.
+    """
+
     track_id: int = 0
     dwell_time: float = 0.0
+    exit_zone: str = "interior"
+    entry_zone: str = "interior"
+    camera_id: str = ""

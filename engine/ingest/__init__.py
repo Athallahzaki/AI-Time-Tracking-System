@@ -23,7 +23,9 @@ _LAZY = {
     "PyAVSource": "pyav_source",
     "StreamTimeline": "timeline",
     "TimelineFidelity": "timeline",
+    "Stamp": "timeline",
     "derived_pts": "timeline",
+    "epochs_are_comparable": "timeline",
 }
 
 __all__ = list(_LAZY)
