@@ -20,10 +20,10 @@ The pacing lives in a source wrapper rather than in the engine because that
 keeps the engine identical in both modes. A mode that changes engine code is a
 mode that measures different code.
 
-One caveat stated in the report, not here: until step B4 replaces ingest with
-PyAV, there is no real PTS (§5.5) and "source PTS" means "frame index divided
-by declared fps". For a file played from disk that is the same thing. For a
-live RTSP camera it will not be, which is exactly why B4 exists.
+Since B4 "source PTS" means the container's own PTS whenever the source has
+one, and the report's `pts_source` says which it was. The OpenCV backend still
+has no PTS at all and falls back to `index / fps`; a run made on it is fine for
+a constant-rate file and quietly wrong for a variable-rate one.
 """
 
 from __future__ import annotations
@@ -114,12 +114,18 @@ class RealtimeSource(_SourceProxy):
     """
     Paces reads to the source timeline and drops when the pipeline falls behind.
 
+    Since B4 the schedule comes from each frame's own PTS when the source has a
+    real one, and falls back to `index / fps` when it does not. That is not
+    cosmetic: on a variable-rate recording the two schedules differ exactly
+    where the recorder skipped frames, so index-based pacing would sleep for
+    time that was never recorded and call the result a realtime run.
+
     Falling behind is the thing being measured, so the drop policy is stated
-    rather than tuned: if the deadline for the next frame has already passed by
-    more than one frame interval, that frame is decoded and thrown away and the
-    next is considered. Decoding it anyway is deliberate — decode is a real cost
-    a production engine pays on every frame whether or not it analyses it, and
-    skipping the decode would flatter the result.
+    rather than tuned: if a frame's deadline has already passed by more than one
+    nominal interval, that frame is thrown away and the next is considered.
+    Decoding it anyway is deliberate — decode is a real cost a production engine
+    pays on every frame whether or not it analyses it, and skipping the decode
+    would flatter the result.
     """
 
     def __init__(
@@ -140,12 +146,34 @@ class RealtimeSource(_SourceProxy):
         self._recorder = recorder
         self._max_consecutive_drops = max_consecutive_drops
         self._t0: Optional[float] = None
+        self._first_pts: Optional[float] = None
+        self._epoch: Optional[int] = None
         self._index = 0
 
     def start(self) -> None:
         self._inner.start()
         self._t0 = time.perf_counter()
+        self._first_pts = None
+        self._epoch = None
         self._index = 0
+
+    def _offset_of(self, frame: Any) -> float:
+        """Where this frame belongs on the run's timeline, in seconds."""
+        metadata = getattr(frame, "metadata", None)
+        pts = getattr(metadata, "pts", None) if metadata is not None else None
+        epoch = getattr(metadata, "stream_epoch", 0) if metadata is not None else 0
+
+        if pts is None:
+            return (self._index - 1) * self._interval
+
+        # A reconnect restarts PTS from a new base, so the anchor is re-taken
+        # rather than subtracted across the boundary. Without this, the first
+        # frame after a reconnect gets a deadline decades away or decades past.
+        if self._epoch != epoch or self._first_pts is None:
+            self._epoch = epoch
+            self._first_pts = pts
+            self._t0 = time.perf_counter()
+        return pts - self._first_pts
 
     def read(self) -> Any:
         if self._t0 is None:
@@ -153,14 +181,15 @@ class RealtimeSource(_SourceProxy):
 
         consecutive = 0
         while True:
-            deadline = self._t0 + self._index * self._interval
+            frame = self._inner.read()
+            self._index += 1
+            if frame is None:
+                return None
+
+            deadline = self._t0 + self._offset_of(frame)
             now = time.perf_counter()
 
             if now > deadline + self._interval:
-                frame = self._inner.read()
-                self._index += 1
-                if frame is None:
-                    return None
                 if self._recorder is not None:
                     self._recorder.record_drop("behind_schedule")
                 consecutive += 1
@@ -185,6 +214,4 @@ class RealtimeSource(_SourceProxy):
                 time.sleep(deadline - now)
                 if self._recorder is not None:
                     self._recorder.record_span("pacing_wait", now, time.perf_counter())
-            frame = self._inner.read()
-            self._index += 1
             return frame

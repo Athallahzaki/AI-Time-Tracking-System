@@ -141,10 +141,21 @@ colleagues, §7.4 already invokes UU 27/2022, and git means retention forever.
 Keep it outside the repository, record its `sha256` in the annotation, and get
 written consent before recording.
 
-**Phone footage is optimistic.** Wider lens, adaptive exposure, bitrate far
-above a CCTV substream, no rolling-shutter artefacts. Every number from it is an
-**upper bound**, and the report says so in its own caveat list — because in two
-months somebody will quote it as a production figure.
+**Phone footage is optimistic — but not in every way, and the earlier version
+of this paragraph overclaimed.** The lens is wider, the exposure adapts, and
+there are no rolling-shutter artefacts from a cheap IP sensor: those make its
+numbers an **upper bound**, and the report says so in its own caveat list,
+because in two months somebody will quote them as production figures. The
+bitrate claim was wrong, though. `ffprobe` on the test clip reports 2070 kb/s
+at 1080p, which is CCTV-mainstream territory rather than far above it — and it
+is HEVC, which costs *more* to decode than the H.264 a camera substream would
+send. So the decode-cost figure from a phone clip is not obviously generous.
+
+That HEVC is also a live reminder: §15 still has "camera codec confirmed H.264,
+not H.265?" open, and §6.7.2 says the answer changes the entire CPU budget
+because browsers mostly cannot play H.265. The phone proves nothing about the
+camera, but the question is cheap to settle now and expensive to discover in
+the last week.
 
 ## Where the report is honest about itself
 

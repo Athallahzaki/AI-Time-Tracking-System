@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 
 from .base import BaseFrameSource
+from .timeline import PTS_DERIVED, derived_pts
 from ..ports.frame import Frame, FrameMetadata
 
 logger = logging.getLogger(__name__)
@@ -151,6 +152,11 @@ class OpenCVStreamSource(BaseFrameSource):
             fid = self._frame_id
             ts = self._latest_timestamp
 
+        # No container PTS here either, and worse than the file case: this
+        # source reconnects on its own and the frame counter keeps climbing
+        # across the break, so the derived timeline silently pretends one
+        # continuous stream. stream_epoch stays 0 because nothing tracks the
+        # boundary — which is one of the reasons PyAVSource replaces this.
         metadata = FrameMetadata(
             frame_id=fid,
             timestamp=ts,
@@ -158,6 +164,9 @@ class OpenCVStreamSource(BaseFrameSource):
             fps=self._measured_fps,
             width=self._width,
             height=self._height,
+            pts=derived_pts(fid, self._measured_fps),
+            pts_source=PTS_DERIVED,
+            stream_epoch=0,
         )
         return Frame(image=img, metadata=metadata)
 

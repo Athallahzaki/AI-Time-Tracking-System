@@ -14,8 +14,8 @@ the vocabulary of company rules inside the engine, which is the exact thing
 and it was right to.
 
 What replaced it is an **allowlist derived from the schema itself**. The engine
-accepts three sections — `core`, `detector`, `tracker` — and within each, only
-the fields its dataclass declares. Everything else is refused by name at load
+accepts four sections — `core`, `ingest`, `detector`, `tracker` — and within
+each, only the fields its dataclass declares. Everything else is refused by name at load
 time. No list of forbidden words exists anywhere in this package; the offending
 name comes from the user's file at runtime and appears only in the error.
 
@@ -40,7 +40,13 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Set, Union
 
-from .schema import DetectorConfig, EngineConfig, TrackerConfig, resolve_engine_path
+from .schema import (
+    DetectorConfig,
+    EngineConfig,
+    IngestConfig,
+    TrackerConfig,
+    resolve_engine_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,11 +68,12 @@ def _field_names(cls: type) -> Set[str]:
 
 
 # Derived from the dataclasses, so the schema cannot drift from what the loader
-# accepts. `detector` and `tracker` are nested objects on EngineConfig and are
-# sections in the file, not keys inside `core`.
-_CORE_KEYS = _field_names(EngineConfig) - {"detector", "tracker"}
+# accepts. `ingest`, `detector` and `tracker` are nested objects on EngineConfig
+# and are sections in the file, not keys inside `core`.
+_CORE_KEYS = _field_names(EngineConfig) - {"ingest", "detector", "tracker"}
 _SECTIONS: Dict[str, Set[str]] = {
     "core": _CORE_KEYS,
+    "ingest": _field_names(IngestConfig),
     "detector": _field_names(DetectorConfig),
     "tracker": _field_names(TrackerConfig),
 }
@@ -123,6 +130,7 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
     _assert_within_the_engines_remit(raw)
 
     core = raw.get("core", {}) or {}
+    ing = raw.get("ingest", {}) or {}
     det = raw.get("detector", {}) or {}
     trk = raw.get("tracker", {}) or {}
 
@@ -133,6 +141,23 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
         target_fps=core.get("target_fps"),
         auto_warmup=bool(core.get("auto_warmup", True)),
         strict_mode=bool(core.get("strict_mode", True)),
+        ingest=IngestConfig(
+            backend=str(ing.get("backend", "pyav")),
+            rtsp_transport=str(ing.get("rtsp_transport", "tcp")),
+            timeout_seconds=float(ing.get("timeout_seconds", 8.0)),
+            reconnect_attempts=int(ing.get("reconnect_attempts", 0)),
+            reconnect_backoff_seconds=float(
+                ing.get("reconnect_backoff_seconds", 1.0)
+            ),
+            max_reconnect_backoff_seconds=float(
+                ing.get("max_reconnect_backoff_seconds", 30.0)
+            ),
+            measure_timeline_fidelity=bool(
+                ing.get("measure_timeline_fidelity", True)
+            ),
+            decoder_thread_type=str(ing.get("decoder_thread_type", "AUTO")),
+            decoder_threads=int(ing.get("decoder_threads", 0)),
+        ),
         detector=DetectorConfig(
             model_path=str(det.get("model_path", "LibreDFINEs.pt")),
             confidence_threshold=float(det.get("confidence_threshold", 0.50)),

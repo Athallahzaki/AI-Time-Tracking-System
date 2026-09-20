@@ -132,6 +132,11 @@ def _run_one_camera(
         if writer is not None:
             writer.close()
         stream.close()
+        # Re-read after close: timeline fidelity and the reconnect count are
+        # accumulated while running, so the descriptor taken at open() is a
+        # snapshot of the beginning, not of the run.
+        if stream.descriptor is not None:
+            run.descriptor = stream.descriptor
 
 
 def _detector_throughput_probe(
@@ -323,12 +328,19 @@ def run_bench(options: BenchOptions) -> Dict[str, Any]:
         config, options.detector_probe_iters
     )
 
+    # close() refreshes each descriptor with what the source accumulated while
+    # running — timeline fidelity and the reconnect count are measured, not
+    # declared, so they are only complete now.
+    descriptors = [dataclasses.asdict(run.descriptor) for run in runs if run.descriptor]
+    pts_source = descriptors[0]["pts_source"] if descriptors else "unknown"
+    results["timeline"] = M.timeline_summary(descriptors, segments)
+
+    # Every frozen key must be present before the report is built — a run that
+    # silently omits one produces a baseline that cannot be compared with the
+    # others, which is the whole thing §13.4 exists to prevent.
     missing = [key for key in R.FROZEN_METRIC_KEYS if key not in results]
     if missing:
         raise RuntimeError(f"metrics block is missing frozen keys {missing}")
-
-    descriptors = [dataclasses.asdict(run.descriptor) for run in runs if run.descriptor]
-    pts_source = descriptors[0]["pts_source"] if descriptors else "unknown"
 
     recording_path = Path(config.source_uri) if config.source_type != "mock" else None
     recording = {
@@ -379,6 +391,7 @@ def run_bench(options: BenchOptions) -> Dict[str, Any]:
             mode=options.mode,
             cameras=options.cameras,
             pts_source=pts_source,
+            source_type=config.source_type,
             recording_is_phone=options.recording_is_phone
             and config.source_type == "video_file",
             annotation_present=annotation is not None,

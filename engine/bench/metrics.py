@@ -266,6 +266,7 @@ class Chain:
     segments: List[TrackSegment]
     basis: str
     person_id: Optional[str] = None
+    epoch: int = 0
 
     @property
     def duration(self) -> float:
@@ -316,6 +317,12 @@ def stitch(
         for chain in open_chains:
             if chain.camera_id != segment.camera_id:
                 continue
+            # B4: a reconnect resets the timebase, so a "gap" measured across
+            # one is two unrelated numbers subtracted. Never stitch across it —
+            # the result would look like a plausible short gap and be nothing
+            # of the kind.
+            if getattr(chain, "epoch", 0) != getattr(segment, "epoch", 0):
+                continue
             gap = segment.start_pts - chain.end_pts
             if gap < 0 or gap > window_seconds:
                 continue
@@ -335,6 +342,7 @@ def stitch(
                 segments=[segment],
                 basis=basis,
                 person_id=person_id,
+                epoch=getattr(segment, "epoch", 0),
             )
             chains.append(target)
             open_chains.append(target)
@@ -594,3 +602,100 @@ def false_gaps(
         entry["basis"] = basis
         result["stitched"][f"N={window:g}s"] = entry
     return result
+
+
+# ---------------------------------------------------------------------------
+# the timeline itself (B4)
+# ---------------------------------------------------------------------------
+
+def timeline_summary(
+    descriptors: Sequence[Dict[str, Any]],
+    segments: Sequence[TrackSegment] = (),
+) -> Dict[str, Any]:
+    """
+    How much the timeline every other metric is computed on can be trusted.
+
+    Three things, and the first is the one that retroactively settles whether
+    older baselines are comparable:
+
+    **`fidelity`** — how far `frame_index / fps` is from the container's own
+    PTS on this recording. A near-zero final drift with a non-zero maximum is
+    the signature everybody misreads as "the fps was right": the *average* rate
+    was right and the instantaneous one was not, and a gap measured near the
+    worst moment is wrong by that much.
+
+    **`epochs`** — how many times a source reconnected. Every boundary is a
+    place where PTS restarts, so it is also a place where no duration may be
+    computed. The segmenter already refuses to cross one; this is the count, so
+    a run with reconnects is visibly not the same kind of run as one without.
+
+    **`pts_backwards_within_epoch`** — an assumption failing. Non-zero means
+    frames arrived out of presentation order inside a single connection, which
+    should not happen; it is counted rather than raised, because a live stream
+    that dies on one malformed timestamp is a worse outcome than a run whose
+    report says "three anomalies".
+    """
+    if not descriptors:
+        return withheld("no stream ran")
+
+    sources = {d.get("pts_source", "unknown") for d in descriptors}
+    per_camera = []
+    total_epoch_changes = 0
+    total_backwards = 0
+    fidelities = []
+
+    for descriptor in descriptors:
+        extra = descriptor.get("extra") or {}
+        timeline = extra.get("timeline") or {}
+        fidelity = extra.get("timeline_fidelity")
+        epochs_opened = int(timeline.get("epochs_opened", 1) or 1)
+        backwards = int(timeline.get("pts_backwards_within_epoch", 0) or 0)
+        total_epoch_changes += max(0, epochs_opened - 1)
+        total_backwards += backwards
+        if fidelity:
+            fidelities.append(fidelity)
+        per_camera.append(
+            {
+                "camera_id": descriptor.get("camera_id"),
+                "pts_source": descriptor.get("pts_source"),
+                # Not "opencv" by default. A source that does not describe
+                # itself — the mock one — is not the OpenCV backend, and
+                # saying so printed a caveat about container PTS for a run
+                # that never opened a container.
+                "backend": extra.get("backend", "unknown"),
+                "average_rate": extra.get("average_rate"),
+                "guessed_rate": extra.get("guessed_rate"),
+                "reconnects": max(0, epochs_opened - 1),
+                "pts_backwards_within_epoch": backwards,
+                "timeline_fidelity": fidelity,
+            }
+        )
+
+    segment_epochs = sorted({getattr(s, "epoch", 0) for s in segments})
+
+    summary: Dict[str, Any] = {
+        "pts_source": sorted(sources)[0] if len(sources) == 1 else sorted(sources),
+        "per_camera": per_camera,
+        "reconnects_total": total_epoch_changes,
+        "pts_backwards_total": total_backwards,
+        "epochs_seen_in_track_log": segment_epochs,
+    }
+
+    if not fidelities:
+        summary["fidelity"] = withheld(
+            "only the PyAV backend can compare a real PTS against "
+            "frame_index / fps; the OpenCV backend has no container PTS to "
+            "compare with (§5.5)"
+        )
+        return summary
+
+    # Pooled across cameras by taking the worst, because the question this
+    # answers is "could any measured duration be wrong", not "is it usually
+    # fine".
+    worst = max(
+        (f for f in fidelities if f.get("max_abs_deviation_s") is not None),
+        key=lambda f: f["max_abs_deviation_s"],
+        default=None,
+    )
+    summary["fidelity"] = worst or withheld("no frames carried a PTS")
+    return summary

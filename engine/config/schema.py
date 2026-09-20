@@ -94,6 +94,49 @@ class TrackerConfig:
 
 
 @dataclass(frozen=True)
+class IngestConfig:
+    """
+    How frames get in, and on what timeline (ARCHITECTURE.md §5.5).
+
+    `backend` exists for one step only. B4 replaces OpenCV ingest with PyAV so
+    that PTS is real rather than derived from a frame index, and a swap that
+    large gets measured rather than asserted: the same recording is benched on
+    both and the delta is committed. After that, `opencv` goes away.
+    """
+
+    backend: str = "pyav"              # "pyav" | "opencv"
+    rtsp_transport: str = "tcp"        # UDP corrupts frames silently (§5.5)
+    timeout_seconds: float = 8.0       # a dead camera must not hang a thread
+    reconnect_attempts: int = 0        # 0 for files; a live camera wants > 0
+    reconnect_backoff_seconds: float = 1.0
+    max_reconnect_backoff_seconds: float = 30.0
+    measure_timeline_fidelity: bool = True
+
+    # Decoder threading. "AUTO" is frame + slice threading, which is what
+    # FFmpeg gives OpenCV by default and what a 1080p HEVC stream needs to keep
+    # up. Frame threading buffers a few frames inside the decoder, which costs
+    # a little delivery latency on a live camera but changes no timestamp: PTS
+    # travels with the frame. "SLICE" avoids that buffering if it ever matters;
+    # "NONE" is for proving what single-threaded decode actually costs.
+    decoder_thread_type: str = "AUTO"    # "AUTO" | "SLICE" | "FRAME" | "NONE"
+    decoder_threads: int = 0             # 0 = one per core
+
+    def __post_init__(self) -> None:
+        if self.decoder_thread_type not in ("AUTO", "SLICE", "FRAME", "NONE"):
+            raise ValueError(
+                f"Unknown decoder_thread_type '{self.decoder_thread_type}'. "
+                f"Expected AUTO, SLICE, FRAME or NONE."
+            )
+        if self.backend not in ("pyav", "opencv"):
+            raise ValueError(
+                f"Unknown ingest backend '{self.backend}'. Expected 'pyav' or "
+                f"'opencv'."
+            )
+        if self.timeout_seconds <= 0:
+            raise ValueError("ingest.timeout_seconds must be positive.")
+
+
+@dataclass(frozen=True)
 class DetectorConfig:
     """Perceptual constants for the object detector."""
 
@@ -121,6 +164,7 @@ class EngineConfig:
     auto_warmup: bool = True
     strict_mode: bool = True
 
+    ingest: IngestConfig = field(default_factory=IngestConfig)
     detector: DetectorConfig = field(default_factory=DetectorConfig)
     tracker: TrackerConfig = field(default_factory=TrackerConfig)
 

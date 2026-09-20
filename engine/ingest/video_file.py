@@ -7,6 +7,7 @@ from typing import Optional, Tuple, Union
 import cv2
 
 from .base import BaseFrameSource
+from .timeline import PTS_DERIVED, derived_pts
 from ..ports.frame import Frame, FrameMetadata
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,10 @@ class VideoFileSource(BaseFrameSource):
                 return None
 
         self._frame_count += 1
+        # cv2.VideoCapture discards the container PTS (§5.5), so the only
+        # timeline available here is an assumed one. It is labelled as assumed:
+        # exact for a constant-rate file, and quietly wrong for a variable-rate
+        # recording, which is what phones produce. PyAVSource is the way out.
         metadata = FrameMetadata(
             frame_id=self._frame_count,
             timestamp=time.time(),
@@ -92,6 +97,9 @@ class VideoFileSource(BaseFrameSource):
             fps=self._fps,
             width=self._width,
             height=self._height,
+            pts=derived_pts(self._frame_count, self._fps),
+            pts_source=PTS_DERIVED,
+            stream_epoch=0,
         )
         return Frame(image=img, metadata=metadata)
 

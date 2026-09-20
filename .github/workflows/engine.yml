@@ -75,3 +75,50 @@ jobs:
         with:
           name: bench-smoke
           path: ${{ runner.temp }}/bench-*/
+
+  # A second job, because the first one deliberately installs nothing heavy.
+  # B4's PyAV binding is the one part of the engine that unit tests cannot
+  # reach: the logic around it is driven by a fake container, and whether real
+  # libav behaves like that fake can only be settled by opening a real file.
+  # This job is that check, and it runs on every push rather than once on a
+  # developer machine.
+  ingest-pyav:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install (ingest path)
+        run: pip install numpy "opencv-python-headless>=4.8" "PyYAML>=6.0" pytest av
+
+      - name: PyAV opens a real file and reports a real timeline
+        run: |
+          python -m engine.tools.probe_ingest \
+            --video engine/samples/synthetic_24fps.mp4 \
+            --json "$RUNNER_TEMP/probe.json"
+
+      - name: The two backends agree, and the PTS is real
+        run: |
+          python - "$RUNNER_TEMP/probe.json" <<'PY'
+          import json, sys
+          result = json.load(open(sys.argv[1]))
+          pyav, cv = result["pyav"], result["opencv"]
+
+          assert pyav["frames_read"] > 0, "PyAV decoded nothing"
+          assert pyav["pts_source"] != "derived_from_fps", pyav
+          assert pyav["timeline"]["pts_backwards_within_epoch"] == 0, pyav["timeline"]
+
+          # The sample clip is written at a constant rate, so the two decoders
+          # must agree exactly. A disagreement here means the binding is
+          # dropping or duplicating frames, which no later test would catch.
+          assert pyav["frames_read"] == cv["frames_read"], result["comparison"]
+
+          fidelity = pyav["timeline_fidelity"]
+          assert fidelity["max_abs_deviation_s"] < 0.01, fidelity
+          print("ingest ok:", fidelity["verdict"])
+          PY
+
+      - name: Ingest unit tests
+        run: pytest engine/tests/test_b4_ingest.py -q

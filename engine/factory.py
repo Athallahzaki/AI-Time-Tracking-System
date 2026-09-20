@@ -30,8 +30,36 @@ def build_source(
     """Constructs the frame source named by the config."""
     from . import ingest
 
+    uri = config.source_uri
+    is_network = uri.lower().startswith(
+        ("rtsp://", "rtsps://", "rtmp://", "http://", "https://", "udp://")
+    )
+    # PyAV takes files and network streams. A bare device index ("0" for a
+    # webcam) needs a platform-specific input format, which is a different
+    # problem and not what B4 is for — those still go to the OpenCV source.
+    use_pyav = config.ingest.backend == "pyav" and (
+        config.source_type == "video_file" or is_network
+    )
+
     if config.source_type == "mock":
         source = ingest.MockFrameSource(max_frames=max_frames)
+    elif use_pyav:
+        # One source class for files and for RTSP: PyAV does not care, and the
+        # difference that used to justify two classes — reconnect — is a config
+        # flag rather than a type (§5.5).
+        source = ingest.PyAVSource(
+            uri=config.source_uri,
+            rtsp_transport=config.ingest.rtsp_transport,
+            timeout_seconds=config.ingest.timeout_seconds,
+            reconnect_attempts=config.ingest.reconnect_attempts,
+            reconnect_backoff_seconds=config.ingest.reconnect_backoff_seconds,
+            max_reconnect_backoff_seconds=(
+                config.ingest.max_reconnect_backoff_seconds
+            ),
+            measure_timeline_fidelity=config.ingest.measure_timeline_fidelity,
+            decoder_thread_type=config.ingest.decoder_thread_type,
+            decoder_threads=config.ingest.decoder_threads,
+        )
     elif config.source_type == "video_file":
         # realtime_pacing=False always. Pacing is a benchmark mode decision
         # (§13.2) and it is made one layer up, by wrapping this source, so that
@@ -42,6 +70,14 @@ def build_source(
             realtime_pacing=False,
         )
     else:
+        if config.ingest.backend == "pyav":
+            logger.warning(
+                "ingest.backend is 'pyav' but %r is a device index, not a file "
+                "or a stream URL. Falling back to the OpenCV source, which has "
+                "no container PTS — every timestamp from this run is derived "
+                "from the frame index (§5.5), and the report says so.",
+                config.source_uri,
+            )
         source = ingest.OpenCVStreamSource(source=config.source_uri)
 
     if source_id is not None:

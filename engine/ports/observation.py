@@ -64,6 +64,14 @@ class FrameObservation:
     height: int
     tracks: Tuple[TrackObservation, ...] = ()
 
+    # Added in B4. `pts_source` says how far the timeline can be trusted
+    # ("container" or "derived_from_fps"); `stream_epoch` increments on every
+    # reconnect, and two PTS values from different epochs must never be
+    # subtracted — RTP restarts from a fresh random base, so the difference is
+    # not a wrong duration, it is a meaningless one that still prints.
+    pts_source: str = "none"
+    stream_epoch: int = 0
+
 
 @dataclass(frozen=True)
 class StreamDescriptor:

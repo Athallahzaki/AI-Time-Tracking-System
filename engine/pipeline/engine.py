@@ -321,19 +321,13 @@ class VisionEngine:
         """
         The frame's position on the source timeline, in seconds.
 
-        cv2.VideoCapture throws the real PTS away (§5.5, §9), so until step B4
-        replaces ingest with PyAV this is derived from the frame index and the
-        declared fps. It is exposed under the name `pts` because that is what it
-        becomes; the bench report records `pts_source` so no one later mistakes
-        a derived number for one that came off the wire.
+        Since B4 this is a typed field the source fills in, and the source also
+        says where the number came from (`pts_source`). The engine does not care
+        which: it passes the timeline through and lets the report and the bench
+        decide how far to trust it.
         """
-        pts = frame.metadata.extra.get("pts")
-        if pts is not None:
-            return float(pts)
-        fps = float(frame.metadata.fps or 0.0)
-        if fps <= 0.0:
-            return 0.0
-        return (frame.frame_id - 1) / fps
+        pts = frame.metadata.pts
+        return 0.0 if pts is None else float(pts)
 
     def run(self) -> None:
         """Runs the main processing loop."""

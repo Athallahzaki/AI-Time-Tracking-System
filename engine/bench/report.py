@@ -66,6 +66,9 @@ FROZEN_METRIC_KEYS = (
     "recognizable_faces",
     "end_to_end_accuracy",
     "detector_throughput_probe",
+    # Added in B4. The schema may gain fields; it may never change what an
+    # existing one means (§13.4, and §6.8 for the same rule on the protocol).
+    "timeline",
 )
 
 
@@ -307,6 +310,7 @@ def standard_caveats(
     mode: str,
     cameras: int,
     pts_source: str,
+    source_type: str = "video_file",
     recording_is_phone: bool,
     annotation_present: bool,
     face_probe_is_lower_bound: Optional[bool],
@@ -326,12 +330,27 @@ def standard_caveats(
         "removes both and that will show up in the memory profile."
     )
 
-    if pts_source != "container_pts":
+    if source_type == "mock":
         caveats.append(
-            "There is no real PTS yet: cv2.VideoCapture discards it (§5.5), so "
-            "timestamps here are frame index / declared fps. Identical for a "
-            "file played from disk, not identical for a live RTSP camera. "
-            "Step B4 replaces ingest with PyAV."
+            "Synthetic source: there is no recording, no container and no real "
+            "timeline. Timings here describe the harness, not the engine on "
+            "video. This run exists to prove the bench works, not to measure "
+            "anything."
+        )
+    elif pts_source == "derived_from_fps":
+        caveats.append(
+            "This run used the OpenCV backend, which discards the container "
+            "PTS (§5.5), so every timestamp is frame index / declared fps. "
+            "Exact for a constant-rate file and wrong for a variable-rate one "
+            "— and phone recordings are routinely variable-rate. Set "
+            "ingest.backend: pyav and compare; metrics.timeline reports how "
+            "far apart the two timelines actually are."
+        )
+    elif pts_source not in ("container", "none"):
+        caveats.append(
+            f"Timeline source is '{pts_source}', which is neither a container "
+            f"PTS nor a derived one. Treat every duration in this report as "
+            f"unverified."
         )
 
     if cameras > 1:

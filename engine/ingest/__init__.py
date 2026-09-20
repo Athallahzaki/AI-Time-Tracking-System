@@ -1,9 +1,14 @@
 """
-Frame sources. OpenCV for now; PyAV with real PTS arrives in step 2.
+Frame sources.
 
-`cv_stream` is ported so the old behaviour is reproducible, but nothing in B0
-or B1 should build on it: cv2.VideoCapture.read() throws the PTS away, and
-every timestamp in ARCHITECTURE.md §6.6 depends on having it.
+Two backends live here for exactly one step. `pyav_source` has the real
+timeline (§5.5, §6.6); `video_file` and `cv_stream` are the OpenCV originals,
+kept only so B4 can measure the two against each other on the same recording
+instead of asserting that swapping them was free. Once that delta is in a
+committed report, the OpenCV pair leaves.
+
+Everything about time that does not need a decoder is in `timeline.py`, which
+both backends share.
 """
 
 from __future__ import annotations
@@ -15,6 +20,10 @@ _LAZY = {
     "OpenCVStreamSource": "cv_stream",
     "VideoFileSource": "video_file",
     "MockFrameSource": "mock_source",
+    "PyAVSource": "pyav_source",
+    "StreamTimeline": "timeline",
+    "TimelineFidelity": "timeline",
+    "derived_pts": "timeline",
 }
 
 __all__ = list(_LAZY)
