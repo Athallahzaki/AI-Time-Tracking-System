@@ -12,10 +12,13 @@ menyamar sebagai aritmetika.
 """
 
 from .assembler import AssemblerMetrics, PresenceAssembler
+from .binding import BindingMetrics, EngineBinding
 from .zones import ZONE_DOOR, ZONE_FRAME_EDGE, ZONE_INTERIOR, DoorRegion, ZoneLabeller
 
 __all__ = [
     "AssemblerMetrics",
+    "BindingMetrics",
+    "EngineBinding",
     "DoorRegion",
     "PresenceAssembler",
     "ZONE_DOOR",
