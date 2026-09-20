@@ -13,3 +13,6 @@ engine.zip
 replay-gap-engine.log
 
 .pytest_cache/
+
+venv/
+.venv/
