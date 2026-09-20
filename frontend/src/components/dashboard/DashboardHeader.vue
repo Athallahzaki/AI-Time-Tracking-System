@@ -31,7 +31,7 @@ const emit = defineEmits(['update:refreshInterval', 'export', 'configure']);
       </p>
     </div>
 
-    <div class="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
+    <!-- <div class="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
       <Button
         variant="outline"
         class="flex-1 sm:flex-initial justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm h-8.5 sm:h-9 px-3"
@@ -48,6 +48,6 @@ const emit = defineEmits(['update:refreshInterval', 'export', 'configure']);
         <Settings2 class="h-3.5 w-3.5 sm:h-4 sm:w-4" />
         Configure Facilities
       </Button>
-    </div>
+    </div> -->
   </div>
 </template>

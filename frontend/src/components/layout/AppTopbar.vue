@@ -41,19 +41,15 @@ defineEmits(['toggle-sidebar']);
 
     <!-- Right: Status Badge + Action Buttons -->
     <div class="flex items-center gap-2 sm:gap-3 shrink-0">
-      <span
+      <!-- <span
         class="flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 sm:px-2.5 py-0.5 sm:py-1 text-[11px] sm:text-xs font-medium text-emerald-700 border border-emerald-200"
       >
         <span class="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
         <span class="hidden sm:inline">AI Engine </span>Online
-      </span>
+      </span> -->
 
       <button class="rounded-lg p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition-colors">
         <Bell class="h-4 w-4 sm:h-5 sm:w-5" />
-      </button>
-
-      <button class="hidden sm:block rounded-lg p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition-colors">
-        <Settings class="h-4 w-4 sm:h-5 sm:w-5" />
       </button>
 
       <div
