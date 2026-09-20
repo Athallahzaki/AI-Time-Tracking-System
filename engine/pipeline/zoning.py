@@ -213,8 +213,15 @@ class ZonePriorityQueue:
             # per-camera id is the closest thing that is stable within a run,
             # and it is built here in one place so that swapping it for the real
             # uuid later is one line rather than a hunt.
+            # A6: lapisan identitas menulis `track_uuid` ke atribut track, dan
+            # uuid itu membawa nomor generasi supaya `track_id` yang didaur
+            # ulang tracker tidak memakai kunci yang sama untuk orang yang
+            # berbeda. Penahan sementara di bawah tetap dipakai selama belum
+            # ada yang menuliskannya -- ini "satu baris" yang dijanjikan
+            # komentar di atas.
+            track_uuid = track.attributes.get("track_uuid") or f"{camera_id}-t{track.track_id}"
             if self._scheduler.submit(
-                track_uuid=f"{camera_id}-t{track.track_id}",
+                track_uuid=track_uuid,
                 camera_id=camera_id,
                 priority=priority,
                 now_pts=now_pts,
