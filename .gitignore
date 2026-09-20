@@ -1,0 +1,15 @@
+mediamtx/
+auto.crt
+auto.key
+license
+mediamtx.exe
+mediamtx.yml
+
+# Editor
+.vscode/
+
+# Local archives / debug artifacts
+engine.zip
+replay-gap-engine.log
+
+.pytest_cache/

@@ -35,3 +35,15 @@ htmlcov/
 .idea/
 .DS_Store
 Thumbs.db
+
+tests/
+test_break_policy.py
+test_corrections.py
+test_enrollment_service.py
+test_protocol_adapter.py
+test_session__deriver.py
+
+# Local Database
+data/*.db
+data/*.db-shm
+data/*.db-wal

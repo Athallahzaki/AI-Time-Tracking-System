@@ -28,7 +28,13 @@ class GapClassification(str, Enum):
     OFFICIAL_BREAK = "official_break"  # Within official break hours (not counted)
     UNKNOWN = "unknown"                # Couldn't classify — needs manual review
 
-
+class ManualCorrectionRequest(BaseModel):
+    camera_id: str
+    track_id: Optional[int] = None
+    employee_id: Optional[str] = None
+    correction_type: str
+    reason: str
+    
 class GapInfo(BaseModel):
     """A gap between two presence intervals, with classification."""
     gap_id: str

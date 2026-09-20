@@ -6,38 +6,72 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.core.database import init_database
 from backend.core.config import settings
-from backend.services.camera_manager import camera_manager
-from backend.routers import attendance, cameras, stats, streams, system
+from backend.core.database import init_database
+from backend.routers import (
+    attendance,
+    enrollments,
+    streams,
+)
+from backend.services.engine_client import (
+    EngineConnectionError,
+    engine_client,
+)
+from backend.services.engine_integration import (
+    engine_integration,
+)
+
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] [%(name)s]: %(message)s",
+    format=(
+        "%(asctime)s [%(levelname)s] "
+        "[%(name)s]: %(message)s"
+    ),
     datefmt="%H:%M:%S",
 )
 
-logger = logging.getLogger("AI-Time-Tracking-Backend")
+logger = logging.getLogger(
+    "AI-Time-Tracking-Backend"
+)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Initializing AI Time Tracking Backend...")
+    logger.info(
+        "Initializing AI Time Tracking Backend..."
+    )
 
     init_database()
 
-    camera_manager.start_default_cameras()
+    engine_integration.configure()
+
+    try:
+        engine_client.connect()
+        engine_client.start_receiver()
+
+        logger.info(
+            "Connected to AI Vision Engine."
+        )
+
+    except EngineConnectionError as exc:
+        logger.warning(
+            "AI Vision Engine unavailable: %s",
+            exc,
+        )
 
     yield
 
-    logger.info("Shutting down AI Time Tracking Backend...")
-    camera_manager.shutdown()
+    logger.info(
+        "Shutting down AI Time Tracking Backend..."
+    )
+
+    engine_client.close()
+
 
 app = FastAPI(
     title="AI Time Tracking System API",
-    description=(
-        "Real-time multi-camera computer vision "
-        "and attendance tracking backend."
-    ),
+    description="AI Time Tracking backend.",
     version="2.0.0",
     lifespan=lifespan,
 )
@@ -45,36 +79,30 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins + ["*"],
+    allow_origins=(
+        settings.cors_origins + ["*"]
+    ),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# Register Routers
-app.include_router(system.router)
-app.include_router(streams.router)
-app.include_router(cameras.router)
-app.include_router(stats.router)
 app.include_router(attendance.router)
+app.include_router(enrollments.router)
+app.include_router(streams.router)
 
 
 @app.get("/")
 def root():
-    active_workers = camera_manager.get_active_workers()
-
     return {
         "status": "online",
         "version": "2.0.0",
-        "active_cameras_count": len(active_workers),
-        "total_configured_cameras": len(
-            camera_manager.get_camera_list()
+        "engine": (
+            "connected"
+            if engine_client.connected
+            else "disconnected"
         ),
-        "active_camera_ids": [
-            worker.camera_id
-            for worker in active_workers
-        ],
     }
 
 
