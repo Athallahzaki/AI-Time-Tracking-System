@@ -18,3 +18,5 @@ replay-gap-engine.log
 venv/
 
 weights/
+
+bench-out/
