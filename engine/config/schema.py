@@ -249,7 +249,7 @@ class RecognitionConfig:
 class DetectorConfig:
     """Perceptual constants for the object detector."""
 
-    model_path: str = "ustc-community/dfine-nano-coco"
+    model_path: str = "LibreDFINEn.pt"
     confidence_threshold: float = 0.50
     iou_threshold: float = 0.45
     image_size: int = 640

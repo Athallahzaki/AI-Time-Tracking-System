@@ -17,9 +17,9 @@ ingest:
   rtsp_transport: "tcp"      # UDP loses packets and hands back corrupted frames
                              # that damage an embedding without raising anything
   timeout_seconds: 8.0       # a dead camera must not hang a thread for ever
-  reconnect_attempts: 0      # 0 for files. A live camera wants several.
+  reconnect_attempts: 10     # 0 for files. A live camera wants several.
   reconnect_backoff_seconds: 1.0
-  max_reconnect_backoff_seconds: 30.0
+  max_reconnect_backoff_seconds: 10.0
   measure_timeline_fidelity: true   # compare real PTS against frame_index / fps
   decoder_thread_type: "AUTO"       # AUTO | SLICE | FRAME | NONE. Set NONE to
                                     # measure what single-threaded decode costs.
@@ -76,7 +76,7 @@ recognition:
   # per_camera_quota:           4   # one busy camera must not blind the others
 
 detector:
-  model_path: "ustc-community/dfine-medium-coco"
+  model_path: "LibreDFINEm.pt"
   confidence_threshold: 0.50
   iou_threshold: 0.45
   image_size: 640

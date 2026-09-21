@@ -643,13 +643,13 @@ def test_bench_never_names_pipeline_internals():
     assert not offenders, offenders
 
 
-def test_bench_runs_without_torch_or_ultralytics():
+def test_bench_runs_without_torch_or_libreyolo():
     """
     §13.9: the bench must run fully on mocks so it can live in CI. If importing
     it drags in torch, the CI job needs a GPU image and stops being run.
 
     This test was written on a machine where neither package was installed, so
-    `'torch' in sys.modules` was False no matter what the code did and the test
+    `'torch/libreyolo in sys.modules` was False no matter what the code did and the test
     passed while proving nothing. It only earned its keep on a developer
     machine that *has* them, where it immediately caught
     `report.package_versions()` importing both in order to read `__version__`.
@@ -661,12 +661,12 @@ def test_bench_runs_without_torch_or_ultralytics():
 
     installed = [
         name
-        for name in ("torch", "ultralytics")
+        for name in ("torch", "libreyolo")
         if importlib.util.find_spec(name) is not None
     ]
     if not installed:
         pytest.skip(
-            "neither torch nor ultralytics is installed here, so this check "
+            "neither torch nor LibreYOLO is installed here, so this check "
             "cannot fail and must not be counted as a pass. Run it on a "
             "machine with the real detector stack (CI covers the other half: "
             "it installs neither and the mock path must still work)."
@@ -676,7 +676,7 @@ def test_bench_runs_without_torch_or_ultralytics():
         "import sys;"
         "import engine.bench.runner as r;"
         "r.run_bench(r.BenchOptions(mock=True, frames=5, out_dir='/tmp/_b1ci'));"
-        "print('torch' in sys.modules, 'ultralytics' in sys.modules)"
+        "print('torch' in sys.modules, 'libreyolo' in sys.modules)"
     )
     result = subprocess_run(code)
     assert result.strip().endswith("False False"), result

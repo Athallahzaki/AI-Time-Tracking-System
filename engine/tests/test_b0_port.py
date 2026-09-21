@@ -141,7 +141,7 @@ def test_effective_fps_caps_but_never_raises():
 # Zero-effect fix 3: strict mode, no silent degradation
 # --------------------------------------------------------------------------
 
-def test_strict_tracker_refuses_to_swap_backend_silently(monkeypatch):
+def test_strict_tracker_refuses_without_libreyolo(monkeypatch):
     """
     Falling back from ByteTrack to IoUTracker without failing means a benchmark
     silently measures a different tracker and still reports tidy numbers.
@@ -151,29 +151,29 @@ def test_strict_tracker_refuses_to_swap_backend_silently(monkeypatch):
 
     real_import = __builtins__["__import__"] if isinstance(__builtins__, dict) else __import__
 
-    def deny_ultralytics(name, *args, **kwargs):
-        if name.startswith("ultralytics"):
-            raise ImportError("ultralytics is not installed")
+    def deny_libreyolo(name, *args, **kwargs):
+        if name.startswith("libreyolo"):
+            raise ImportError("libreyolo is not installed")
         return real_import(name, *args, **kwargs)
 
-    monkeypatch.setattr("builtins.__import__", deny_ultralytics)
+    monkeypatch.setattr("builtins.__import__", deny_libreyolo)
 
     with pytest.raises(RuntimeError, match="bytetrack"):
         ByteTrackTracker(strict=True)
 
 
-def test_non_strict_tracker_still_falls_back(monkeypatch):
+def test_non_strict_tracker_still_falls_back_without_libreyolo(monkeypatch):
     """Opting out must remain possible — it just has to be explicit."""
     from engine.perception import ByteTrackTracker
 
     real_import = __builtins__["__import__"] if isinstance(__builtins__, dict) else __import__
 
-    def deny_ultralytics(name, *args, **kwargs):
-        if name.startswith("ultralytics"):
-            raise ImportError("ultralytics is not installed")
+    def deny_libreyolo(name, *args, **kwargs):
+        if name.startswith("libreyolo"):
+            raise ImportError("libreyolo is not installed")
         return real_import(name, *args, **kwargs)
 
-    monkeypatch.setattr("builtins.__import__", deny_ultralytics)
+    monkeypatch.setattr("builtins.__import__", deny_libreyolo)
 
     tracker = ByteTrackTracker(strict=False)
     assert tracker is not None
@@ -309,7 +309,7 @@ def test_track_lifecycle_events_fire_once_per_transition():
     assert len(created) == 1, "a track must be announced once, not once per frame"
 
 
-def test_mock_path_needs_neither_torch_nor_ultralytics():
+def test_mock_path_needs_neither_torch_nor_libreyolo():
     """
     The mock path is what lets B1's benchmark run in CI. If importing the
     pipeline drags in torch, that stops being true.
@@ -323,10 +323,10 @@ def test_mock_path_needs_neither_torch_nor_ultralytics():
     import importlib.util
 
     if all(
-        importlib.util.find_spec(name) is None for name in ("torch", "ultralytics")
+        importlib.util.find_spec(name) is None for name in ("torch", "libreyolo")
     ):
         pytest.skip(
-            "neither torch nor ultralytics is installed here, so this check "
+            "neither torch nor LibreYOLO is installed here, so this check "
             "cannot fail. Run it on a machine with the real detector stack."
         )
 
@@ -335,7 +335,7 @@ def test_mock_path_needs_neither_torch_nor_ultralytics():
         "import engine.ingest, engine.perception, engine.pipeline.engine;"
         "from engine.perception import MockDetector, MockTracker;"
         "assert 'torch' not in sys.modules, 'torch imported eagerly';"
-        "assert 'ultralytics' not in sys.modules, 'ultralytics imported eagerly';"
+        "assert 'libreyolo' not in sys.modules, 'libreyolo imported eagerly';"
         "print('ok')"
     )
     result = subprocess.run(

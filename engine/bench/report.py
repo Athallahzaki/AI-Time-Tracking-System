@@ -135,12 +135,11 @@ _DISTRIBUTIONS = {
     "numpy": ("numpy",),
     "cv2": ("opencv-python", "opencv-python-headless", "opencv-contrib-python"),
     "torch": ("torch",),
-    "ultralytics": ("ultralytics",),
+    "libreyolo": ("libreyolo",),
     "onnxruntime": ("onnxruntime-gpu", "onnxruntime"),
     "yaml": ("PyYAML",),
     "av": ("av",),
-    "transformers": ("transformers",),
-}
+    }
 
 
 def package_versions() -> Dict[str, Any]:
@@ -149,9 +148,9 @@ def package_versions() -> Dict[str, Any]:
 
     The first version of this function called `__import__(name)` to read
     `__version__`, which quietly defeated the one property the mock path exists
-    for: importing the report module pulled torch and Ultralytics into the
-    process, so `python -m engine.bench --mock` was no longer a run that proves
-    it can survive without them. It did not fail on a machine with neither
+    for: importing the report module pulled heavy model/tracker runtimes into
+    the process, so `python -m engine.bench --mock` was no longer a run that
+    proves it can survive without them. It did not fail on a machine with neither
     installed, which is exactly how a vacuous check survives review.
 
     `importlib.metadata` reads the dist-info on disk. Nothing is imported, the
@@ -328,9 +327,8 @@ def standard_caveats(
     caveats: List[str] = []
 
     caveats.append(
-        "Baseline is measured on a stack that still carries torch and "
-        "Ultralytics AGPL-3.0 in the tracker (§14 note on step 16). Step B7 "
-        "removes both and that will show up in the memory profile."
+        "The real detector and ByteTrack paths are both provided by LibreYOLO. "
+        "The mock path intentionally does not import the model runtime."
     )
 
     if source_type == "mock":
