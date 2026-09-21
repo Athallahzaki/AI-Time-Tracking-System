@@ -16,3 +16,5 @@ replay-gap-engine.log
 
 .venv/
 venv/
+
+weights/

@@ -17,12 +17,12 @@ PyYAML>=6.0              # config loading
 # --- real detector / tracker path -----------------------------------------
 # Not needed for the mock path, which is what CI runs. Installing these is what
 # makes `--source <file>` work with real weights.
-#
-# libreyolo>=0.3          # MIT. D-FINE / RF-DETR / DEIM
-# torch>=2.0              # dragged in by libreyolo AND by the tracker adapter
-# ultralytics>=8.0        # AGPL-3.0. ONLY still here for BYTETracker; removed in step 11.
-#                         # Baseline numbers from step 1 are measured with it present,
-#                         # and the report must say so.
+
+libreyolo>=0.3          # MIT. D-FINE / RF-DETR / DEIM
+torch>=2.0              # dragged in by libreyolo AND by the tracker adapter
+ultralytics>=8.0        # AGPL-3.0. ONLY still here for BYTETracker; removed in step 11.
+                        # Baseline numbers from step 1 are measured with it present,
+                        # and the report must say so.
 
 # --- B1 benchmark ----------------------------------------------------------
 # No new runtime dependency. The face probe uses the frontal cascade bundled
