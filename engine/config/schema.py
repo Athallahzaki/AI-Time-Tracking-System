@@ -77,7 +77,7 @@ def seconds_to_frames(seconds: float, fps: float) -> int:
 class TrackerConfig:
     """Perceptual constants for the tracker. Nothing here is a company rule."""
 
-    backend: str = "bytetrack"          # "bytetrack" | "iou"
+    backend: str = "iou"                # "bytetrack" | "iou"
     track_threshold: float = 0.45
     match_threshold: float = 0.8
     track_buffer_seconds: float = 1.0   # was track_buffer=30 frames at 30 fps
@@ -249,7 +249,7 @@ class RecognitionConfig:
 class DetectorConfig:
     """Perceptual constants for the object detector."""
 
-    model_path: str = "LibreDFINEs.pt"
+    model_path: str = "ustc-community/dfine-nano-coco"
     confidence_threshold: float = 0.50
     iou_threshold: float = 0.45
     image_size: int = 640

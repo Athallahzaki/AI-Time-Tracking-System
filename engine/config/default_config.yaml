@@ -76,17 +76,16 @@ recognition:
   # per_camera_quota:           4   # one busy camera must not blind the others
 
 detector:
-  model_path: "LibreDFINEs.pt"     # D-FINE small via LibreYOLO (MIT)
+  model_path: "ustc-community/dfine-nano-coco"  # official D-FINE, Apache-2.0
   confidence_threshold: 0.50
-  iou_threshold: 0.45
+  iou_threshold: 0.45             # compatibility only; D-FINE does not need NMS
   image_size: 640
   device: "auto"                   # "auto" | "cpu" | "cuda" | 0
   half: false                      # FP16 is a trap on Pascal (GTX 1060). ARCHITECTURE.md §8
 
 tracker:
-  backend: "bytetrack"             # bytetrack | iou. Under strict_mode, a requested
-                                   # backend that cannot be loaded is a startup failure,
-                                   # not a silent fallback.
+  backend: "iou"                   # no Ultralytics dependency; bytetrack remains optional
+                                   # a requested missing backend is a startup failure
   track_threshold: 0.45
   match_threshold: 0.8
   track_buffer_seconds: 1.0        # was track_buffer=30 frames hardcoded at 30 fps

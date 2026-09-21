@@ -169,7 +169,7 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
             colour_conversion=str(ing.get("colour_conversion", "to_ndarray")),
         ),
         detector=DetectorConfig(
-            model_path=str(det.get("model_path", "LibreDFINEs.pt")),
+            model_path=str(det.get("model_path", "ustc-community/dfine-nano-coco")),
             confidence_threshold=float(det.get("confidence_threshold", 0.50)),
             iou_threshold=float(det.get("iou_threshold", 0.45)),
             image_size=int(det.get("image_size", 640)),

@@ -1,0 +1,7 @@
+# Full dependency set for the real D-FINE engine machine.
+# Mock tests/CI can keep using requirements.txt without downloading PyTorch.
+-r requirements.txt
+
+torch>=2.1
+transformers>=4.51,<6
+Pillow>=10

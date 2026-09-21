@@ -13,7 +13,7 @@ python -m venv .venv
 source .venv/bin/activate            # Windows PowerShell: .venv\Scripts\Activate.ps1
 pip install -r backend/requirements.txt
 pip install -r contracts/validator/requirements.txt
-pip install -r engine/requirements.txt
+pip install -r engine/requirements-dfine.txt
 pip install -r requirements-dev.txt     # hanya untuk testing/development
 cd frontend && npm ci && cd ..
 ```
@@ -86,6 +86,15 @@ Endpoint utama: `/api/system/status`, `/api/cameras`,
 Proyek belum siap produksi penuh: model nyata, benchmark rekaman representatif,
 kebijakan HRD, MediaMTX, autentikasi, dan deployment masih perlu diselesaikan.
 Lihat `WORKPLAN_STATUS.md`.
+
+Detector nyata menggunakan D-FINE resmi melalui Hugging Face Transformers,
+bukan YOLO/Ultralytics. Checkpoint default
+`ustc-community/dfine-nano-coco` diunduh sekali saat engine pertama dijalankan
+dan selanjutnya memakai cache lokal. Untuk mesin engine tanpa internet, unduh
+model lebih dahulu lalu isi `detector.model_path` dengan direktori model lokal.
+Untuk CI atau demo mock tanpa model, cukup pasang `engine/requirements.txt`;
+dependency PyTorch/D-FINE hanya dipasang pada mesin engine nyata melalui
+`engine/requirements-dfine.txt`.
 
 ## Mode demo satu perintah
 

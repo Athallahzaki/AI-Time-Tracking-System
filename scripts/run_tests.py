@@ -45,6 +45,7 @@ TEST_MODULES = [
     "engine.tests.test_b4_ingest",
     "engine.tests.test_b5_zones",
     "engine.tests.test_enrollment",
+    "engine.tests.test_dfine_detector",
     "engine.tests.test_identity",
     "engine.tests.test_presence",
     "engine.tests.test_store",

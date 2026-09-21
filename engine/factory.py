@@ -93,7 +93,7 @@ def build_detector(config: EngineConfig) -> Any:
     if config.source_type == "mock":
         return perception.MockDetector()
 
-    return perception.YOLODetector(
+    return perception.DFINEDetector(
         model_path=config.detector.model_path,
         confidence_threshold=config.detector.confidence_threshold,
         iou_threshold=config.detector.iou_threshold,

@@ -166,8 +166,10 @@ The port surfaced a second instance of it, in B's own territory:
 `IoUTracker` with a log line at INFO. On a machine without Ultralytics, a
 benchmark run would have measured a completely different tracker and still
 produced a tidy report with plausible numbers. Under `strict_mode: true` that
-is now a startup failure naming the backend. Falling back is still possible —
-it just has to be asked for, with `tracker.backend: iou`.
+is now a startup failure naming the backend. The shipped configuration now
+explicitly selects `tracker.backend: iou`, so Ultralytics is not required for
+the default D-FINE path. Selecting `tracker.backend: bytetrack` remains an
+optional choice and fails at startup if its backend is unavailable.
 
 A benchmark that can lie in a flattering direction is worse than no benchmark.
 

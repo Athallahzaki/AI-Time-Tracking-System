@@ -14,7 +14,7 @@ Review 21 September 2026: implementasi sesuai arah arsitektur, tetapi belum M5
 | A2–A7 engine | Mayoritas selesai | identity, presence, outbox, runtime diuji |
 | A8 enrollment | Sebagian besar | admission ada; model nyata belum terpasang |
 | B2–B6 pipeline | Sebagian besar | PTS, zone, queue, matcher ada |
-| B7–B9 model/NVDEC | Belum/opsional | harus berbasis benchmark |
+| B7–B9 model/NVDEC | Sebagian | D-FINE Nano terpasang; benchmark lapangan dan NVDEC belum |
 | C1–C4 API/protokol/storage | Selesai minimum | replay dan event mentah tersedia |
 | C5 session derivation | Selesai minimum | endpoint `/api/attendance/derived` |
 | C6 break quota/alert | Selesai minimum | kuota, warning, timezone, dan endpoint tersedia |

@@ -9,7 +9,7 @@ from .geometry import BoundingBox
 class Detection:
     """
     Normalized, framework-agnostic object detection representation.
-    Decouples YOLO, ONNX, or any model output from downstream tracking/analytics.
+    Decouples D-FINE or any future model output from downstream tracking/analytics.
     """
     bbox: BoundingBox
     confidence: float

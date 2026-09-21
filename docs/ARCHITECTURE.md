@@ -878,7 +878,7 @@ eksplisit untuk penggunaan komersial.
 
 | Komponen | Sekarang | Keputusan | Pertimbangan |
 | --- | --- | --- | --- |
-| Detektor objek | YOLO11s via Ultralytics | LibreYOLO (D-FINE / RF-DETR / DEIM) | Ultralytics AGPL-3.0; LibreYOLO MIT, ekspor ONNX dan TensorRT |
+| Detektor objek | YOLO11s via Ultralytics | D-FINE resmi via Transformers | Checkpoint COCO Apache-2.0; adapter engine tidak bergantung Ultralytics |
 | Tracker | ByteTrack via Ultralytics | Vendor ByteTrack asli (MIT) atau `supervision` | Sumber AGPL yang sama; algoritma aslinya MIT |
 | Detektor wajah | SCRFD-10G (pack AuraFace) | Pertahankan; head-crop + input 320 dulu | Lisensi bersih; YuNet hanya kalau benchmark menuntut |
 | Aligner | 5-point affine, template ArcFace | Pertahankan | Konvensi landmark terikat ke detector |
@@ -1185,7 +1185,7 @@ rupiah, dan ia menjawab dua pertanyaan sekaligus.
 | 13 | Ingest pindah ke PyAV (§5.5) + offset PTS→wallclock | PTS tersedia di event; offset ditetapkan ulang tiap reconnect |
 | 13b | NVDEC, kalau profil menunjukkan decode jadi hambatan | CPU decode turun drastis |
 | 14 | Normalized bbox + dual-view `FrameSource` | Adapter lama tetap lulus tes tanpa perubahan perilaku |
-| 15 | Ganti detector ke LibreYOLO, retune threshold tracker | mAP person dan ID switch setara atau lebih baik |
+| 15 | Ganti detector ke D-FINE resmi, retune threshold tracker | mAP person dan ID switch setara atau lebih baik |
 | 16 | Topologi kamera + fusi lintas kamera + peta cakupan | Handoff tersambung; titik buta ketahuan sebelum produksi |
 | 17 | Worker pool recognition — hanya kalau bench menuntut | FPS tidak lagi turun linear terhadap jumlah orang |
 
@@ -1346,7 +1346,7 @@ error apa pun. §5.2, §9 butir 10.
 ## Sumber
 
 - [fal/AuraFace-v1](https://huggingface.co/fal/AuraFace-v1) — Apache-2.0, `glintr100.onnx` dan `scrfd_10g_bnkps.onnx`
-- [LibreYOLO](https://www.libreyolo.com/docs) — MIT, D-FINE / RF-DETR / DEIM, ekspor ONNX dan TensorRT
+- [D-FINE](https://github.com/Peterande/D-FINE) — implementasi resmi D-FINE, Apache-2.0
 - [LibreFaceRec](https://www.libreyolo.com/docs/models/librefacerec) — AuraFace + YuNet
 - [FoundationVision/ByteTrack](https://github.com/FoundationVision/ByteTrack) — MIT, sumber untuk di-vendor
 - [mikel-brostrom/boxmot](https://github.com/mikel-brostrom/boxmot) — AGPL-3.0, **hindari**

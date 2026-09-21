@@ -139,7 +139,7 @@ _DISTRIBUTIONS = {
     "onnxruntime": ("onnxruntime-gpu", "onnxruntime"),
     "yaml": ("PyYAML",),
     "av": ("av",),
-    "libreyolo": ("libreyolo",),
+    "transformers": ("transformers",),
 }
 
 

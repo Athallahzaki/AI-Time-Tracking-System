@@ -109,7 +109,7 @@ dan lapisan identitas; **Engine B** memegang pipeline dan performa.
 | B5 | `door_region` + prioritas antrian | Track baru di pintu didahulukan |
 | B6 | Matcher matriks + head-crop + quality gate | Latency p95 turun, akurasi tidak |
 | B7 | Ganti tracker ke ByteTrack MIT | Ultralytics lepas dari tracker; umur track tidak memburuk |
-| B8 | Ganti detector ke LibreYOLO + retune | Ultralytics lepas sepenuhnya |
+| B8 | Ganti detector ke D-FINE resmi + retune | Ultralytics lepas dari jalur detector |
 | B9 | NVDEC — hanya kalau profil menuntut | Decode tidak lagi jadi hambatan |
 
 **Titik temu A dan B:** A5 dan A6 butuh `door_region` dari B5, dan keduanya butuh PTS
