@@ -127,8 +127,7 @@ class SessionDeriver:
 
             "gap_seconds": gap_seconds,
 
-            # Belum diklasifikasikan.
-            # Ini nanti tugas C8.
+            # Nilai awal; classify_gaps() menggantinya memakai kebijakan backend.
             "classification": "unknown",
         }
 

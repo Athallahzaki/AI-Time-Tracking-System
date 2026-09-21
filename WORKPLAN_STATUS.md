@@ -1,6 +1,6 @@
 # Status Kesesuaian Workplan
 
-Review 20 September 2026: implementasi sesuai arah arsitektur, tetapi belum M5
+Review 21 September 2026: implementasi sesuai arah arsitektur, tetapi belum M5
 (siap uji lapangan). Posisi realistis berada di M1 menuju M2.
 
 | Bagian | Status | Catatan |
@@ -27,7 +27,9 @@ Review 20 September 2026: implementasi sesuai arah arsitektur, tetapi belum M5
 Perubahan review: memperbaiki runtime engine yang gagal karena mismatch signature,
 mengaktifkan router backend, membuat kontrol kamera lintas proses, menambahkan
 konfigurasi koneksi engine, endpoint derivasi attendance, tes backend, dependency
-terkunci rentang versi, CORS yang valid, README, dan panduan testing.
+terkunci rentang versi, CORS yang valid, README, dan panduan testing. Audit terakhir
+menghapus worker lama yang mengimpor engine ke backend, memasukkan tes backend ke
+konfigurasi pytest, dan menambah tes regresi batas proses.
 
 Sebelum dipakai HRD: sepakati kebijakan, ambil rekaman representatif dan luluskan
 benchmark, pasang model legal, implementasikan roster/MediaMTX/auth, lakukan soak

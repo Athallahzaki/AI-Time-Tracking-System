@@ -48,6 +48,11 @@ TEST_MODULES = [
     "engine.tests.test_identity",
     "engine.tests.test_presence",
     "engine.tests.test_store",
+    "backend.tests.test_api",
+    "backend.tests.test_engine_connection_manager",
+    "backend.tests.test_policy_config",
+    "backend.tests.test_process_boundaries",
+    "backend.tests.test_sessions",
 ]
 
 
