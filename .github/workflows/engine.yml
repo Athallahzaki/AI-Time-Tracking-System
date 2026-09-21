@@ -1,0 +1,174 @@
+name: engine
+
+on:
+  push:
+    paths: ["engine/**", "bench/**", "contracts/**", ".github/workflows/engine.yml"]
+  pull_request:
+    paths: ["engine/**", "bench/**", "contracts/**", ".github/workflows/engine.yml"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Deliberately does NOT install torch, libreyolo or ultralytics. If the
+      # mock path ever starts needing them, CI breaks here — which is the point:
+      # the benchmark has to be runnable without a GPU or model weights
+      # (ARCHITECTURE.md §13.9), or it stops being run at all.
+      - name: Install (mock path only)
+        run: pip install numpy "opencv-python-headless>=4.8" "PyYAML>=6.0" pytest
+
+      - name: No company policy in engine/
+        run: python contracts/tools/policy_grep.py engine/
+
+      # The go/no-go thresholds are company numbers and live outside engine/
+      # (§16). This asserts they are where they are supposed to be, so the check
+      # above cannot be satisfied by moving them back in.
+      - name: Go/no-go thresholds live outside the engine
+        run: |
+          test -f bench/gonogo.yaml
+          ! test -e engine/gonogo.yaml
+
+      - name: Unit tests
+        run: pytest engine/tests -q
+
+      - name: Pipeline smoke run
+        run: python -m engine.tools.run --mock --frames 30 --quiet
+
+      # The benchmark itself runs in CI, on mocks. A bug in bench code is then
+      # found in three seconds rather than thirty minutes into a real run.
+      - name: Benchmark smoke run (throughput)
+        run: |
+          python -m engine.bench --mock --frames 200 --quiet \
+            --thresholds bench/gonogo.yaml --out "$RUNNER_TEMP/bench-throughput"
+
+      - name: Benchmark smoke run (realtime, 3 cameras)
+        run: |
+          python -m engine.bench --mock --frames 60 --mode realtime --cameras 3 \
+            --quiet --out "$RUNNER_TEMP/bench-realtime"
+
+      # The report schema is frozen and additive-only (§13.4). A run that does
+      # not produce every frozen key fails here rather than three months later
+      # when two baselines turn out not to be comparable.
+      - name: Report carries every frozen field
+        run: |
+          python - "$RUNNER_TEMP/bench-throughput/baseline.json" <<'PY'
+          import json, sys
+          from engine.bench.report import FROZEN_TOP_LEVEL_KEYS, FROZEN_METRIC_KEYS
+          report = json.load(open(sys.argv[1]))
+          missing = [k for k in FROZEN_TOP_LEVEL_KEYS if k not in report]
+          missing += [f"metrics.{k}" for k in FROZEN_METRIC_KEYS if k not in report["metrics"]]
+          assert not missing, missing
+          assert report["go_no_go"]["verdict"] != "GO", (
+              "a mock run with no annotation must never come back GO"
+          )
+          print("report ok:", report["go_no_go"]["verdict"])
+          PY
+
+      # B5. The mock path can prove the wiring even though it cannot prove the
+      # ordering is useful: a zone is assigned, a request is queued with a
+      # priority, and both land in the report. Cheap, and it catches the one
+      # thing that would otherwise be found on a real recording — a queue that
+      # silently never ran because the source has no PTS.
+      - name: Benchmark smoke run (B5 zones and queue enabled)
+        run: |
+          cat > "$RUNNER_TEMP/b5.yaml" <<'YAML'
+          core:
+            source_type: "mock"
+            auto_warmup: false
+          zones:
+            door_regions:
+              cam0: [0.0, 0.0, 0.35, 0.35]
+          recognition:
+            enabled: true
+            max_requests_per_frame: 1
+          YAML
+          python -m engine.bench --mock --config "$RUNNER_TEMP/b5.yaml" \
+            --frames 100 --quiet --out "$RUNNER_TEMP/bench-b5"
+          python - "$RUNNER_TEMP/bench-b5/baseline.json" <<'PY'
+          import json, sys
+          metrics = json.load(open(sys.argv[1]))["metrics"]
+          exits, queue = metrics["zone_exits"], metrics["recognition_queue"]
+          assert exits["door_region_configured"] is True, exits
+          assert "caveat" not in exits, exits
+          assert queue["submitted_total"] >= 1, queue
+          assert queue["had_consumer"] is False, (
+              "something is consuming the recognition queue; the worker pool is "
+              "step §5.2 and is not supposed to exist yet"
+          )
+          print("b5 ok:", exits["endings_by_zone"], queue["submitted_total"])
+          PY
+
+      - name: Upload bench artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-smoke
+          path: ${{ runner.temp }}/bench-*/
+
+  # A second job, because the first one deliberately installs nothing heavy.
+  # B4's PyAV binding is the one part of the engine that unit tests cannot
+  # reach: the logic around it is driven by a fake container, and whether real
+  # libav behaves like that fake can only be settled by opening a real file.
+  # This job is that check, and it runs on every push rather than once on a
+  # developer machine.
+  ingest-pyav:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install (ingest path)
+        run: pip install numpy "opencv-python-headless>=4.8" "PyYAML>=6.0" pytest av
+
+      # The clip is generated, not committed: `*.mp4` is gitignored because
+      # recordings in this project are biometric data about colleagues (§7.4),
+      # and a rule with an exception carved into it invites the next exception to
+      # be a real recording. Before this step existed, this job and five tests
+      # depended on a file that only ever existed on one laptop.
+      - name: Generate the synthetic test clip
+        run: |
+          python -c "from engine.tests.assets import ensure_synthetic_clip as e; print(e())"
+
+      - name: PyAV opens a real file and reports a real timeline
+        run: |
+          python -m engine.tools.probe_ingest \
+            --video engine/samples/synthetic_24fps.mp4 \
+            --json "$RUNNER_TEMP/probe.json"
+
+      - name: The two backends agree, and the PTS is real
+        run: |
+          python - "$RUNNER_TEMP/probe.json" <<'PY'
+          import json, sys
+          result = json.load(open(sys.argv[1]))
+          pyav, cv = result["pyav"], result["opencv"]
+
+          assert pyav["frames_read"] > 0, "PyAV decoded nothing"
+          assert pyav["pts_source"] != "derived_from_fps", pyav
+          assert pyav["timeline"]["pts_backwards_within_epoch"] == 0, pyav["timeline"]
+
+          # `pts` is stream-relative (the schema's definition), so the first
+          # frame of an epoch is 0.0 whatever base the container used, and the
+          # offset that converts it to wallclock is a number the event layer can
+          # read rather than guess.
+          assert pyav["first_pts"] == 0.0, pyav
+          assert pyav["timeline"]["pts_wallclock_offset"] is not None, pyav["timeline"]
+
+          # The sample clip is written at a constant rate, so the two decoders
+          # must agree exactly. A disagreement here means the binding is
+          # dropping or duplicating frames, which no later test would catch.
+          assert pyav["frames_read"] == cv["frames_read"], result["comparison"]
+
+          fidelity = pyav["timeline_fidelity"]
+          assert fidelity["max_abs_deviation_s"] < 0.01, fidelity
+          print("ingest ok:", fidelity["verdict"])
+          PY
+
+      - name: Ingest unit tests
+        run: pytest engine/tests/test_b4_ingest.py -q

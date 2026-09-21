@@ -1,0 +1,74 @@
+{
+  "scenario": "istirahat-asli",
+  "description": "Keluar lewat pintu, kembali 12 menit kemudian lewat pintu",
+  "what_this_file_is": "Ringkasan observasional dari rekaman, bukan kesimpulan kebijakan. Celah dilaporkan beserta bukti batasnya; bagaimana ia diperlakukan diputuskan backend.",
+  "counts": {
+    "events": 96,
+    "intervals": 2,
+    "tracks_started": 2,
+    "tracks_ended": 2,
+    "seq_first": 1,
+    "seq_last": 96
+  },
+  "cameras": [
+    "r1"
+  ],
+  "people": {
+    "4471": {
+      "interval_count": 2,
+      "intervals": [
+        {
+          "interval_id": "iv_r1-0001",
+          "camera_id": "r1",
+          "start_at": "2025-09-19T00:00:05.000Z",
+          "end_at": "2025-09-19T00:05:00.000Z",
+          "start_zone": "door",
+          "end_zone": "door",
+          "start_source": "face",
+          "end_source": "face",
+          "end_reason": "left_frame",
+          "prev_interval_id": null
+        },
+        {
+          "interval_id": "iv_r1-0002",
+          "camera_id": "r1",
+          "start_at": "2025-09-19T00:17:00.000Z",
+          "end_at": "2025-09-19T00:25:00.000Z",
+          "start_zone": "door",
+          "end_zone": "door",
+          "start_source": "face",
+          "end_source": "face",
+          "end_reason": "left_frame",
+          "prev_interval_id": null
+        }
+      ]
+    }
+  },
+  "gaps": [
+    {
+      "person_id": "4471",
+      "after_interval": "iv_r1-0001",
+      "before_interval": "iv_r1-0002",
+      "duration_seconds": 720.0,
+      "same_camera": true,
+      "closed_by_engine": false,
+      "evidence": {
+        "end_zone": "door",
+        "end_reason": "left_frame",
+        "end_source": "face",
+        "next_start_zone": "door",
+        "next_start_source": "face"
+      }
+    }
+  ],
+  "asserts": {
+    "intervals": 2,
+    "gaps": 1,
+    "gap_evidence": {
+      "end_zone": "door",
+      "end_reason": "left_frame",
+      "next_start_zone": "door"
+    },
+    "note": "Bentuknya identik dengan berbalik-lama kalau hanya melihat durasi. Yang membedakan cuma zona batasnya. Kalau UI menampilkan keduanya sebagai angka menit yang sama, seluruh kehati-hatian §4 hilang di lapisan terakhir."
+  }
+}

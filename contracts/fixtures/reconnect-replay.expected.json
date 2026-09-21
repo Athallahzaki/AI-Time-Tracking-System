@@ -1,0 +1,41 @@
+{
+  "scenario": "reconnect-replay",
+  "description": "Backend putus di tengah, menyambung lagi, tidak ada event hilang",
+  "what_this_file_is": "Ringkasan observasional dari rekaman, bukan kesimpulan kebijakan. Celah dilaporkan beserta bukti batasnya; bagaimana ia diperlakukan diputuskan backend.",
+  "counts": {
+    "events": 27,
+    "intervals": 1,
+    "tracks_started": 1,
+    "tracks_ended": 1,
+    "seq_first": 1,
+    "seq_last": 27
+  },
+  "cameras": [
+    "r1"
+  ],
+  "people": {
+    "4471": {
+      "interval_count": 1,
+      "intervals": [
+        {
+          "interval_id": "iv_r1-0001",
+          "camera_id": "r1",
+          "start_at": "2025-09-19T00:00:10.000Z",
+          "end_at": "2025-09-19T00:03:20.000Z",
+          "start_zone": "door",
+          "end_zone": "door",
+          "start_source": "face",
+          "end_source": "face",
+          "end_reason": "left_frame",
+          "prev_interval_id": null
+        }
+      ]
+    }
+  },
+  "gaps": [],
+  "asserts": {
+    "intervals": 1,
+    "gaps": 0,
+    "note": "Hanya bisa diuji terhadap socket, bukan terhadap fixture. Rekamannya ada supaya urutan seq yang benar punya acuan."
+  }
+}

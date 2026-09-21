@@ -1,0 +1,2 @@
+{"type": "camera.online", "v": 1, "ts": "2025-09-19T00:00:00.000Z", "seq": 1, "camera_id": "r1", "stream_epoch": 0, "fps": 10.0, "pts_wallclock_offset": 1758240000.0}
+{"type": "enrollment_needed", "v": 1, "ts": "2025-09-19T00:00:05.000Z", "seq": 2, "person_ids": ["4471"]}

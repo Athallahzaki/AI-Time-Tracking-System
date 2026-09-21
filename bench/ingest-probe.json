@@ -1,0 +1,124 @@
+{
+  "video": "X:\\video.mp4",
+  "pyav": {
+    "backend": "pyav",
+    "codecs": {
+      "available": true,
+      "pyav_version": "18.1.0",
+      "hardware_decoders": [
+        "av1_cuvid",
+        "av1_qsv",
+        "h264_cuvid",
+        "h264_qsv",
+        "hevc_cuvid",
+        "hevc_qsv",
+        "mjpeg_cuvid",
+        "mjpeg_qsv",
+        "mpeg1_cuvid",
+        "mpeg2_cuvid",
+        "mpeg2_qsv",
+        "mpeg4_cuvid",
+        "vc1_cuvid",
+        "vc1_qsv",
+        "vp8_cuvid",
+        "vp8_qsv",
+        "vp9_cuvid",
+        "vp9_qsv",
+        "vvc_qsv"
+      ],
+      "note": "this build DOES carry hardware decoders, which contradicts the assumption in \u00a75.5 that a PyPI wheel would not. That makes B9 cheaper than planned but not free: asking for a cuvid decoder still ends with to_ndarray copying the frame back to host memory, so the PCIe round trip \u00a75.5 actually cares about survives until the ONNX IO-binding refactor. Nothing to do here; B4 is about PTS."
+    },
+    "uri": "X:\\video.mp4",
+    "is_network_stream": false,
+    "average_rate": 24.798755945847056,
+    "guessed_rate": 25.0,
+    "time_base": 1.1111111111111112e-05,
+    "declared_frames": 2711,
+    "duration_seconds": 109.32,
+    "decoder_threading": {
+      "requested": "AUTO",
+      "applied_to": [
+        "codec_context",
+        "stream"
+      ]
+    },
+    "timeline": {
+      "source_id": "probe",
+      "epoch": 0,
+      "epochs_opened": 1,
+      "pts_backwards_within_epoch": 0
+    },
+    "timeline_fidelity": {
+      "samples": 2711,
+      "interval_error_s": {
+        "<=1s": 0.639675,
+        "<=5s": 0.639675,
+        "<=30s": 0.810535,
+        "<=300s": 0.810535
+      },
+      "series_stride": 1,
+      "max_abs_deviation_s": 0.802744,
+      "max_deviation_at_pts_s": 98.92,
+      "rms_deviation_s": 0.473424,
+      "final_drift_s": 0.000325,
+      "long_frame_intervals": 2,
+      "verdict": "variable rate: a duration of up to 30 s can be misstated by 0.81 s on the derived timeline. Measure this recording with ingest.backend: pyav, and do not compare gap lengths taken on the two timelines"
+    },
+    "open_seconds": 0.0069,
+    "frames_read": 2711,
+    "decode_seconds": 29.1986,
+    "decode_fps": 92.85,
+    "pts_source": "container",
+    "epochs_seen": [
+      0
+    ],
+    "first_pts": 0.0,
+    "last_pts": 109.28,
+    "pts_span_seconds": 109.28
+  },
+  "opencv": {
+    "backend": "opencv",
+    "reported_fps": 24.798756,
+    "declared_frames": 2711,
+    "frames_read": 2711,
+    "decode_seconds": 24.0481,
+    "decode_fps": 112.73,
+    "pts_source": "derived_from_fps",
+    "note": "cv2.VideoCapture discards the container PTS, so the only timeline available from this backend is frame_index / reported_fps (\u00a75.5)."
+  },
+  "comparison": {
+    "frame_count_agreement": {
+      "pyav": 2711,
+      "opencv": 2711,
+      "difference": 0,
+      "note": "both decoders saw the same number of frames"
+    },
+    "rate_declaration": {
+      "average_rate": 24.798756,
+      "guessed_rate": 25.0,
+      "variable_rate_signature": true,
+      "note": "average_rate != guessed_rate is the variable-rate signature: the container nominally runs at guessed_rate and actually delivered fewer frames. cv2 reports the average, so the derived timeline is right on average and wrong locally."
+    }
+  },
+  "decode_timing": {
+    "repeats": 3,
+    "method": "one discarded warm-up pass per backend, then interleaved timed passes; median reported",
+    "pyav": {
+      "median_fps": 81.85,
+      "min_fps": 80.86,
+      "max_fps": 85.34,
+      "spread_percent": 5.5,
+      "runs": 3
+    },
+    "opencv": {
+      "median_fps": 112.86,
+      "min_fps": 112.5,
+      "max_fps": 122.42,
+      "spread_percent": 8.8,
+      "runs": 3
+    },
+    "difference_percent": 27.5,
+    "noise_percent": 8.8,
+    "conclusion": "OpenCV is 27.5% faster, which is outside the 8.8% run-to-run spread. If that is PyAV losing, it is per-frame Python overhead and should be fixed rather than accepted."
+  }
+}

@@ -1,0 +1,23 @@
+name: enrollment-ditolak
+description: Tabrakan, duplikat, dan kualitas buruk, masing-masing dengan alasannya
+protocol_version: 1
+heartbeat_interval: 60.0
+snapshot_interval: 60.0
+
+cameras:
+  - id: r1
+    pts_offset: 1758240000.0
+
+persons: ["4471", "4802"]
+
+timeline:
+  - { at: 0.0,  emit: camera.online, camera: r1 }
+  - { at: 5.0,  emit: enrollment_needed, persons: ["4471"] }
+
+expect:
+  note: >-
+    Skenario kanal control: jalankan terhadap socket dan kirim `enroll`.
+    Balasannya deterministik dari isi permintaan -- id gambar yang memuat
+    `blurry`, `too_small`, `no_face` atau `dup` ditolak dengan alasan itu, dan
+    person_id berakhiran 9 dianggap bertabrakan dengan 4802. Tiga jalur
+    penolakan bisa diuji frontend tanpa satu pun model.

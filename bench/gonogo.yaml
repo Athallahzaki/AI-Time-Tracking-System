@@ -1,0 +1,57 @@
+# Pre-registered go/no-go thresholds for B1.
+#
+# This file lives OUTSIDE engine/ on purpose. The numbers below are company
+# policy — a thirty-minute personal allowance, an eight-hour day, a judgement
+# that ten per cent of the allowance may be lost to noise — and §16 forbids the
+# engine from holding any of them. `contracts/tools/policy_grep.py` would be
+# right to go red if `ALLOWANCE_MINUTES = 30` appeared in engine/bench/.
+#
+# §13.7: these are fixed BEFORE anyone looks at the data. If they are not,
+# whatever number comes out gets rationalised into acceptable. Moving one after
+# a run is allowed — it is a commit, with a name on it and a reason below.
+#
+# Usage:
+#   python -m engine.bench --thresholds bench/gonogo.yaml ...
+#
+# Without --thresholds the bench still reports every measurement and simply
+# declines to pronounce, because a verdict with no pre-registered pass mark is
+# an opinion with a JSON schema.
+
+declared_on: "2026-09-19"
+
+rationale: >-
+  ARCHITECTURE.md §13.7. The personal allowance is 30 minutes per day. Losing
+  10% of it to measurement noise is judged acceptable, so false gaps must stay
+  under ~3 minutes per person per day. The track-lifetime floor is the other
+  side of the same coin (§4.7): if a track survives only a couple of minutes
+  while the person has not moved, no amount of backend logic rescues the
+  feature. 30 seconds is the point below which stitching stops being able to
+  bridge the gaps at any window we would accept.
+
+# --- metric 1 (§4.7, §13.7) -------------------------------------------------
+# Total time a person is in the room with nothing tracking them, projected to a
+# working day. 10% of a 30-minute allowance.
+max_false_gap_minutes_per_person_per_day: 3.0
+
+# --- metric 2 (§4.7) --------------------------------------------------------
+# Median lifetime of a track that ended while the person was demonstrably still
+# in the room. Not the median of all tracks — a person walking out produces a
+# short track that is entirely correct.
+min_track_lifetime_seconds_while_present: 30.0
+
+# --- metric 3 (§3.1, §13.5) -------------------------------------------------
+# How often a usable face appears, per person per hour. Set to null until a
+# real face detector is ported: the current probe is OpenCV's frontal cascade,
+# a lower bound, and failing a run against a threshold on a deliberately weak
+# detector would be theatre. Fill this in when identity/ lands.
+min_recognizable_faces_per_person_hour: null
+
+# The working day the projection above is made against. A company number, which
+# is exactly why it is here rather than in engine/.
+workday_hours: 8.0
+
+# Which offline stitching window the verdict is taken at (§13.6, §15). 5s is
+# the middle of the evaluated set and roughly what track_buffer already covers;
+# the report shows all of 2/5/15/30 so the choice can be revisited with data
+# rather than defended from memory.
+stitch_window_for_verdict_seconds: 5.0

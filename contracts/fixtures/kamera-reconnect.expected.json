@@ -1,0 +1,68 @@
+{
+  "scenario": "kamera-reconnect",
+  "description": "Kamera menyambung ulang, pts kembali nol, offset ditetapkan ulang",
+  "what_this_file_is": "Ringkasan observasional dari rekaman, bukan kesimpulan kebijakan. Celah dilaporkan beserta bukti batasnya; bagaimana ia diperlakukan diputuskan backend.",
+  "counts": {
+    "events": 59,
+    "intervals": 2,
+    "tracks_started": 2,
+    "tracks_ended": 2,
+    "seq_first": 1,
+    "seq_last": 59
+  },
+  "cameras": [
+    "r1"
+  ],
+  "people": {
+    "4471": {
+      "interval_count": 2,
+      "intervals": [
+        {
+          "interval_id": "iv_r1-0001",
+          "camera_id": "r1",
+          "start_at": "2025-09-19T00:00:20.000Z",
+          "end_at": "2025-09-19T00:03:20.000Z",
+          "start_zone": "door",
+          "end_zone": "interior",
+          "start_source": "face",
+          "end_source": "forced",
+          "end_reason": "camera_lost",
+          "prev_interval_id": null
+        },
+        {
+          "interval_id": "iv_r1-0002",
+          "camera_id": "r1",
+          "start_at": "2025-09-19T00:03:50.000Z",
+          "end_at": "2025-09-19T00:08:20.000Z",
+          "start_zone": "interior",
+          "end_zone": "door",
+          "start_source": "face",
+          "end_source": "face",
+          "end_reason": "left_frame",
+          "prev_interval_id": null
+        }
+      ]
+    }
+  },
+  "gaps": [
+    {
+      "person_id": "4471",
+      "after_interval": "iv_r1-0001",
+      "before_interval": "iv_r1-0002",
+      "duration_seconds": 30.0,
+      "same_camera": true,
+      "closed_by_engine": false,
+      "evidence": {
+        "end_zone": "interior",
+        "end_reason": "camera_lost",
+        "end_source": "forced",
+        "next_start_zone": "interior",
+        "next_start_source": "face"
+      }
+    }
+  ],
+  "asserts": {
+    "intervals": 2,
+    "note": "Setelah reconnect, pts interval kedua jauh lebih kecil dari pts interval pertama, tapi `at`-nya lebih besar. Backend yang membandingkan pts lintas stream_epoch akan menyimpulkan waktu berjalan mundur; yang memakai `at` tidak. Tanpa stream_epoch, tidak ada cara membedakan keduanya."
+  }
+}

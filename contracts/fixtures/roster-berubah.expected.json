@@ -1,0 +1,39 @@
+{
+  "scenario": "roster-berubah",
+  "description": "set_roster saat jalan, vektor dibuang, enrollment diminta",
+  "what_this_file_is": "Ringkasan observasional dari rekaman, bukan kesimpulan kebijakan. Celah dilaporkan beserta bukti batasnya; bagaimana ia diperlakukan diputuskan backend.",
+  "counts": {
+    "events": 30,
+    "intervals": 1,
+    "tracks_started": 1,
+    "tracks_ended": 1,
+    "seq_first": 1,
+    "seq_last": 30
+  },
+  "cameras": [
+    "r1"
+  ],
+  "people": {
+    "4471": {
+      "interval_count": 1,
+      "intervals": [
+        {
+          "interval_id": "iv_r1-0001",
+          "camera_id": "r1",
+          "start_at": "2025-09-19T00:00:10.000Z",
+          "end_at": "2025-09-19T00:05:00.000Z",
+          "start_zone": "door",
+          "end_zone": "door",
+          "start_source": "face",
+          "end_source": "face",
+          "end_reason": "left_frame",
+          "prev_interval_id": null
+        }
+      ]
+    }
+  },
+  "gaps": [],
+  "asserts": {
+    "note": "Rekonsiliasi deklaratif: backend mengirim SELURUH himpunan yang diinginkan, engine mencocokkan state-nya. Perintah imperatif akan desync begitu satu pesan hilang, dan kalian baru tahu saat ada kamera hantu yang masih diproses padahal sudah dihapus dari UI."
+  }
+}

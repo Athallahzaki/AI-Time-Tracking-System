@@ -1,0 +1,32 @@
+name: istirahat-asli
+description: Keluar lewat pintu, kembali 12 menit kemudian lewat pintu
+protocol_version: 1
+heartbeat_interval: 60.0
+snapshot_interval: 30.0
+
+cameras:
+  - id: r1
+    pts_offset: 1758240000.0
+
+persons: ["4471"]
+
+timeline:
+  - { at: 0.0,    emit: camera.online, camera: r1 }
+  - { at: 5.0,    emit: track.started, track: r1-t1, camera: r1, zone: door }
+  - { at: 7.0,    emit: track.identified, track: r1-t1, person: "4471", similarity: 0.92, margin: 0.19 }
+  - { at: 300.0,  emit: track.ended, track: r1-t1, reason: left_frame, zone: door }
+  - { at: 1020.0, emit: track.started, track: r1-t4, camera: r1, zone: door }
+  - { at: 1022.0, emit: track.identified, track: r1-t4, person: "4471", similarity: 0.90, margin: 0.16 }
+  - { at: 1500.0, emit: track.ended, track: r1-t4, reason: left_frame, zone: door }
+
+expect:
+  intervals: 2
+  gaps: 1
+  gap_evidence:
+    end_zone: door
+    end_reason: left_frame
+    next_start_zone: door
+  note: >-
+    Bentuknya identik dengan berbalik-lama kalau hanya melihat durasi. Yang
+    membedakan cuma zona batasnya. Kalau UI menampilkan keduanya sebagai angka
+    menit yang sama, seluruh kehati-hatian §4 hilang di lapisan terakhir.

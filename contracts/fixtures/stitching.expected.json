@@ -1,0 +1,70 @@
+{
+  "scenario": "stitching",
+  "description": "Teroklusi 3 detik, disambung engine, bukan interval baru",
+  "what_this_file_is": "Ringkasan observasional dari rekaman, bukan kesimpulan kebijakan. Celah dilaporkan beserta bukti batasnya; bagaimana ia diperlakukan diputuskan backend.",
+  "counts": {
+    "events": 49,
+    "intervals": 2,
+    "tracks_started": 2,
+    "tracks_ended": 2,
+    "seq_first": 1,
+    "seq_last": 49
+  },
+  "cameras": [
+    "r1"
+  ],
+  "people": {
+    "4471": {
+      "interval_count": 2,
+      "intervals": [
+        {
+          "interval_id": "iv_r1-0001",
+          "camera_id": "r1",
+          "start_at": "2025-09-19T00:00:06.000Z",
+          "end_at": "2025-09-19T00:02:30.000Z",
+          "start_zone": "door",
+          "end_zone": "interior",
+          "start_source": "face",
+          "end_source": "face",
+          "end_reason": "occluded_timeout",
+          "prev_interval_id": null
+        },
+        {
+          "interval_id": "iv_r1-0002",
+          "camera_id": "r1",
+          "start_at": "2025-09-19T00:02:33.000Z",
+          "end_at": "2025-09-19T00:07:00.000Z",
+          "start_zone": "interior",
+          "end_zone": "door",
+          "start_source": "tracking",
+          "end_source": "tracking",
+          "end_reason": "left_frame",
+          "prev_interval_id": "iv_r1-0001"
+        }
+      ]
+    }
+  },
+  "gaps": [
+    {
+      "person_id": "4471",
+      "after_interval": "iv_r1-0001",
+      "before_interval": "iv_r1-0002",
+      "duration_seconds": 3.0,
+      "same_camera": true,
+      "closed_by_engine": true,
+      "evidence": {
+        "end_zone": "interior",
+        "end_reason": "occluded_timeout",
+        "end_source": "face",
+        "next_start_zone": "interior",
+        "next_start_source": "tracking"
+      }
+    }
+  ],
+  "asserts": {
+    "intervals": 2,
+    "gaps": 1,
+    "gap_closed_by_engine": true,
+    "note": "Tetap dua interval, tapi yang kedua membawa `prev_interval_id`. Backend memperlakukan rantai itu sebagai satu kehadiran berkelanjutan tanpa celah. Engine menyambung karena punya bukti perseptual -- orang yang sama, kamera yang sama, jeda dalam batas tracker -- bukan karena tiga detik terlalu singkat untuk dihitung apa pun. Yang kedua itu kebijakan."
+  }
+}

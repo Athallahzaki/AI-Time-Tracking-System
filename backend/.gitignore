@@ -1,0 +1,49 @@
+# ==============================================================================
+# Git Ignore Rules for Backend
+# ==============================================================================
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Media, Recordings & Snapshots
+snapshot_*.jpg
+*.mp4
+*.avi
+*.mkv
+*.mov
+runs/
+*.log
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editor / OS specifics
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+tests/
+test_break_policy.py
+test_corrections.py
+test_enrollment_service.py
+test_protocol_adapter.py
+test_session__deriver.py
+
+# Local Database
+data/*.db
+data/*.db-shm
+data/*.db-wal

@@ -1,0 +1,33 @@
+name: stitching
+description: Teroklusi 3 detik, disambung engine, bukan interval baru
+protocol_version: 1
+heartbeat_interval: 30.0
+snapshot_interval: 20.0
+stitch_window_seconds: 5.0
+
+cameras:
+  - id: r1
+    pts_offset: 1758240000.0
+
+persons: ["4471"]
+
+timeline:
+  - { at: 0.0,   emit: camera.online, camera: r1 }
+  - { at: 6.0,   emit: track.started, track: r1-t1, camera: r1, zone: door }
+  - { at: 7.0,   emit: track.identified, track: r1-t1, person: "4471", similarity: 0.91, margin: 0.18 }
+  - { at: 150.0, emit: track.ended, track: r1-t1, reason: occluded_timeout, zone: interior }
+  - { at: 153.0, emit: track.started, track: r1-t2, camera: r1, zone: interior }
+  # Dalam jendela penyambungan: bukti perseptual, bukan kebijakan.
+  - { at: 153.1, emit: track.resumed, track: r1-t2, prev_track: r1-t1, person: "4471", gap_seconds: 3.0 }
+  - { at: 420.0, emit: track.ended, track: r1-t2, reason: left_frame, zone: door }
+
+expect:
+  intervals: 2
+  gaps: 1
+  gap_closed_by_engine: true
+  note: >-
+    Tetap dua interval, tapi yang kedua membawa `prev_interval_id`. Backend
+    memperlakukan rantai itu sebagai satu kehadiran berkelanjutan tanpa celah.
+    Engine menyambung karena punya bukti perseptual -- orang yang sama, kamera
+    yang sama, jeda dalam batas tracker -- bukan karena tiga detik terlalu
+    singkat untuk dihitung apa pun. Yang kedua itu kebijakan.

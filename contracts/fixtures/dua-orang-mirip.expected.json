@@ -1,0 +1,22 @@
+{
+  "scenario": "dua-orang-mirip",
+  "description": "Margin tipis, tidak ada yang boleh diklaim",
+  "what_this_file_is": "Ringkasan observasional dari rekaman, bukan kesimpulan kebijakan. Celah dilaporkan beserta bukti batasnya; bagaimana ia diperlakukan diputuskan backend.",
+  "counts": {
+    "events": 23,
+    "intervals": 0,
+    "tracks_started": 1,
+    "tracks_ended": 1,
+    "seq_first": 1,
+    "seq_last": 23
+  },
+  "cameras": [
+    "r1"
+  ],
+  "people": {},
+  "gaps": [],
+  "asserts": {
+    "intervals": 0,
+    "note": "Tanpa margin test, track ini akan diberikan ke salah satu dari keduanya dengan percaya diri, dan orang yang salah mendapat catatan kehadiran."
+  }
+}

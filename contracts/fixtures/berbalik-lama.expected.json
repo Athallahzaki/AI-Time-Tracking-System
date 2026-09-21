@@ -1,0 +1,74 @@
+{
+  "scenario": "berbalik-lama",
+  "description": "Track putus di interior padahal orangnya masih di ruangan",
+  "what_this_file_is": "Ringkasan observasional dari rekaman, bukan kesimpulan kebijakan. Celah dilaporkan beserta bukti batasnya; bagaimana ia diperlakukan diputuskan backend.",
+  "counts": {
+    "events": 61,
+    "intervals": 2,
+    "tracks_started": 2,
+    "tracks_ended": 2,
+    "seq_first": 1,
+    "seq_last": 61
+  },
+  "cameras": [
+    "r1"
+  ],
+  "people": {
+    "4471": {
+      "interval_count": 2,
+      "intervals": [
+        {
+          "interval_id": "iv_r1-0001",
+          "camera_id": "r1",
+          "start_at": "2025-09-19T00:00:02.000Z",
+          "end_at": "2025-09-19T00:03:00.000Z",
+          "start_zone": "door",
+          "end_zone": "interior",
+          "start_source": "face",
+          "end_source": "face",
+          "end_reason": "occluded_timeout",
+          "prev_interval_id": null
+        },
+        {
+          "interval_id": "iv_r1-0002",
+          "camera_id": "r1",
+          "start_at": "2025-09-19T00:06:15.000Z",
+          "end_at": "2025-09-19T00:10:00.000Z",
+          "start_zone": "interior",
+          "end_zone": "door",
+          "start_source": "face",
+          "end_source": "face",
+          "end_reason": "left_frame",
+          "prev_interval_id": null
+        }
+      ]
+    }
+  },
+  "gaps": [
+    {
+      "person_id": "4471",
+      "after_interval": "iv_r1-0001",
+      "before_interval": "iv_r1-0002",
+      "duration_seconds": 195.0,
+      "same_camera": true,
+      "closed_by_engine": false,
+      "evidence": {
+        "end_zone": "interior",
+        "end_reason": "occluded_timeout",
+        "end_source": "face",
+        "next_start_zone": "interior",
+        "next_start_source": "face"
+      }
+    }
+  ],
+  "asserts": {
+    "intervals": 2,
+    "gaps": 1,
+    "gap_evidence": {
+      "end_zone": "interior",
+      "end_reason": "occluded_timeout",
+      "next_start_zone": "interior"
+    },
+    "note": "Kedua batas celah ada di interior dan engine tidak menyambungnya. Itu seluruh bukti yang backend punya, dan itu cukup untuk membedakannya dari celah yang batasnya di pintu."
+  }
+}

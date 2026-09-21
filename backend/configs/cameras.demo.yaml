@@ -1,0 +1,8 @@
+cameras:
+  - id: "demo-01"
+    code: "DEMO-01"
+    name: "Mock Entertainment Room"
+    source_uri: "mock"
+    stream_url: "frontend/public/videos/video2.mp4"
+    enabled_by_default: true
+    fps: 30

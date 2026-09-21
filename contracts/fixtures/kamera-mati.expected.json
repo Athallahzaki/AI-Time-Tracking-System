@@ -1,0 +1,77 @@
+{
+  "scenario": "kamera-mati",
+  "description": "Tiga orang di ruangan, kamera putus, tidak seorang pun pulang",
+  "what_this_file_is": "Ringkasan observasional dari rekaman, bukan kesimpulan kebijakan. Celah dilaporkan beserta bukti batasnya; bagaimana ia diperlakukan diputuskan backend.",
+  "counts": {
+    "events": 78,
+    "intervals": 3,
+    "tracks_started": 3,
+    "tracks_ended": 3,
+    "seq_first": 1,
+    "seq_last": 78
+  },
+  "cameras": [
+    "r1"
+  ],
+  "people": {
+    "4471": {
+      "interval_count": 1,
+      "intervals": [
+        {
+          "interval_id": "iv_r1-0001",
+          "camera_id": "r1",
+          "start_at": "2025-09-19T00:00:10.000Z",
+          "end_at": "2025-09-19T00:06:40.000Z",
+          "start_zone": "door",
+          "end_zone": "interior",
+          "start_source": "face",
+          "end_source": "forced",
+          "end_reason": "camera_lost",
+          "prev_interval_id": null
+        }
+      ]
+    },
+    "4802": {
+      "interval_count": 1,
+      "intervals": [
+        {
+          "interval_id": "iv_r1-0002",
+          "camera_id": "r1",
+          "start_at": "2025-09-19T00:00:30.000Z",
+          "end_at": "2025-09-19T00:06:40.000Z",
+          "start_zone": "door",
+          "end_zone": "interior",
+          "start_source": "face",
+          "end_source": "forced",
+          "end_reason": "camera_lost",
+          "prev_interval_id": null
+        }
+      ]
+    },
+    "5120": {
+      "interval_count": 1,
+      "intervals": [
+        {
+          "interval_id": "iv_r1-0003",
+          "camera_id": "r1",
+          "start_at": "2025-09-19T00:00:50.000Z",
+          "end_at": "2025-09-19T00:06:40.000Z",
+          "start_zone": "door",
+          "end_zone": "interior",
+          "start_source": "face",
+          "end_source": "forced",
+          "end_reason": "camera_lost",
+          "prev_interval_id": null
+        }
+      ]
+    }
+  },
+  "gaps": [],
+  "asserts": {
+    "intervals": 3,
+    "gaps": 0,
+    "all_end_reasons": "camera_lost",
+    "all_end_sources": "forced",
+    "note": "Ketiga interval wajib berakhir `camera_lost` dan `forced`, bukan `left_frame`. Ini bug yang baru ketahuan saat penggajian."
+  }
+}

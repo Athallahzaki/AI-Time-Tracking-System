@@ -1,0 +1,30 @@
+name: kamera-reconnect
+description: Kamera menyambung ulang, pts kembali nol, offset ditetapkan ulang
+protocol_version: 1
+heartbeat_interval: 30.0
+snapshot_interval: 20.0
+
+cameras:
+  - id: r1
+    pts_offset: 1758240000.0
+
+persons: ["4471"]
+
+timeline:
+  - { at: 0.0,   emit: camera.online, camera: r1 }
+  - { at: 20.0,  emit: track.started, track: r1-t1, camera: r1, zone: door }
+  - { at: 22.0,  emit: track.identified, track: r1-t1, person: "4471", similarity: 0.90, margin: 0.15 }
+  - { at: 200.0, emit: camera.failed, camera: r1, reason: connection_refused }
+  # stream_epoch naik, pts mulai dari nol lagi, offset baru dipancarkan.
+  - { at: 215.0, emit: camera.online, camera: r1 }
+  - { at: 230.0, emit: track.started, track: r1-t8, camera: r1, zone: interior }
+  - { at: 232.0, emit: track.identified, track: r1-t8, person: "4471", similarity: 0.89, margin: 0.14 }
+  - { at: 500.0, emit: track.ended, track: r1-t8, reason: left_frame, zone: door }
+
+expect:
+  intervals: 2
+  note: >-
+    Setelah reconnect, pts interval kedua jauh lebih kecil dari pts interval
+    pertama, tapi `at`-nya lebih besar. Backend yang membandingkan pts lintas
+    stream_epoch akan menyimpulkan waktu berjalan mundur; yang memakai `at`
+    tidak. Tanpa stream_epoch, tidak ada cara membedakan keduanya.

@@ -1,0 +1,28 @@
+# B0 + B1. Loose pins: from here on, a dependency change must show up as a
+# measured delta in bench-out/baseline.json, not as a surprise.
+#
+# The mock path — which is what CI runs and what `python -m engine.bench --mock`
+# uses — needs only the three below. That is deliberate (§13.9): a benchmark
+# that needs a GPU image to run is a benchmark that stops being run.
+
+numpy>=1.24
+av>=11.0                 # B4: real PTS. Binds libav* directly (§5.5). The PyPI
+                         # wheel carries its own FFmpeg, built WITHOUT CUDA —
+                         # this gives the timeline, not hardware decode.
+opencv-python>=4.8       # drawing, the overlay tool, and the ingest backend
+                         # being measured against. The ingest half leaves once
+                         # B4's delta is committed.
+PyYAML>=6.0              # config loading
+
+# --- real detector / tracker path -----------------------------------------
+# Not needed for the mock path, which is what CI runs. Installing these is what
+# makes `--source <file>` work with real weights.
+#
+# ultralytics>=8.0        # optional only for tracker.backend=bytetrack; not used by detector
+
+# --- B1 benchmark ----------------------------------------------------------
+# No new runtime dependency. The face probe uses the frontal cascade bundled
+# with opencv-python (a LOWER BOUND — see engine/bench/faceprobe.py), and
+# everything else is stdlib. Swapping in SCRFD later adds onnxruntime.
+#
+# onnxruntime-gpu>=1.17   # when identity/ lands and the face probe uses SCRFD

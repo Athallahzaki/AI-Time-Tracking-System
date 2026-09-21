@@ -1,0 +1,26 @@
+name: dua-orang-mirip
+description: Margin tipis, tidak ada yang boleh diklaim
+protocol_version: 1
+heartbeat_interval: 60.0
+snapshot_interval: 30.0
+
+cameras:
+  - id: r1
+    pts_offset: 1758240000.0
+
+persons: ["4471", "4802"]
+
+timeline:
+  - { at: 0.0,   emit: camera.online, camera: r1 }
+  - { at: 20.0,  emit: track.started, track: r1-t6, camera: r1, zone: door }
+  # Lolos threshold 0,37 dengan mudah, tapi kandidat keduanya cuma 0,02 di
+  # bawahnya. Threshold bertanya "cukup mirip?", bukan "mirip siapa lagi?".
+  - { at: 80.0,  emit: person.unidentified_present, track: r1-t6,
+      duration_seconds: 60, attempts: 22, reason: margin_too_narrow }
+  - { at: 300.0, emit: track.ended, track: r1-t6, reason: left_frame, zone: door }
+
+expect:
+  intervals: 0
+  note: >-
+    Tanpa margin test, track ini akan diberikan ke salah satu dari keduanya
+    dengan percaya diri, dan orang yang salah mendapat catatan kehadiran.

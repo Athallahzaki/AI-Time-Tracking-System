@@ -1,0 +1,21 @@
+{
+  "scenario": "enrollment-ditolak",
+  "description": "Tabrakan, duplikat, dan kualitas buruk, masing-masing dengan alasannya",
+  "what_this_file_is": "Ringkasan observasional dari rekaman, bukan kesimpulan kebijakan. Celah dilaporkan beserta bukti batasnya; bagaimana ia diperlakukan diputuskan backend.",
+  "counts": {
+    "events": 2,
+    "intervals": 0,
+    "tracks_started": 0,
+    "tracks_ended": 0,
+    "seq_first": 1,
+    "seq_last": 2
+  },
+  "cameras": [
+    "r1"
+  ],
+  "people": {},
+  "gaps": [],
+  "asserts": {
+    "note": "Skenario kanal control: jalankan terhadap socket dan kirim `enroll`. Balasannya deterministik dari isi permintaan -- id gambar yang memuat `blurry`, `too_small`, `no_face` atau `dup` ditolak dengan alasan itu, dan person_id berakhiran 9 dianggap bertabrakan dengan 4802. Tiga jalur penolakan bisa diuji frontend tanpa satu pun model."
+  }
+}

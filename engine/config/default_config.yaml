@@ -1,0 +1,90 @@
+# Engine configuration.
+#
+# Perceptual constants only: how long before a track counts as gone, how much
+# evidence confirms an identity, what similarity counts as a match. Office rules
+# live in backend/policy/ and measurement thresholds in bench/.
+# ARCHITECTURE.md §16. The loader accepts only the sections and keys the schema
+# declares, so anything else here is a load-time error, not a silent default.
+#
+# Every temporal value is in SECONDS. Conversion to frames happens at
+# construction time using the effective fps (engine/config/schema.py).
+
+# How frames get in, and on what timeline (ARCHITECTURE.md §5.5, §6.6).
+ingest:
+  backend: "pyav"            # "pyav" | "opencv". opencv exists only so B4 can
+                             # measure the swap instead of asserting it was free;
+                             # it leaves once that delta is committed.
+  rtsp_transport: "tcp"      # UDP loses packets and hands back corrupted frames
+                             # that damage an embedding without raising anything
+  timeout_seconds: 8.0       # a dead camera must not hang a thread for ever
+  reconnect_attempts: 0      # 0 for files. A live camera wants several.
+  reconnect_backoff_seconds: 1.0
+  max_reconnect_backoff_seconds: 30.0
+  measure_timeline_fidelity: true   # compare real PTS against frame_index / fps
+  decoder_thread_type: "AUTO"       # AUTO | SLICE | FRAME | NONE. Set NONE to
+                                    # measure what single-threaded decode costs.
+  decoder_threads: 0                # 0 = one per core
+  colour_conversion: "to_ndarray"   # "to_ndarray" | "reformatter". Identical
+                                    # pixels; the second reuses one libswscale
+                                    # context instead of building one per frame.
+                                    # probe_ingest times both — switch only with
+                                    # that number in the commit message.
+
+core:
+  source_uri: "samples/room.mp4"   # "0" for webcam, "rtsp://..." for a camera, or a file path
+  source_type: "video_file"        # opencv | video_file | mock
+  detection_interval: 1            # 1 is the only safe value until ARCHITECTURE.md §9 item 7 is fixed
+  target_fps: 30.0                 # baseline value. Dropping to 10 is step 10, measured separately
+  auto_warmup: true
+  strict_mode: true                # fail loudly rather than degrade silently
+
+# Zones (B5, ARCHITECTURE.md §3.2, §4.2). The door, per camera, normalized 0-1.
+#
+# At runtime this arrives from the backend in `set_cameras` and the wire wins —
+# a camera can be moved without editing a file, and two answers to "where is the
+# door" would eventually disagree about whether somebody left the room. What this
+# section is for is the single-camera developer run and the benchmark, where
+# there is no backend to ask, and where §13.8's cheap false-gap estimate is
+# defined in terms of this region.
+#
+# Normalized because the engine sees the mainstream while whoever draws the
+# region is looking at the dashboard's substream (§6.7.2). A camera with no
+# region never reports `door` — it reports `interior` or `frame_edge` — because
+# guessing `door` silently marks every gap as a real departure.
+zones:
+  door_regions: {}                 # e.g.  cam0: [0.62, 0.10, 0.95, 0.55]
+  edge_margin: 0.03                # how close to the frame edge counts as leaving
+                                   # the view for a geometric reason
+
+# The recognition queue (B5, §3.2, §5.2). Ordering only: a track born in the
+# door region is tried first, because that is the one moment a frontal face is
+# nearly guaranteed on a corner camera.
+#
+# OFF by default, and that is a measurement decision, not caution: B1's
+# committed baseline was measured with no queue in the loop. Turning one on by
+# default would move the numbers every later step is compared against, in the
+# same commit that introduced the thing being compared (§16).
+#
+# Every value below left unset means "use the constant in
+# identity/admission.py", so none of them has two homes.
+recognition:
+  enabled: false
+  max_requests_per_frame: 2
+  # max_age_seconds:          0.5   # a crop older than this is worse than the next one
+  # retry_interval_seconds:   1.0
+  # reverify_interval_seconds: 60.0
+  # per_camera_quota:           4   # one busy camera must not blind the others
+
+detector:
+  model_path: "ustc-community/dfine-nano-coco"
+  confidence_threshold: 0.50
+  iou_threshold: 0.45
+  image_size: 640
+  device: "auto"
+  half: false                    # FP16 is a trap on Pascal (GTX 1060). ARCHITECTURE.md §8
+
+tracker:
+  backend: "iou"
+  track_threshold: 0.45
+  match_threshold: 0.8
+  track_buffer_seconds: 1.0
