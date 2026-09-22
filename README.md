@@ -6,7 +6,7 @@ backend menyimpan event mentah dan menurunkan sesi/gap.
 
 ## Persyaratan dan instalasi
 
-- Python 3.11/3.12, Node.js 20+, npm
+- Python 3.11/3.12, Node.js 20+, npm, dan Docker untuk CCTV live
 
 ```bash
 python -m venv .venv
@@ -20,7 +20,10 @@ cd frontend && npm ci && cd ..
 
 ## Menjalankan
 
-Buka tiga terminal dari root proyek.
+Buka empat terminal dari root proyek. Untuk CCTV live, siapkan MediaMTX dahulu
+sesuai `deploy/README.md`, kemudian jalankan `./deploy/start-mediamtx.ps1` pada
+Windows atau `sh deploy/start-mediamtx.sh` pada Linux/macOS. Setelah sehat,
+jalankan tiga proses aplikasi:
 
 ```bash
 # Terminal 1: engine
@@ -83,8 +86,9 @@ Endpoint utama: `/api/system/status`, `/api/cameras`,
 `/api/attendance/derived`, `/api/attendance/corrections`, `/api/enrollments`, dan
 `/api/detections/stream`.
 
-Proyek belum siap produksi penuh: model nyata, benchmark rekaman representatif,
-kebijakan HRD, MediaMTX, autentikasi, dan deployment masih perlu diselesaikan.
+Proyek belum siap produksi penuh: benchmark rekaman representatif, kebijakan HRD,
+autentikasi, TLS, dan hardening deployment masih perlu diselesaikan. Setup MediaMTX
+lokal/lapangan dasar tersedia di `deploy/`.
 Lihat `WORKPLAN_STATUS.md`.
 
 Detector nyata menggunakan D-FINE resmi melalui Hugging Face Transformers,

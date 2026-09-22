@@ -4,7 +4,7 @@
 # stream_url formats supported by the frontend player (auto-detected):
 #
 #   WebRTC (WHEP) — lowest latency ~100ms, recommended for live monitoring:
-#     stream_url: "http://localhost:8889/<name>/whep"
+#     stream_url: "/whep/<name>/whep"   (Vite proxies /whep → localhost:8889)
 #
 #   HLS — higher latency ~2-5s, works everywhere without a running WebRTC server:
 #     stream_url: "/hls/<name>/index.m3u8"   (Vite proxies /hls → localhost:8888)
@@ -19,7 +19,7 @@ cameras:
     code: "CAM-01"
     name: "Entertainment Room"
     source_uri: "rtsp://localhost:8554/cam01"
-    stream_url: "http://localhost:8889/cam01/whep"
+    stream_url: "/whep/cam01/whep"
     enabled_by_default: true
     fps: 30
 

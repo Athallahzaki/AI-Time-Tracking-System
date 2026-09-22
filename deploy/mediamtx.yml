@@ -1,0 +1,39 @@
+# MediaMTX v1.21.1 — relay CCTV untuk engine (RTSP) dan browser (WHEP/HLS).
+# Nilai source cam01 dioverride oleh MTX_PATHS_CAM01_SOURCE dari Docker Compose.
+logLevel: info
+logDestinations: [stdout]
+
+api: true
+apiAddress: :9997
+
+rtsp: true
+rtspAddress: :8554
+rtspTransports: [tcp]
+
+rtmp: false
+srt: false
+moq: false
+
+hls: true
+hlsAddress: :8888
+hlsAllowOrigins: ["*"]
+hlsAlwaysRemux: true
+hlsVariant: lowLatency
+hlsSegmentCount: 7
+hlsSegmentDuration: 1s
+hlsPartDuration: 200ms
+
+webrtc: true
+webrtcAddress: :8889
+webrtcAllowOrigins: ["*"]
+webrtcLocalUDPAddress: :8189
+webrtcIPsFromInterfaces: true
+
+pathDefaults:
+  sourceOnDemand: false
+
+paths:
+  cam01:
+    # Aman sebagai default; Compose wajib menggantinya dengan CAM01_SOURCE.
+    source: publisher
+

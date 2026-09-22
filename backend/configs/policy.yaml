@@ -1,6 +1,8 @@
 # Kebijakan sementara untuk development. Minta HRD mengesahkan nilai produksi.
 timezone: "Asia/Jakarta"
-daily_break_allowance_minutes: 30
+# Orang yang hanya lewat kurang dari 20 detik tidak memakai jatah.
+qualification_seconds: 20
+daily_free_time_allowance_minutes: 30
 official_break:
   start: "12:00"
   end: "13:00"

@@ -23,6 +23,7 @@ class BreakPolicy:
         tracking_loss_threshold: float = 30.0,
         daily_allowance_minutes: float = 30.0,
         warning_remaining_minutes: float = 5.0,
+        qualification_seconds: float = 20.0,
         timezone_name: str = "Asia/Jakarta",
     ) -> None:
         self.break_start_hour = break_start_hour
@@ -32,6 +33,7 @@ class BreakPolicy:
         )
         self.daily_allowance_minutes = daily_allowance_minutes
         self.warning_remaining_minutes = warning_remaining_minutes
+        self.qualification_seconds = qualification_seconds
         self.timezone_name = timezone_name
         self.timezone = ZoneInfo(timezone_name)
 
@@ -111,10 +113,14 @@ def load_break_policy(path: Path) -> BreakPolicy:
         raise FileNotFoundError(f"Policy config not found: {path}")
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     official = data.get("official_break") or {}
-    allowance = float(data.get("daily_break_allowance_minutes", 30))
+    allowance = float(data.get(
+        "daily_free_time_allowance_minutes",
+        data.get("daily_break_allowance_minutes", 30),
+    ))
+    qualification = float(data.get("qualification_seconds", 20))
     warning = float(data.get("warning_remaining_minutes", 5))
     threshold = float(data.get("tracking_loss_threshold_seconds", 30))
-    if allowance < 0 or warning < 0 or threshold < 0:
+    if allowance < 0 or warning < 0 or threshold < 0 or qualification < 0:
         raise ValueError("Policy durations cannot be negative")
     if warning > allowance:
         raise ValueError("warning_remaining_minutes cannot exceed allowance")
@@ -124,6 +130,7 @@ def load_break_policy(path: Path) -> BreakPolicy:
         tracking_loss_threshold=threshold,
         daily_allowance_minutes=allowance,
         warning_remaining_minutes=warning,
+        qualification_seconds=qualification,
         timezone_name=str(data.get("timezone", "Asia/Jakarta")),
     )
 

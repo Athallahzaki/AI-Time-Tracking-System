@@ -357,6 +357,7 @@ class CameraSupervisor:
             self._live[uuid] = {
                 "track_uuid": uuid,
                 "camera_id": self.spec.camera_id,
+                "stream_epoch": frame.metadata.stream_epoch,
                 "identity_state": identity,
                 "person_id": getattr(identity, "person_id", None),
                 "identity_source": getattr(identity, "identity_source", None),
@@ -509,6 +510,7 @@ class CameraSupervisor:
             item = {
                 "track_uuid": entry["track_uuid"],
                 "camera_id": entry["camera_id"],
+                "stream_epoch": entry["stream_epoch"],
                 "person_id": entry["person_id"],
                 "since_pts": round(entry["since_pts"], 4),
             }

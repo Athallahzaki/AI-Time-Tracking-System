@@ -10,7 +10,7 @@ import UnidentifiedAlertPanel from '@/components/dashboard/UnidentifiedAlertPane
 import ManualCorrectionPanel from '@/components/dashboard/ManualCorrectionPanel.vue';
 
 const refreshInterval = ref('5');
-const { stats, isConnected, isStreaming, reconnect } = useDetectionStream();
+const { cameras, stats, isConnected, isStreaming } = useDetectionStream();
 
 function handleExport() {
   window.open('/api/attendance/events', '_blank');
@@ -30,7 +30,11 @@ function handleConfigure() {
         @configure="handleConfigure"
       />
       <StatsRow :stats="stats" />
-      <LiveFeedSection />
+      <LiveFeedSection
+        :cameras="cameras"
+        :is-connected="isConnected"
+        :is-streaming="isStreaming"
+      />
       <BreakAllowancePanel />
       <UnidentifiedAlertPanel />
       <ManualCorrectionPanel ref="correctionPanelref" />

@@ -18,9 +18,9 @@ let pc = null; // RTCPeerConnection for WebRTC
 let hls = null; // Hls instance for HLS
 
 const maxDwellTime = computed(() => {
-  if (!props.camera.detections || props.camera.detections.length === 0)
+  if (!displayDetections.value || displayDetections.value.length === 0)
     return 'Inactive';
-  const extras = props.camera.detections.map((d) => d.extra).filter(Boolean);
+  const extras = displayDetections.value.map((d) => d.extra).filter(Boolean);
   return extras.length > 0 ? extras[0] : 'Active';
 });
 
@@ -62,6 +62,44 @@ let resizeObserver = null;
 const displayDetections = ref([]);
 let rafId = null;
 
+function formatLiveDuration(seconds) {
+  const whole = Math.max(0, Math.floor(seconds));
+  if (whole < 60) return `${whole}s`;
+  const minutes = Math.floor(whole / 60);
+  const remaining = whole % 60;
+  if (minutes < 60) return `${minutes}m ${remaining}s`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m ${remaining}s`;
+}
+
+function withLiveTimers(detections) {
+  const now = Date.now();
+  return (detections || []).map((detection) => {
+    if (detection.elapsedSeconds == null || detection.elapsedObservedAtMs == null) {
+      return detection;
+    }
+    const delta = Math.max(0, now - detection.elapsedObservedAtMs) / 1000;
+    const elapsed = detection.elapsedSeconds + delta;
+    let extra = `${formatLiveDuration(elapsed)}${detection.durationSuffix || ''}`;
+    if (detection.timerMode === 'qualifying') {
+      const remaining = Math.max(0, (detection.qualificationRemainingSeconds || 0) - delta);
+      extra = `Validasi orang lewat ${Math.ceil(remaining)}s`;
+    } else if (detection.timerMode === 'paused') {
+      extra = 'Istirahat 12:00–13:00 · timer dijeda';
+    } else if (detection.timerMode === 'counting' || detection.timerMode === 'limit') {
+      const used = (detection.dailyUsedSeconds || 0) + delta;
+      const allowance = detection.allowanceSeconds || 1800;
+      extra = detection.timerMode === 'limit'
+        ? `BATAS TERCAPAI · ${formatLiveDuration(used)} / ${formatLiveDuration(allowance)}`
+        : `Jatah terpakai ${formatLiveDuration(used)} / ${formatLiveDuration(allowance)}`;
+    }
+    return {
+      ...detection,
+      extra,
+    };
+  });
+}
+
 function getHlsCurrentPDT() {
   if (streamMode.value !== 'hls' || !hls || !videoEl.value) return null;
 
@@ -97,10 +135,11 @@ function tick() {
   // File MP4/direct tidak memiliki wall-clock/PDT yang sama dengan engine.
   // Untuk mode ini tampilkan hasil deteksi terbaru. Sinkronisasi timestamp
   // hanya dapat dilakukan untuk stream HLS (PDT) atau WebRTC live.
-  displayDetections.value =
+  const resolved =
     streamMode.value === 'direct'
       ? props.camera.detections || []
       : resolveDetectionsAt(props.camera, computeTargetMs());
+  displayDetections.value = withLiveTimers(resolved);
   rafId = requestAnimationFrame(tick);
 }
 

@@ -24,6 +24,13 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/hls/, ''),
       },
+      // Keep WHEP relative: remote dashboard clients must contact this server,
+      // not their own localhost:8889.
+      '/whep': {
+        target: 'http://127.0.0.1:8889',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/whep/, ''),
+      },
     },
   },
 })

@@ -90,7 +90,9 @@ export function useEmployeeAllowance() {
       if (!res.ok) return;
       const json = await res.json();
       // Bentuk pasti /api/enrollments belum saya lihat — jaga-jaga dua kemungkinan bentuk.
-      const list: any[] = Array.isArray(json?.data)
+      const list: any[] = Array.isArray(json?.enrollments)
+        ? json.enrollments
+        : Array.isArray(json?.data)
         ? json.data
         : Array.isArray(json)
           ? json

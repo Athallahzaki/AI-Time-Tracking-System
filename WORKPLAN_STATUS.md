@@ -10,7 +10,7 @@ Review 21 September 2026: implementasi sesuai arah arsitektur, tetapi belum M5
 | 0.3 OpenAPI | Selesai runtime | `/openapi.json` dan `/docs` |
 | 0.4 kebijakan HRD | Siap dikonfigurasi | YAML tervalidasi; keputusan resmi HRD masih diperlukan |
 | 0.5 benchmark/rekaman | Sebagian | harness ada; baseline lapangan belum ada |
-| 0.6 PROGRAM-DATE-TIME | Belum | MediaMTX belum tersedia |
+| 0.6 PROGRAM-DATE-TIME | Siap diuji lapangan | MediaMTX tersedia; akurasi kamera nyata belum divalidasi |
 | A2–A7 engine | Mayoritas selesai | identity, presence, outbox, runtime diuji |
 | A8 enrollment | Sebagian besar | admission ada; model nyata belum terpasang |
 | B2–B6 pipeline | Sebagian besar | PTS, zone, queue, matcher ada |
@@ -19,10 +19,10 @@ Review 21 September 2026: implementasi sesuai arah arsitektur, tetapi belum M5
 | C5 session derivation | Selesai minimum | endpoint `/api/attendance/derived` |
 | C6 break quota/alert | Selesai minimum | kuota, warning, timezone, dan endpoint tersedia |
 | C7 camera/roster reconcile | Selesai minimum | otomatis saat startup dan reconnect |
-| C8 MediaMTX/auth | Belum | konfigurasi deploy belum ada |
+| C8 MediaMTX/auth | Sebagian | Compose, WHEP/HLS, health check tersedia; auth/TLS produksi belum |
 | C9 koreksi append-only | Selesai minimum | double-write diperbaiki |
 | C10 enrollment API | Selesai minimum | request/result tersedia |
-| D1–D7 frontend | Sebagian | dashboard ada; HLS playback/auth belum lengkap |
+| D1–D7 frontend | Sebagian besar | WHEP/HLS dan overlay tersedia; auth produksi belum |
 
 Perubahan review: memperbaiki runtime engine yang gagal karena mismatch signature,
 mengaktifkan router backend, membuat kontrol kamera lintas proses, menambahkan

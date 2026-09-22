@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from backend.core.config import settings
 from backend.services.engine_client import EngineConnectionError, engine_client
+from backend.core.state import system_state
 
 router = APIRouter(prefix="/api/cameras", tags=["Cameras"])
 
@@ -21,6 +22,10 @@ def _configured_cameras() -> list[dict]:
     cameras = []
     for camera_id, config in settings.cameras.items():
         override = _overrides.get(camera_id, {})
+        activity = system_state.get_camera_activity(camera_id)
+        recently_updated = (
+            datetime.now(timezone.utc).timestamp() - float(activity.get("last_update", 0))
+        ) < 12.0
         cameras.append({
             "id": camera_id,
             "code": config.code,
@@ -28,6 +33,10 @@ def _configured_cameras() -> list[dict]:
             "source_uri": override.get("source_uri", config.source_uri),
             "stream_url": config.stream_url,
             "enabled": override.get("enabled", config.enabled_by_default),
+            "is_running": bool(recently_updated),
+            "fps": activity.get("fps", config.fps),
+            "active_people": activity.get("people_count", 0) if recently_updated else 0,
+            "stream_status": activity.get("stream_status", "Standby"),
         })
     return cameras
 
