@@ -21,6 +21,7 @@ _LAZY = {
     "VideoFileSource": "video_file",
     "MockFrameSource": "mock_source",
     "PyAVSource": "pyav_source",
+    "PlaybackSource": "playback",
     "StreamTimeline": "timeline",
     "TimelineFidelity": "timeline",
     "Stamp": "timeline",

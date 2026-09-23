@@ -1,0 +1,6 @@
+# Recognizer slot (recognition.recognizer: onnx_face). Only needed when the
+# recognizer is turned on in the engine config; the default engine never
+# imports it. Pick ONE of the two lines.
+-r requirements.txt
+onnxruntime-gpu>=1.17     # CUDA machine
+# onnxruntime>=1.17       # CPU-only machine

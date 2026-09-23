@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import queue
 import collections
 from threading import Lock
@@ -26,6 +27,9 @@ class ViewStreamService:
         self._history_camera_ids = history_camera_ids or set()
         self._max_history_frames = max_history_frames
         self._history: Dict[str, collections.deque] = {}
+        # Async subscribers: (event loop, asyncio.Queue). Delivery hops onto
+        # the subscriber's loop, so SSE handlers never park a worker thread.
+        self._async_subscribers: Dict[str, list] = {}
 
     def publish(
         self,
@@ -65,6 +69,13 @@ class ViewStreamService:
                     [],
                 )
             )
+            async_subscribers = list(self._async_subscribers.get(camera_id, []))
+
+        for loop, async_queue in async_subscribers:
+            try:
+                loop.call_soon_threadsafe(_put_latest, async_queue, message)
+            except RuntimeError:
+                pass  # loop closed; unsubscribe will clean up
 
         for subscriber in subscribers:
             try:
@@ -115,6 +126,23 @@ class ViewStreamService:
 
         return subscriber
 
+    def subscribe_async(self, camera_id: str, replay_history: bool = False) -> "asyncio.Queue":
+        loop = asyncio.get_running_loop()
+        with self._lock:
+            replay = list(self._history.get(camera_id, ())) if replay_history else []
+            async_queue: asyncio.Queue = asyncio.Queue(maxsize=max(1, len(replay) + 128))
+            for message in replay:
+                async_queue.put_nowait(message)
+            self._async_subscribers.setdefault(camera_id, []).append((loop, async_queue))
+        return async_queue
+
+    def unsubscribe_async(self, camera_id: str, async_queue: "asyncio.Queue") -> None:
+        with self._lock:
+            items = self._async_subscribers.get(camera_id, [])
+            self._async_subscribers[camera_id] = [i for i in items if i[1] is not async_queue]
+            if not self._async_subscribers[camera_id]:
+                self._async_subscribers.pop(camera_id, None)
+
     def unsubscribe(
         self,
         camera_id: str,
@@ -156,6 +184,19 @@ class ViewStreamService:
                 None,
             )
             self._history.pop(camera_id, None)
+
+
+def _put_latest(async_queue: "asyncio.Queue", message: Dict[str, Any]) -> None:
+    """Drop the oldest frame when a slow browser falls behind."""
+    if async_queue.full():
+        try:
+            async_queue.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
+    try:
+        async_queue.put_nowait(message)
+    except asyncio.QueueFull:
+        pass
 
 
 from backend.core.config import settings

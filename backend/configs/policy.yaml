@@ -1,10 +1,27 @@
-# Kebijakan sementara untuk development. Minta HRD mengesahkan nilai produksi.
+# Kebijakan jatah free time. Nilai sementara untuk development —
+# minta HRD mengesahkan nilai produksi.
+#
+# Model: kamera memantau RUANG FASILITAS. Waktu karyawan TERLIHAT di ruang itu
+# memakai jatah hariannya.
 timezone: "Asia/Jakarta"
-# Orang yang hanya lewat kurang dari 20 detik tidak memakai jatah.
+
+# Kunjungan yang lebih pendek dari ini (orang lewat) tidak memakai jatah.
+# Untuk kunjungan yang lebih panjang, detik-detik pertama ini tetap gratis.
 qualification_seconds: 20
-daily_free_time_allowance_minutes: 30
-official_break:
-  start: "12:00"
-  end: "13:00"
-tracking_loss_threshold_seconds: 30
-warning_remaining_minutes: 5
+
+daily_free_time_allowance_minutes: 2
+warning_remaining_minutes: 1
+
+# Jeda istirahat resmi: kehadiran di jam ini tidak dihitung. Menit dihormati
+# (mis. "12:30"). Boleh lebih dari satu.
+official_breaks:
+  - start: "12:00"
+    end: "13:00"
+
+# Dua potongan kehadiran orang yang sama yang berjarak <= ini dianggap SATU
+# kunjungan (oklusi, track putus, pindah antar dua kamera di ruang yang sama).
+visit_merge_gap_seconds: 30
+
+# Track teridentifikasi tanpa kabar durabel (heartbeat tiap 30 dtk) selama ini
+# berhenti dihitung — mencegah engine yang mati mendadak menagih selamanya.
+open_presence_stale_seconds: 90

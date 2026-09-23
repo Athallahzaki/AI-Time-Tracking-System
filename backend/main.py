@@ -19,6 +19,7 @@ from backend.routers import (
 from backend.services.engine_client import engine_client
 from backend.services.engine_connection_manager import engine_connection_manager
 from backend.services.engine_integration import (
+    detection_writer,
     engine_integration,
 )
 
@@ -45,6 +46,10 @@ async def lifespan(app: FastAPI):
 
     init_database()
 
+    # Fail at startup, loudly, on a broken cameras.yaml — never "no cameras".
+    cameras = settings.cameras
+    logger.info("Loaded %s camera(s) from %s", len(cameras), settings.cameras_yaml_path)
+
     engine_integration.configure()
 
     engine_connection_manager.start()
@@ -56,12 +61,13 @@ async def lifespan(app: FastAPI):
     )
 
     engine_connection_manager.stop()
+    detection_writer.stop()
 
 
 app = FastAPI(
     title="AI Time Tracking System API",
     description="AI Time Tracking backend.",
-    version="2.0.0",
+    version="2.1.0",
     lifespan=lifespan,
 )
 
@@ -87,7 +93,7 @@ app.include_router(system.router)
 def root():
     return {
         "status": "online",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "engine": (
             "connected"
             if engine_client.connected

@@ -20,7 +20,7 @@ cd frontend && npm ci && cd ..
 
 ## Menjalankan
 
-Buka empat terminal dari root proyek. Untuk CCTV live, siapkan MediaMTX dahulu
+Buka terminal dari root proyek. Untuk CCTV live, siapkan MediaMTX dahulu
 sesuai `deploy/README.md`, kemudian jalankan `./deploy/start-mediamtx.ps1` pada
 Windows atau `sh deploy/start-mediamtx.sh` pada Linux/macOS. Setelah sehat,
 jalankan tiga proses aplikasi:
@@ -78,6 +78,11 @@ python scripts/run_tests.py
 cd frontend && npm run build
 ```
 
+Engine asli menyimpan outbox di `engine/data/outbox.sqlite3` (ubah dengan
+`--outbox` atau `ENGINE_OUTBOX_PATH`) supaya nomor urut event bertahan melintasi
+restart. Event yang gagal diproses backend tidak memutus koneksi; ia disimpan
+dan terlihat di `GET /api/system/dead-letters`.
+
 Tes `engine/tests/test_api.py` memakai Unix socket. Sandbox yang melarang
 `AF_UNIX` akan memberi `PermissionError`; jalankan tes tersebut di host Linux/macOS
 biasa. Tes runtime in-process dan kontrak tidak memerlukan socket.
@@ -91,14 +96,41 @@ autentikasi, TLS, dan hardening deployment masih perlu diselesaikan. Setup Media
 lokal/lapangan dasar tersedia di `deploy/`.
 Lihat `WORKPLAN_STATUS.md`.
 
-Detector nyata menggunakan D-FINE resmi melalui Hugging Face Transformers,
-bukan YOLO/Ultralytics. Checkpoint default
-`ustc-community/dfine-nano-coco` diunduh sekali saat engine pertama dijalankan
-dan selanjutnya memakai cache lokal. Untuk mesin engine tanpa internet, unduh
-model lebih dahulu lalu isi `detector.model_path` dengan direktori model lokal.
+Detector nyata adalah D-FINE lewat **LibreYOLO** (MIT), bukan
+Ultralytics/YOLO. Ukuran dipilih lewat config engine:
+`engine/config/dfine-m.yaml` (Medium, default) atau `engine/config/dfine-s.yaml`
+(Small). Launcher: `python scripts/run_demo.py --model m` atau `--model s`.
 Untuk CI atau demo mock tanpa model, cukup pasang `engine/requirements.txt`;
-dependency PyTorch/D-FINE hanya dipasang pada mesin engine nyata melalui
+LibreYOLO hanya dipasang pada mesin engine nyata melalui
 `engine/requirements-dfine.txt`.
+
+## Recognizer wajah (slot, default mati)
+
+Engine punya slot recognizer (SCRFD + AuraFace lewat onnxruntime) yang
+**dimatikan secara default**. Selama mati, enrollment dijawab
+`recognizer_disabled` dan semua track tanpa nama. Untuk menyalakan, di config
+engine isi:
+
+```yaml
+recognition:
+  enabled: true
+  recognizer: "onnx_face"
+  face_detector_model: "models/scrfd_10g_bnkps.onnx"
+  face_embedder_model: "models/auraface_v1.onnx"
+```
+
+lalu `pip install -r engine/requirements-face.txt`. Model tidak dibundel. Kalau
+diminta tapi tidak bisa dimuat, engine menolak start (tidak jalan diam-diam
+tanpa identitas).
+
+## Jatah free time (logika bisnis di backend)
+
+Model: kamera memantau **ruang fasilitas**; waktu karyawan terlihat di sana
+memakai jatah harian. Semua angka ada di `backend/configs/policy.yaml`.
+Hitungan dilakukan `backend/services/free_time.py` dari **event durabel**
+(`presence.interval` + track yang masih terbuka), digabung lintas kamera, dengan
+20 detik pertama tiap kunjungan gratis dan jam istirahat resmi tidak dihitung.
+Kanal `view` hanya untuk tampilan. Koreksi HR (append-only) langsung diterapkan.
 
 ## Mode runtime satu perintah
 
@@ -138,5 +170,5 @@ diakses engine atau letakkan MP4 pada mesin engine. `stream_url` sebaliknya dibu
 oleh browser. Lihat `deploy/README.md` sebelum menentukan topologi deployment.
 
 Tidak boleh ada import kode langsung antara `backend` dan `engine`; kontrak TCP
-NDJSON adalah satu-satunya batas runtime. Tes arsitektur akan menggagalkan build
-jika aturan ini dilanggar.
+NDJSON adalah satu-satunya batas runtime. `backend/tests/test_boundary.py`
+menggagalkan build jika aturan ini dilanggar (tes integrasi socket dikecualikan).

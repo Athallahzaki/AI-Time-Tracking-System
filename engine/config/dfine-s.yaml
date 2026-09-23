@@ -34,7 +34,8 @@ core:
   source_uri: "samples/room.mp4"   # "0" for webcam, "rtsp://..." for a camera, or a file path
   source_type: "video_file"        # opencv | video_file | mock
   detection_interval: 1            # 1 is the only safe value until ARCHITECTURE.md §9 item 7 is fixed
-  target_fps: 30.0                 # baseline value. Dropping to 10 is step 10, measured separately
+  target_fps: 12.0                 # runtime profile: analyse 12 fps (frames above are dropped
+                                   # before the detector). Bench baseline stays in default_config (30).
   auto_warmup: true
   strict_mode: true                # fail loudly rather than degrade silently
 
@@ -74,14 +75,29 @@ recognition:
   # retry_interval_seconds:   1.0
   # reverify_interval_seconds: 60.0
   # per_camera_quota:           4   # one busy camera must not blind the others
+  recognizer: "none"
+  # --- recognizer slot (face identity) ---------------------------------------
+  # Default OFF. To turn it on: set enabled: true, recognizer: onnx_face, and
+  # point the two model paths at ONNX files on the engine machine (not bundled).
+  # If it is turned on and cannot load, the engine refuses to start.
+  #
+  #   recognizer: "onnx_face"                       # "none" | "onnx_face"
+  #   face_detector_model: "models/scrfd_10g_bnkps.onnx"
+  #   face_embedder_model: "models/auraface_v1.onnx"
+  #   embedding_version: "auraface-v1"
+  #   reference_db_path: "engine/data/references.sqlite3"
+  #   onnx_providers: ["CUDAExecutionProvider", "CPUExecutionProvider"]
+  #   face_detection_threshold: 0.5
+  #   min_face_px: 40
+
 
 detector:
   model_path: "LibreDFINEs.pt"
   confidence_threshold: 0.50
   iou_threshold: 0.45
   image_size: 640
-  device: "cuda"
-  half: false                # FP16 is a trap on Pascal (GTX 1060). ARCHITECTURE.md §8
+  device: "auto"
+  half: false                    # FP16 is a trap on Pascal (GTX 1060). ARCHITECTURE.md §8
 
 tracker:
   backend: "iou"

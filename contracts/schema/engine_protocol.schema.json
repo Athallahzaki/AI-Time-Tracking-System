@@ -227,7 +227,12 @@
             "tracker": { "type": "string" }
           }
         },
-        "oldest_available_seq": { "type": "integer", "minimum": 0 }
+        "oldest_available_seq": { "type": "integer", "minimum": 0 },
+        "outbox_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Identitas outbox engine. Berubah = penomoran seq dimulai ulang; backend wajib memulai kursor baru, bukan membuang seq kecil sebagai duplikat."
+        }
       }
     },
 
@@ -272,11 +277,14 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["camera_id", "uri", "door_region"],
+            "required": ["camera_id", "uri"],
             "properties": {
               "camera_id": { "$ref": "#/$defs/camera_id" },
               "uri": { "type": "string", "minLength": 1 },
-              "door_region": { "$ref": "#/$defs/normalized_region" },
+              "door_region": {
+                "description": "Opsional. Tidak ada = zona pintu belum diukur; semua kotak berlabel interior. Dipakai untuk start_zone/end_zone (forensik), bukan untuk hitungan jatah.",
+                "$ref": "#/$defs/normalized_region"
+              },
               "enabled": { "type": "boolean", "default": true }
             }
           }
@@ -346,7 +354,7 @@
         "type": { "const": "enroll_result" },
         "request_id": { "type": "string", "minLength": 1 },
         "accepted": { "type": "boolean" },
-        "reason": { "enum": ["ok", "collision", "insufficient_references"] },
+        "reason": { "enum": ["ok", "collision", "insufficient_references", "recognizer_disabled"] },
         "collides_with": { "$ref": "#/$defs/person_id" },
         "collision_similarity": { "$ref": "#/$defs/similarity" },
         "embedding_version": { "type": "string" },
@@ -695,7 +703,11 @@
               "track_uuid": { "$ref": "#/$defs/track_uuid" },
               "bbox": { "$ref": "#/$defs/normalized_bbox" },
               "person_id": { "oneOf": [{ "$ref": "#/$defs/person_id" }, { "type": "null" }] },
-              "identity_source": { "enum": ["face", "tracking"] }
+              "identity_source": { "enum": ["face", "tracking"] },
+              "confidence": {
+                "type": "number", "minimum": 0, "maximum": 1,
+                "description": "Skor detector (bukan kemiripan wajah). Hanya untuk tampilan."
+              }
             }
           }
         }

@@ -55,12 +55,22 @@ class EngineApi:
         }
         self._protocol_version = protocol_version
 
-        self._events: "queue.Queue[Dict[str, Any]]" = queue.Queue(maxsize=EVENT_QUEUE_MAX)
+        # Event TIDAK lewat antrian yang bisa dibuang. Pengiriman event berbasis
+        # kursor ke outbox: thread kirim membaca `outbox.since(kursor)`, jadi
+        # tidak ada satu pun event yang bisa "diambil lalu dibuang" ketika
+        # koneksi sedang kosong (itu penyebab event hilang saat handshake).
+        self._wake = threading.Event()
+        self._cursor = 0
+        self._generation = 0
         self._views: "queue.Queue[Dict[str, Any]]" = queue.Queue(maxsize=VIEW_QUEUE_MAX)
         self._handlers: Dict[str, ControlHandler] = {}
 
         self._connection: Optional[socket.socket] = None
         self._connection_lock = threading.Lock()
+        # Satu kunci tulis untuk SEMUA penulisan ke socket: handshake (thread
+        # accept), thread kirim, dan balasan kontrol (thread baca). `sendall`
+        # dari beberapa thread tidak atomik dan bisa menyisipkan NDJSON.
+        self._write_lock = threading.Lock()
         self._server: Optional[socket.socket] = None
         self._sender: Optional[threading.Thread] = None
         self._stop = threading.Event()
@@ -79,13 +89,7 @@ class EngineApi:
         tahu — ia sudah menerimanya, jadi ia tidak akan memintanya lagi.
         """
         stored = self._outbox.append(message)
-        try:
-            self._events.put_nowait(stored)
-        except queue.Full:
-            # Tidak hilang: ia ada di outbox, dan backend akan memintanya lewat
-            # `last_event_seq` saat menyambung lagi. Yang terjadi di sini cuma
-            # pengiriman langsungnya yang dilewati.
-            logger.warning("antrian kirim penuh; seq %s menunggu di outbox", stored.get("seq"))
+        self._wake.set()
         return stored
 
     def emit_view(self, message: Dict[str, Any]) -> bool:
@@ -109,7 +113,7 @@ class EngineApi:
     def metrics(self) -> Dict[str, float]:
         return {
             "outbox_depth": float(len(self._outbox)),
-            "event_queue": float(self._events.qsize()),
+            "event_queue": float(max(0, self._outbox.latest_seq - self._cursor)),
             "view_queue": float(self._views.qsize()),
             "dropped_views": float(self._dropped_views),
             "sent_events": float(self._sent_events),
@@ -207,50 +211,46 @@ class EngineApi:
 
         last_event_seq = int(hello.get("last_event_seq", 0))
 
-        self._write(connection, {
+        hello_ack = {
             "type": "hello_ack", "v": 1, "ts": _now(), "channel": "control",
             "protocol_version": self._protocol_version,
             "engine_version": self._engine_version,
             "models": dict(self._models),
             "oldest_available_seq": self._outbox.oldest_available_seq,
-        })
+        }
+        outbox_id = getattr(self._outbox, "outbox_id", None)
+        if outbox_id:
+            # Identitas outbox. Backend memakainya untuk tahu bahwa penomoran
+            # `seq` dimulai ulang (berkas outbox dihapus / engine in-memory
+            # restart) alih-alih membuang event baru sebagai "sudah dilihat".
+            hello_ack["outbox_id"] = outbox_id
 
-        gap = self._outbox.gap_for(last_event_seq)
-        if gap is not None:
-            gap["ts"] = _now()
-            gap["channel"] = "control"
-            self._write(connection, gap)
-            logger.warning("lubang data: seq %s..%s", gap["from_seq"], gap["to_seq"])
+        with self._write_lock:
+            self._write(connection, hello_ack)
+            gap = self._outbox.gap_for(last_event_seq)
+            if gap is not None:
+                gap["ts"] = _now()
+                gap["channel"] = "control"
+                self._write(connection, gap)
+                logger.warning("lubang data: seq %s..%s", gap["from_seq"], gap["to_seq"])
 
-        for event in self._outbox.since(last_event_seq):
-            self._write(connection, event)
+            # Koneksi dan kursor dipasang atomik, di bawah kunci tulis yang
+            # sama: tidak ada pesan lain yang bisa mendahului hello_ack, dan
+            # replay dikerjakan thread kirim dari kursor ini -- satu jalur,
+            # tanpa snapshot yang bisa ketinggalan event.
+            with self._connection_lock:
+                previous = self._connection
+                self._connection = connection
+                self._cursor = max(0, last_event_seq)
+                self._generation += 1
 
-        # Antrian kirim dikosongkan dari apa pun yang sudah ikut terkirim lewat
-        # replay di atas, supaya backend tidak menerima event yang sama dua kali
-        # dengan seq yang sama.
-        self._drain_events_up_to(self._outbox.latest_seq)
-
-        with self._connection_lock:
-            self._connection = connection
+        if previous is not None and previous is not connection:
+            self._close_connection(previous)
+        self._wake.set()
 
         threading.Thread(
             target=self._read_loop, args=(connection, reader), daemon=True, name="engine-api-read"
         ).start()
-
-    def _drain_events_up_to(self, seq: int) -> None:
-        kept = []
-        while True:
-            try:
-                message = self._events.get_nowait()
-            except queue.Empty:
-                break
-            if message.get("seq", 0) > seq:
-                kept.append(message)
-        for message in kept:
-            try:
-                self._events.put_nowait(message)
-            except queue.Full:
-                break
 
     def _read_loop(self, connection: socket.socket, reader) -> None:
         try:
@@ -286,7 +286,7 @@ class EngineApi:
 
         handler = self._handlers.get(message_type or "")
         if handler is None:
-            self._write(connection, {
+            self._send(connection, {
                 "type": "ack", "v": 1, "ts": _now(), "channel": "control",
                 "in_reply_to": message_type or "?", "accepted": False, "reason": "tidak dikenal",
             })
@@ -304,38 +304,77 @@ class EngineApi:
                      "in_reply_to": message_type, "accepted": True}
 
         reply.setdefault("channel", "control")
-        self._write(connection, reply)
+        self._send(connection, reply)
+
+    SEND_BATCH = 500
+    VIEWS_PER_ROUND = 8
 
     def _send_loop(self) -> None:
-        while not self._stop.is_set():
-            message: Optional[Dict[str, Any]] = None
-            channel = "events"
+        """Satu penulis untuk event dan view. Event selalu didahulukan.
 
-            try:
-                message = self._events.get(timeout=0.05)
-            except queue.Empty:
-                try:
-                    message = self._views.get_nowait()
-                    channel = "view"
-                except queue.Empty:
-                    continue
+        Event dibaca dari outbox mulai kursor; kursor maju hanya setelah
+        penulisan berhasil ke koneksi yang SAMA (dicek lewat `_generation`).
+        Kalau koneksi berganti di tengah batch, sisa batch ditinggalkan dan
+        handshake berikutnya sudah memasang kursor dari `last_event_seq`.
+        """
+        while not self._stop.is_set():
+            self._wake.wait(0.05)
+            self._wake.clear()
 
             with self._connection_lock:
                 connection = self._connection
+                cursor = self._cursor
+                generation = self._generation
 
             if connection is None:
-                # Tidak ada yang mendengarkan. Event tetap aman di outbox;
-                # frame view memang boleh hilang.
+                # View memang boleh hilang; event tetap aman di outbox.
+                self._discard_views()
                 continue
 
+            pending = self._outbox.since(cursor, self.SEND_BATCH) if self._outbox.latest_seq > cursor else []
             try:
-                self._write(connection, message, channel)
-                if channel == "events":
+                for event in pending:
+                    with self._write_lock:
+                        with self._connection_lock:
+                            if self._generation != generation:
+                                break
+                        self._write(connection, event, "events")
+                        with self._connection_lock:
+                            if self._generation == generation:
+                                self._cursor = max(self._cursor, int(event.get("seq", 0)))
                     self._sent_events += 1
+
+                if len(pending) >= self.SEND_BATCH:
+                    self._wake.set()      # masih ada backlog; view menunggu
+                    continue
+
+                for _ in range(self.VIEWS_PER_ROUND):
+                    try:
+                        view = self._views.get_nowait()
+                    except queue.Empty:
+                        break
+                    with self._write_lock:
+                        with self._connection_lock:
+                            if self._generation != generation:
+                                break
+                        self._write(connection, view, "view")
+                if not self._views.empty():
+                    self._wake.set()
             except OSError:
                 with self._connection_lock:
                     if self._connection is connection:
                         self._connection = None
+
+    def _discard_views(self) -> None:
+        while True:
+            try:
+                self._views.get_nowait()
+            except queue.Empty:
+                return
+
+    def _send(self, connection: socket.socket, message: Dict[str, Any], channel: Optional[str] = None) -> None:
+        with self._write_lock:
+            self._write(connection, message, channel)
 
     @staticmethod
     def _write(connection: socket.socket, message: Dict[str, Any], channel: Optional[str] = None) -> None:

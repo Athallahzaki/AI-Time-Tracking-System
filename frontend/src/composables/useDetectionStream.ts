@@ -15,6 +15,10 @@ export interface DetectionItem {
   track_id?: string | number;
   elapsedSeconds?: number;
   elapsedObservedAtMs?: number;
+  /** Global clock: server epoch seconds when this track was first seen. */
+  firstSeenAt?: number;
+  /** Server epoch seconds at which daily/qualification values were computed. */
+  timerAsOf?: number;
   durationSuffix?: string;
   timerMode?: 'qualifying' | 'counting' | 'paused' | 'limit' | 'unidentified';
   qualificationRemainingSeconds?: number;
@@ -65,7 +69,9 @@ interface BackendBbox {
 interface BackendPerson {
   track_id: string | number;
   bbox: BackendBbox;
-  confidence: number;
+  confidence: number | null;
+  first_seen_at?: number;
+  timer_as_of?: number;
   state?: string;
   dwell_time?: number;
   presence_status?: string;
@@ -88,6 +94,8 @@ interface ProtocolViewBox {
   person_id?: string | null;
   confidence?: number;
   similarity?: number;
+  first_seen_at?: number;
+  timer_as_of?: number;
   session_elapsed?: number;
   dwell_time?: number;
   presence_status?: string;
@@ -107,6 +115,7 @@ interface BackendDetectionPayload {
   ts?: string;
   pts?: number;
   stream_epoch?: number;
+  server_time?: number;
   width?: number;
   height?: number;
   fps?: number;
@@ -183,6 +192,36 @@ const liveStats = reactive<DashboardStats>({
   exceededDuration: 0,
 });
 
+// ---- Global clock ---------------------------------------------------------
+// Every timer on the dashboard is read from ONE clock: the backend's wall
+// clock. Each payload carries server_time; we keep the offset between it and
+// this browser's clock. Network delay only ever makes a sample look older, so
+// the largest (server - local) seen recently is the best estimate. Timers are
+// then "server_now - first_seen_at": no per-frame anchors, no accumulation,
+// so a second on screen is always exactly a second.
+const CLOCK_WINDOW = 64;
+const clockSamples: number[] = [];
+let serverOffsetMs = 0;
+let clockSynced = false;
+
+function updateServerClock(serverTimeS: unknown): void {
+  const serverMs = Number(serverTimeS) * 1000;
+  if (!Number.isFinite(serverMs) || serverMs <= 0) return;
+  clockSamples.push(serverMs - Date.now());
+  if (clockSamples.length > CLOCK_WINDOW) clockSamples.shift();
+  serverOffsetMs = Math.max(...clockSamples);
+  clockSynced = true;
+}
+
+/** Current time on the global (backend) clock, in epoch seconds. */
+export function serverNowSeconds(): number {
+  return (Date.now() + serverOffsetMs) / 1000;
+}
+
+export function isServerClockSynced(): boolean {
+  return clockSynced;
+}
+
 function finiteNumber(value: unknown, fallback = 0): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -201,9 +240,12 @@ function protocolBoxesToPeople(
     return {
       track_id: box.track_id ?? box.track_uuid ?? index + 1,
       identity: box.person_id ?? null,
-      confidence: box.confidence ?? box.similarity ?? 0.95,
+      // Detector score from the engine. No fake default: missing stays missing.
+      confidence: box.confidence ?? null,
       presence_status:
         box.presence_status ?? (box.person_id ? 'CONFIRMED' : 'TRACKED'),
+      first_seen_at: box.first_seen_at,
+      timer_as_of: box.timer_as_of,
       session_elapsed: box.session_elapsed ?? box.dwell_time ?? 0,
       is_official_break: box.is_official_break,
       is_qualified: box.is_qualified,
@@ -269,6 +311,7 @@ export function useDetectionStream() {
     try {
       const data = JSON.parse(rawPayload) as BackendDetectionPayload;
       if (!data?.camera_id) return;
+      updateServerClock(data.server_time);
 
       isStreaming.value = true;
       lastUpdated.value = new Date();
@@ -302,8 +345,10 @@ export function useDetectionStream() {
         const y1 = Math.max(0, Math.min(frameHeight, finiteNumber(bbox.y1)));
         const x2 = Math.max(x1, Math.min(frameWidth, finiteNumber(bbox.x2)));
         const y2 = Math.max(y1, Math.min(frameHeight, finiteNumber(bbox.y2)));
-        const rawConfidence = finiteNumber(person.confidence, 0.95);
-        const confidence = rawConfidence <= 1 ? rawConfidence * 100 : rawConfidence;
+        const rawConfidence = person.confidence == null ? Number.NaN : Number(person.confidence);
+        const confidence = Number.isFinite(rawConfidence)
+          ? (rawConfidence <= 1 ? rawConfidence * 100 : rawConfidence)
+          : null;
         const elapsed = person.session_elapsed ?? person.dwell_time ?? 0;
 
         let color: DetectionItem['color'] = 'cyan';
@@ -339,7 +384,7 @@ export function useDetectionStream() {
         const allowance = finiteNumber(person.allowance_seconds, 30 * 60);
         let timerText = `Jatah terpakai ${formatDuration(dailyUsed)} / ${formatDuration(allowance)}`;
         if (timerMode === 'qualifying') {
-          timerText = `Passing ${Math.ceil(qualificationRemaining)}s`;
+          timerText = `Validasi orang lewat ${Math.ceil(qualificationRemaining)}s`;
         } else if (timerMode === 'paused') {
           timerText = 'Istirahat 12:00–13:00 · timer dijeda';
         } else if (timerMode === 'unidentified') {
@@ -355,10 +400,14 @@ export function useDetectionStream() {
             ? `Emp #${person.identity}`
             : `ID #${person.track_id}`,
           sub: person.presence_status || person.state || 'TRACKED',
-          conf: `${Math.round(confidence)}%`,
+          conf: confidence == null ? '' : `${Math.round(confidence)}%`,
           extra: timerText,
           elapsedSeconds: finiteNumber(elapsed),
           elapsedObservedAtMs: Date.now(),
+          firstSeenAt: typeof person.first_seen_at === 'number'
+            ? person.first_seen_at : undefined,
+          timerAsOf: typeof person.timer_as_of === 'number'
+            ? person.timer_as_of : undefined,
           durationSuffix,
           timerMode,
           qualificationRemainingSeconds: qualificationRemaining,

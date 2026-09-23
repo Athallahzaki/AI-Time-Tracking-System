@@ -4,8 +4,8 @@ cameras:
   - id: "r1"
     code: "CAM-01"
     name: "Entertainment Room"
-    source_uri: "rtsp://127.0.0.1:8554/cam01"
-    stream_url: "/hls/cam01/index.m3u8"
+    source_uri: "frontend/public/videos/video2.mp4"
+    stream_url: "videos/video2.mp4"
     enabled_by_default: true
     fps: 25
 

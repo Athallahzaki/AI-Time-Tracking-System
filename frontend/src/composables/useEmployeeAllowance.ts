@@ -40,21 +40,16 @@ export interface BreakUsage {
 }
 
 /**
- * ENDPOINT INI BELUM ADA DI BACKEND.
+ * GET /api/attendance/breaks?date=YYYY-MM-DD -> { status, data: BreakUsage[] }
  *
- * schemas/attendance.py sudah punya BreakUsage, tapi routers/attendance.py
- * yang saya lihat baru: /active, /corrections, /events, /summary — belum ada
- * yang mengembalikan BreakUsage.
+ * Model jatah (keputusan 23 Sep 2026): waktu karyawan TERLIHAT di ruang
+ * fasilitas memakai jatah. `breaks` berisi KUNJUNGAN (bukan celah), dihitung
+ * backend dari event durabel (backend/services/free_time.py): digabung lintas
+ * kamera, 20 detik pertama gratis, jam istirahat resmi tidak dihitung.
+ * `gap_id` = visit_id, dipakai form koreksi untuk mengecualikan kunjungan.
  *
- * Usulan untuk backend (kecil, karena logikanya di session_deriver.py /
- * break_policy.py sudah ada — tinggal dibungkus jadi route):
- *
- *   GET /api/attendance/breaks?date=YYYY-MM-DD
- *   → { "status": "success", "data": BreakUsage[] }
- *
- * Sampai endpoint ini ada, composable akan menampilkan status error apa
- * adanya — BUKAN data rekaan. Sistem ini jadi dasar sanksi karyawan; angka
- * palsu yang terlihat asli lebih berbahaya daripada layar "gagal memuat".
+ * Kalau endpoint gagal, composable menampilkan error apa adanya — BUKAN data
+ * rekaan. Angka palsu yang terlihat asli lebih berbahaya daripada layar gagal.
  */
 const BREAKS_ENDPOINT = '/api/attendance/breaks';
 

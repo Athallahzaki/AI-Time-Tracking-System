@@ -6,6 +6,7 @@ import DetectionBox from './DetectionBox.vue';
 import {
   resolveDetectionsAt,
   resolveDetectionsAtPts,
+  serverNowSeconds,
 } from '@/composables/useDetectionStream.ts';
 
 const props = defineProps({
@@ -77,24 +78,57 @@ function formatLiveDuration(seconds) {
   return `${hours}h ${minutes % 60}m ${remaining}s`;
 }
 
-function withLiveTimers(detections, freeze = false) {
-  const now = Date.now();
+// Timers read the GLOBAL clock (backend wall clock, see serverNowSeconds in
+// useDetectionStream). Each box carries absolute timestamps: first_seen_at and
+// timer_as_of. Whatever frame is on screen -- live, delayed HLS, or a direct
+// MP4 at 0.8x -- "how long" is server_now - first_seen_at, so one second on
+// screen is exactly one second and switching frames cannot speed it up.
+const lastShown = new Map();   // per-track guard against tiny clock-offset steps back
+const LAST_SHOWN_TTL_MS = 30000;
+
+function monotonic(key, value, nowMs) {
+  const previous = lastShown.get(key);
+  const shown = previous && value < previous.value && previous.value - value < 1
+    ? previous.value
+    : value;
+  lastShown.set(key, { value: shown, seenMs: nowMs });
+  return shown;
+}
+
+function pruneShown(nowMs) {
+  for (const [key, entry] of lastShown) {
+    if (nowMs - entry.seenMs > LAST_SHOWN_TTL_MS) lastShown.delete(key);
+  }
+}
+
+function withLiveTimers(detections) {
+  const nowMs = Date.now();
+  const serverNow = serverNowSeconds();
+  pruneShown(nowMs);
   return (detections || []).map((detection) => {
-    if (detection.elapsedSeconds == null || detection.elapsedObservedAtMs == null) {
+    const key = detection.track_id ?? detection.id;
+    let elapsed;
+    let sinceAsOf;
+    if (detection.firstSeenAt != null && detection.timerAsOf != null) {
+      elapsed = Math.max(0, serverNow - detection.firstSeenAt);
+      sinceAsOf = Math.max(0, serverNow - detection.timerAsOf);
+    } else if (detection.elapsedSeconds != null && detection.elapsedObservedAtMs != null) {
+      // Older backend without absolute timestamps.
+      sinceAsOf = Math.max(0, nowMs - detection.elapsedObservedAtMs) / 1000;
+      elapsed = detection.elapsedSeconds + sinceAsOf;
+    } else {
       return detection;
     }
-    const delta = freeze
-      ? 0
-      : Math.max(0, now - detection.elapsedObservedAtMs) / 1000;
-    const elapsed = detection.elapsedSeconds + delta;
+    elapsed = monotonic(`${key}:e`, elapsed, nowMs);
+
     let extra = `${formatLiveDuration(elapsed)}${detection.durationSuffix || ''}`;
     if (detection.timerMode === 'qualifying') {
-      const remaining = Math.max(0, (detection.qualificationRemainingSeconds || 0) - delta);
-      extra = `Passing: ${Math.ceil(remaining)}s`;
+      const remaining = Math.max(0, (detection.qualificationRemainingSeconds || 0) - sinceAsOf);
+      extra = `Validasi orang lewat ${Math.ceil(remaining)}s`;
     } else if (detection.timerMode === 'paused') {
       extra = 'Istirahat 12:00–13:00 · timer dijeda';
     } else if (detection.timerMode === 'counting' || detection.timerMode === 'limit') {
-      const used = (detection.dailyUsedSeconds || 0) + delta;
+      const used = monotonic(`${key}:u`, (detection.dailyUsedSeconds || 0) + sinceAsOf, nowMs);
       const allowance = detection.allowanceSeconds || 1800;
       extra = detection.timerMode === 'limit'
         ? `BATAS TERCAPAI · ${formatLiveDuration(used)} / ${formatLiveDuration(allowance)}`
@@ -144,10 +178,7 @@ function tick() {
     streamMode.value === 'direct'
       ? resolveDetectionsAtPts(props.camera, videoEl.value?.currentTime ?? 0)
       : resolveDetectionsAt(props.camera, computeTargetMs());
-  displayDetections.value = withLiveTimers(
-    resolved,
-    streamMode.value === 'direct',
-  );
+  displayDetections.value = withLiveTimers(resolved);
   rafId = requestAnimationFrame(tick);
 }
 
@@ -161,9 +192,48 @@ function isHlsUrl(url) {
 }
 
 const WEBRTC_PLAYOUT_DELAY = 0.8;
-const DIRECT_LAG_TOLERANCE_SECONDS = 1.0;
+// Direct-mode sync (seamless). The engine analyses the file at its own speed;
+// if that is below real time the old code paused the video, waited for a
+// 2 s lead, played again, caught up, paused again ... a visible stutter every
+// few seconds. Now the video's playbackRate follows the engine's measured
+// throughput so it slows down smoothly instead. Pausing stays only as a last
+// resort when the engine stalls completely.
+const DIRECT_TARGET_LEAD_SECONDS = 1.5;   // how far analysis should run ahead
+const DIRECT_HARD_LAG_SECONDS = 1.0;      // video ahead of analysis by this -> pause
+const DIRECT_SEEK_LAG_SECONDS = 3.0;      // further ahead than this -> jump back instead
 const DIRECT_LAG_GRACE_MS = 1500;
-const DIRECT_RESUME_LEAD_SECONDS = 2.0;
+const DIRECT_MIN_RATE = 0.25;
+const DIRECT_RATE_GAIN = 0.4;             // per second of lead error
+const DIRECT_RATE_STEP = 0.03;            // ignore tiny changes (no thrash)
+const directRate = { lastPts: Number.NaN, lastMs: 0, engineRate: 1, prevLatest: Number.NaN };
+
+function seekVideoTo(video, seconds) {
+  const target = Math.max(0, seconds);
+  if (Math.abs(video.currentTime - target) > 0.05) video.currentTime = target;
+}
+
+function measureEngineRate(latest) {
+  const nowMs = performance.now();
+  if (Number.isFinite(directRate.lastPts) && latest > directRate.lastPts) {
+    const dt = (nowMs - directRate.lastMs) / 1000;
+    if (dt >= 0.25) {
+      const sample = (latest - directRate.lastPts) / dt;
+      directRate.engineRate = 0.8 * directRate.engineRate + 0.2 * sample;
+      directRate.lastPts = latest;
+      directRate.lastMs = nowMs;
+    }
+  } else if (!Number.isFinite(directRate.lastPts) || latest < directRate.lastPts) {
+    directRate.lastPts = latest;
+    directRate.lastMs = nowMs;
+  }
+}
+
+function setPlaybackRate(video, rate) {
+  const clamped = Math.min(1, Math.max(DIRECT_MIN_RATE, rate));
+  if (Math.abs(video.playbackRate - clamped) >= DIRECT_RATE_STEP || clamped === 1) {
+    if (video.playbackRate !== clamped) video.playbackRate = clamped;
+  }
+}
 
 function synchronizeDirectPlayback() {
   const video = videoEl.value;
@@ -175,7 +245,6 @@ function synchronizeDirectPlayback() {
   const analysisComplete = Number.isFinite(latest)
     && Number.isFinite(duration)
     && latest >= duration - 0.5;
-  const lead = Number.isFinite(latest) ? latest - video.currentTime : -Infinity;
 
   // With no analyzed frame at all, hold the first video frame immediately so
   // the beginning cannot be lost while the model warms up.
@@ -185,8 +254,41 @@ function synchronizeDirectPlayback() {
     return;
   }
 
-  const lagging = !analysisComplete && lead < -DIRECT_LAG_TOLERANCE_SECONDS;
-  if (lagging) {
+  if (analysisComplete) {
+    directLagStartedAtMs = null;
+    setPlaybackRate(video, 1);
+    if (directSyncWaiting.value) {
+      directSyncWaiting.value = false;
+      video.play().catch((error) => {
+        console.debug('[Direct sync] Playback resume deferred:', error);
+      });
+    }
+    return;
+  }
+
+  // The engine restarted the file (--loop-files, or a camera re-open): its
+  // timeline went back to 0. Follow it instead of waiting a whole lap with
+  // the video frozen near the end -- that was the "stuck at AI sync".
+  const restarted = Number.isFinite(directRate.prevLatest)
+    && latest < directRate.prevLatest - 1;
+  directRate.prevLatest = latest;
+  if (restarted) {
+    directRate.lastPts = Number.NaN;
+    seekVideoTo(video, latest - DIRECT_TARGET_LEAD_SECONDS);
+  }
+
+  measureEngineRate(latest);
+  let lead = latest - video.currentTime;
+
+  // Video far ahead of analysis (e.g. it looped on its own, or the engine was
+  // restarted): jump back to where the engine is rather than freezing.
+  if (lead < -DIRECT_SEEK_LAG_SECONDS) {
+    seekVideoTo(video, latest - 0.2);
+    lead = latest - video.currentTime;
+  }
+
+  // Last resort: the engine has stalled and the video overtook it.
+  if (lead < -DIRECT_HARD_LAG_SECONDS) {
     if (directLagStartedAtMs == null) directLagStartedAtMs = performance.now();
     if (performance.now() - directLagStartedAtMs >= DIRECT_LAG_GRACE_MS) {
       if (!video.paused) video.pause();
@@ -196,10 +298,12 @@ function synchronizeDirectPlayback() {
   }
   directLagStartedAtMs = null;
 
-  if (
-    directSyncWaiting.value
-    && (analysisComplete || lead >= DIRECT_RESUME_LEAD_SECONDS)
-  ) {
+  // Follow the engine: its throughput, corrected toward the target lead.
+  const rate = directRate.engineRate
+    + DIRECT_RATE_GAIN * (lead - DIRECT_TARGET_LEAD_SECONDS);
+  setPlaybackRate(video, rate);
+
+  if (directSyncWaiting.value && lead >= DIRECT_TARGET_LEAD_SECONDS) {
     directSyncWaiting.value = false;
     video.play().catch((error) => {
       console.debug('[Direct sync] Playback resume deferred:', error);
@@ -320,6 +424,9 @@ function startDirect(url) {
   streamMode.value = 'direct';
   directSyncWaiting.value = true;
   directLagStartedAtMs = null;
+  directRate.lastPts = Number.NaN;
+  directRate.prevLatest = Number.NaN;
+  directRate.engineRate = 1;
   if (videoEl.value) {
     videoEl.value.src = url;
     videoEl.value.load();
@@ -558,6 +665,7 @@ function handleWarning() {
           class="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 rounded-md border px-2.5 py-1.5 text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer text-[11px] sm:text-xs"
           @click="handleInspect"
           title="View active presence sessions JSON"
+          :disabled="!displayDetections.length"
         >
           <ScanSearch class="h-3.5 w-3.5 shrink-0" />
           <span>Inspect Sessions</span>
@@ -565,6 +673,7 @@ function handleWarning() {
         <button
           class="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 font-medium text-red-500 hover:bg-red-50 transition-colors cursor-pointer text-[11px] sm:text-xs"
           @click="handleWarning"
+          :disabled="!displayDetections.length"
         >
           <TriangleAlert class="h-3.5 w-3.5 shrink-0" />
           <span>Manual Warning</span>

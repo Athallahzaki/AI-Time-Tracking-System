@@ -341,9 +341,17 @@ def test_enrollment_is_declined_out_loud_while_there_is_no_embedder():
     expensive: the UI says done and the person is unrecognisable for months."""
     runtime = _runtime()
     try:
-        reply = runtime._on_enroll({"type": "enroll", "request_id": "e-1"})
+        reply = runtime._on_enroll({
+            "type": "enroll", "request_id": "e-1", "person_id": "4471",
+            "images": [{"id": "img1", "jpeg_b64": "AAAA"}],
+        })
+        # An enroll_result WITH the request_id, so the backend can close the
+        # right pending request instead of leaving the UI on "pending".
+        assert reply["type"] == "enroll_result"
+        assert reply["request_id"] == "e-1"
         assert reply["accepted"] is False
-        assert "embedder" in reply["reason"]
+        assert reply["reason"] == "recognizer_disabled"
+        assert reply["images"] == [{"id": "img1", "accepted": False}]
     finally:
         runtime.close()
 

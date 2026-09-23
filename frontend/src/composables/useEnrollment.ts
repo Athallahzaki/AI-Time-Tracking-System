@@ -9,9 +9,32 @@ export interface EnrolledPerson {
 }
 
 export interface EnrollmentSubmitResult {
-  status: 'pending';
+  status: 'pending' | 'accepted' | 'rejected';
   request_id: string;
   person_id: string;
+  accepted?: boolean;
+  reason?: string | null;
+  collides_with?: string | null;
+  images?: Array<{ id: string; accepted: boolean; reason?: string }>;
+}
+
+const POLL_INTERVAL_MS = 1000;
+const POLL_TIMEOUT_MS = 130_000; // backend gives up at 120 s ("engine_timeout")
+
+async function waitForEnrollmentResult(
+  pending: EnrollmentSubmitResult,
+): Promise<EnrollmentSubmitResult> {
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+    const res = await fetch(
+      `/api/enrollments/requests/${encodeURIComponent(pending.request_id)}`,
+    );
+    if (!res.ok) continue;
+    const body = (await res.json()) as EnrollmentSubmitResult;
+    if (body.status !== 'pending') return body;
+  }
+  return pending;
 }
 
 function fileToBase64(file: File): Promise<string> {
@@ -93,7 +116,10 @@ export function useEnrollment() {
         throw new Error(body?.detail || `HTTP ${res.status}`);
       }
 
-      return await res.json();
+      const pending = (await res.json()) as EnrollmentSubmitResult;
+      const final = await waitForEnrollmentResult(pending);
+      if (final.status === 'accepted') await fetchEnrolledPersons();
+      return final;
     } catch (err: any) {
       submitError.value =
         err?.message || 'Gagal mengirim permintaan enrollment';

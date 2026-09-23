@@ -116,13 +116,30 @@ async function handleSubmit() {
 
     <div
       v-if="lastResult"
-      class="rounded-md bg-sky-50 px-3 py-2 text-xs text-sky-700"
+      class="rounded-md px-3 py-2 text-xs"
+      :class="lastResult.status === 'accepted'
+        ? 'bg-emerald-50 text-emerald-700'
+        : lastResult.status === 'rejected'
+          ? 'bg-red-50 text-red-700'
+          : 'bg-sky-50 text-sky-700'"
     >
-      Permintaan terkirim untuk {{ lastResult.person_id }} (request_id:
-      {{ lastResult.request_id }}). Status diterima/ditolak
-      <strong>belum bisa ditampilkan otomatis</strong> di sini — cek daftar di
-      bawah setelah beberapa saat, atau tanyakan ke tim backend jalur mana yang
-      membawa hasil enroll_result ke frontend.
+      <template v-if="lastResult.status === 'accepted'">
+        Enrollment {{ lastResult.person_id }} diterima.
+      </template>
+      <template v-else-if="lastResult.status === 'rejected'">
+        Enrollment {{ lastResult.person_id }} ditolak: {{ lastResult.reason || 'tanpa alasan' }}
+        <span v-if="lastResult.reason === 'recognizer_disabled'">
+          (recognizer engine belum dinyalakan di config)
+        </span>
+        <ul v-if="lastResult.images?.length" class="mt-1 list-disc pl-4">
+          <li v-for="img in lastResult.images" :key="img.id">
+            {{ img.id }}: {{ img.accepted ? 'OK' : img.reason || 'ditolak' }}
+          </li>
+        </ul>
+      </template>
+      <template v-else>
+        Menunggu jawaban engine untuk {{ lastResult.person_id }}…
+      </template>
     </div>
 
     <button

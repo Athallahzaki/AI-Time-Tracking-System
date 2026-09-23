@@ -2,6 +2,8 @@
 import { ref } from 'vue';
 
 const props = defineProps({
+  presetPersonId: { type: String, default: '' },
+  presetDate: { type: String, default: '' },
   presetSessionId: { type: String, default: '' },
   presetGapId: { type: String, default: '' },
   presetCorrectedBy: { type: String, default: '' },
@@ -9,22 +11,29 @@ const props = defineProps({
 
 const emit = defineEmits(['submitted', 'cancel']);
 
-// Field mana yang WAJIB di CorrectionCreate belum saya pastikan — belum lihat
-// schemas/corrections.py, cuma cara pakainya di routers/attendance.py.
-// gap_id/corrected_by/reason ditandai wajib berdasarkan akal sehat audit trail;
-// sesuaikan kalau schema aslinya berbeda.
+// Sesuai backend/schemas/corrections.py. Model jatah: waktu TERLIHAT di ruang
+// fasilitas. Koreksi bisa (a) mengecualikan satu kunjungan (Visit ID dari
+// panel jatah + klasifikasi) atau (b) menambah/mengurangi menit hari itu
+// (angka negatif = mengembalikan jatah). Keduanya butuh ID karyawan.
 const GAP_CLASSIFICATIONS = [
-  { value: '', label: 'Jangan ubah klasifikasi' },
-  { value: 'tracking_loss', label: 'Kegagalan Tracking' },
-  { value: 'break', label: 'Istirahat' },
-  { value: 'departure', label: 'Pulang' },
-  { value: 'camera_failure', label: 'Kamera Mati' },
-  { value: 'system_event', label: 'Event Sistem' },
-  { value: 'official_break', label: 'Jam Istirahat Resmi' },
-  { value: 'unknown', label: 'Perlu Ditinjau' },
+  { value: '', label: 'Jangan kecualikan kunjungan' },
+  { value: 'misidentified', label: 'Salah orang (bukan karyawan ini)' },
+  { value: 'not_free_time', label: 'Bukan free time (tugas kerja)' },
+  { value: 'tracking_loss', label: 'Kegagalan tracking' },
+  { value: 'camera_failure', label: 'Kamera bermasalah' },
+  { value: 'system_event', label: 'Event sistem' },
+  { value: 'official_break', label: 'Jam istirahat resmi' },
 ];
 
+function todayLocal() {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
 const form = ref({
+  person_id: props.presetPersonId,
+  date: props.presetDate || todayLocal(),
   session_id: props.presetSessionId,
   gap_id: props.presetGapId,
   corrected_by: props.presetCorrectedBy,
@@ -44,6 +53,8 @@ async function handleSubmit() {
   submitSuccess.value = false;
   try {
     const payload = {
+      person_id: form.value.person_id || null,
+      date: form.value.date || null,
       session_id: form.value.session_id || null,
       gap_id: form.value.gap_id || null,
       corrected_by: form.value.corrected_by,
@@ -87,6 +98,24 @@ async function handleSubmit() {
 
     <div class="grid grid-cols-2 gap-3">
       <div>
+        <label class="text-xs font-medium text-slate-600">ID Karyawan *</label>
+        <input
+          v-model="form.person_id"
+          required
+          type="text"
+          class="mt-1 w-full rounded-md border px-2 py-1.5 text-sm"
+        />
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-600">Tanggal *</label>
+        <input
+          v-model="form.date"
+          required
+          type="date"
+          class="mt-1 w-full rounded-md border px-2 py-1.5 text-sm"
+        />
+      </div>
+      <div>
         <label class="text-xs font-medium text-slate-600">Session ID</label>
         <input
           v-model="form.session_id"
@@ -95,11 +124,11 @@ async function handleSubmit() {
         />
       </div>
       <div>
-        <label class="text-xs font-medium text-slate-600">Gap ID *</label>
+        <label class="text-xs font-medium text-slate-600">Visit ID</label>
         <input
           v-model="form.gap_id"
-          required
           type="text"
+          placeholder="visit_… (kosongkan jika hanya penyesuaian menit)"
           class="mt-1 w-full rounded-md border px-2 py-1.5 text-sm"
         />
       </div>
@@ -129,7 +158,7 @@ async function handleSubmit() {
     <div class="grid grid-cols-2 gap-3">
       <div>
         <label class="text-xs font-medium text-slate-600"
-          >Ubah klasifikasi jadi</label
+          >Kecualikan kunjungan karena</label
         >
         <select
           v-model="form.new_classification"
@@ -146,7 +175,7 @@ async function handleSubmit() {
       </div>
       <div>
         <label class="text-xs font-medium text-slate-600"
-          >Penyesuaian durasi (menit)</label
+          >Penyesuaian jatah (menit, − = kembalikan)</label
         >
         <input
           v-model="form.adjustment_minutes"

@@ -25,7 +25,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Tuple, Union
 
 
 def resolve_engine_path(raw_path: Union[str, Path]) -> str:
@@ -223,7 +223,34 @@ class RecognitionConfig:
     # overlap with, so this is a throttle on bookkeeping, not on GPU work.
     max_requests_per_frame: int = 2
 
+    # --- the recognizer slot --------------------------------------------
+    # "none" (default): no face model is loaded, enrollment answers
+    # `recognizer_disabled`, every track stays nameless. "onnx_face": SCRFD +
+    # AuraFace through onnxruntime (engine/identity/face_onnx.py). Turning it
+    # on also requires `enabled: true` — recognition needs the scheduler.
+    recognizer: str = "none"
+    face_detector_model: Optional[str] = None
+    face_embedder_model: Optional[str] = None
+    embedding_version: str = "auraface-v1"
+    reference_db_path: str = "engine/data/references.sqlite3"
+    onnx_providers: Optional[Tuple[str, ...]] = None
+    face_detection_threshold: float = 0.5
+    min_face_px: float = 40.0
+    match_threshold: Optional[float] = None
+    match_margin: Optional[float] = None
+
     def __post_init__(self) -> None:
+        if self.recognizer not in ("none", "onnx_face"):
+            raise ValueError("recognition.recognizer must be 'none' or 'onnx_face'.")
+        if self.recognizer != "none" and not self.enabled:
+            raise ValueError(
+                "recognition.recognizer is set but recognition.enabled is false; "
+                "a recognizer without the scheduler would never be asked anything."
+            )
+        if self.recognizer != "none" and not (self.face_detector_model and self.face_embedder_model):
+            raise ValueError(
+                "recognition.recognizer=onnx_face needs face_detector_model and face_embedder_model."
+            )
         if self.max_requests_per_frame < 0:
             raise ValueError("recognition.max_requests_per_frame must be >= 0.")
         for name in ("max_age_seconds", "retry_interval_seconds",

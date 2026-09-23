@@ -1,5 +1,6 @@
 <script setup>
-import { useUnidentifiedAlerts } from '@/composables/useUnidentifiedAlerts';
+
+import { useUnidentifiedAlerts } from '@/composables/useUnIdentifiedAlerts';
 import { AlertTriangle, Video } from '@lucide/vue';
 
 const { alerts, isLoading, loadError } = useUnidentifiedAlerts();

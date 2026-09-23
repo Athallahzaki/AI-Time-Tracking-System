@@ -45,6 +45,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+import uuid as uuid_module
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
@@ -71,6 +72,14 @@ DEFAULT_VIEW_FPS = 10.0
 
 # How far below the expected rate a camera may run before it is called degraded.
 DEGRADED_FPS_FRACTION = 0.5
+
+# Reopen policy after a failure. `camera.failed` announces the first delay;
+# later attempts back off up to the cap. A camera is never given up on while
+# it is still in the desired set — only `set_cameras` removes it.
+RETRY_INITIAL_SECONDS = 5.0
+RETRY_MAX_SECONDS = 60.0
+
+NETWORK_SCHEMES = ("rtsp://", "rtsps://", "rtmp://", "http://", "https://", "udp://")
 
 
 @dataclass
@@ -101,6 +110,8 @@ class CameraStats:
     measured_fps: float = 0.0
     state: str = "starting"
     error: Optional[str] = None
+    attempts: int = 0
+    loops: int = 0
     attempts_by_uuid: Dict[str, int] = field(default_factory=dict)
     evidence_by_uuid: Dict[str, int] = field(default_factory=dict)
 
@@ -121,8 +132,14 @@ class CameraSupervisor:
         heartbeat_seconds: float = HEARTBEAT_INTERVAL_SECONDS,
         unidentified_after_seconds: float = UNIDENTIFIED_AFTER_SECONDS,
         max_frames: Optional[int] = None,
+        loop_files: bool = False,
     ) -> None:
         self.spec = spec
+        # Local video files restart from the beginning when they end. For
+        # demos/testing only: every lap is a new run (new ids, open presences
+        # closed), exactly like a camera that went away and came back.
+        self._loop_files = loop_files
+        self._detector: Any = None
         self._config = config
         self._emit_event = emit_event
         self._emit_view = emit_view
@@ -186,33 +203,68 @@ class CameraSupervisor:
     # -- the loop ---------------------------------------------------------
 
     def _run(self) -> None:
+        """Open, run, and on failure reopen with backoff until stopped.
+
+        Previously the thread simply exited after `camera.failed` — which
+        promised `retry_in_seconds: 5` — and reconciliation skipped the camera
+        because its id was still registered. A dropped RTSP stream stayed dead
+        until someone restarted the engine.
+        """
         camera_id = self.spec.camera_id
+        delay = RETRY_INITIAL_SECONDS
+        while not self._stop.is_set():
+            outcome = self._run_once()
+            if outcome == "stopped" or self._stop.is_set():
+                break
+            if outcome == "finished":
+                if self._loop_files and self._max_frames is None:
+                    self.stats.loops += 1
+                    logger.info("[%s] video selesai, mengulang dari awal (putaran %d)",
+                                camera_id, self.stats.loops + 1)
+                    delay = RETRY_INITIAL_SECONDS
+                    continue
+                # A local file reached its end (or max_frames): nothing to reopen.
+                break
+            self.stats.attempts += 1
+            logger.warning("[%s] membuka ulang dalam %.0f detik", camera_id, delay)
+            if self._stop.wait(delay):
+                break
+            delay = min(RETRY_MAX_SECONDS, delay * 2)
+
+    def _run_once(self) -> str:
+        """One open-run-close cycle. Returns 'stopped', 'finished' or 'failed'."""
+        camera_id = self.spec.camera_id
+        self._reset_run_state()
         try:
             self._build()
         except Exception as error:  # noqa: BLE001 — reported, not swallowed
             self.stats.state = "failed"
             self.stats.error = repr(error)
-            logger.exception("[%s] gagal dibuka", camera_id)
-            # §2.3: a camera that never opened is a camera problem, and the
-            # backend has to hear it as one rather than infer it from silence.
+            if self.stats.attempts == 0:
+                logger.exception("[%s] gagal dibuka", camera_id)
+            else:
+                logger.warning("[%s] masih gagal dibuka: %r", camera_id, error)
             self._emit_event(
                 events.camera_failed(
                     camera_id, time.time(), reason=_failure_reason(error),
-                    retry_in_seconds=5.0,
+                    retry_in_seconds=RETRY_INITIAL_SECONDS,
                 )
             )
-            return
+            return "failed"
 
         self.stats.state = "online"
+        self.stats.error = None
         self.stats.started_wallclock = time.time()
-
+        outcome = "stopped"
         try:
             while not self._stop.is_set():
                 frame, tracks = self._engine.step()
                 if frame is None:
+                    outcome = "failed" if self._is_network else "finished"
                     break
                 self._on_frame(frame, tracks)
                 if self._max_frames is not None and self.stats.frames >= self._max_frames:
+                    outcome = "finished"
                     break
         except Exception as error:  # noqa: BLE001
             self.stats.state = "failed"
@@ -222,12 +274,42 @@ class CameraSupervisor:
             self._emit_event(
                 events.camera_failed(
                     camera_id, time.time(), reason=_failure_reason(error),
-                    retry_in_seconds=5.0,
+                    retry_in_seconds=RETRY_INITIAL_SECONDS,
                 )
             )
-            return
-        finally:
-            self._shutdown()
+            self._stop_engine()
+            return "failed"
+
+        if outcome == "failed":
+            # A live stream that ends did not send everybody home (§2.3).
+            self.stats.state = "failed"
+            self.stats.error = "stream_ended"
+            self._close_open_tracks(reason="camera_lost")
+            self._emit_event(
+                events.camera_failed(
+                    camera_id, time.time(), reason="stream_ended",
+                    retry_in_seconds=RETRY_INITIAL_SECONDS,
+                )
+            )
+            self._stop_engine()
+            return "failed"
+
+        self._shutdown()
+        return outcome
+
+    @property
+    def _is_network(self) -> bool:
+        return str(self.spec.uri).lower().startswith(NETWORK_SCHEMES)
+
+    def _reset_run_state(self) -> None:
+        self._epoch = None
+        self._last_view_pts = -1e9
+        self._last_heartbeat.clear()
+        self._track_born_pts.clear()
+        self._unidentified_reported.clear()
+        self._live.clear()
+        # New ids for every run: track_uuid / interval_id are never reused.
+        self._run_nonce = uuid_module.uuid4().hex[:8]
 
     def _build(self) -> None:
         from .. import factory
@@ -242,14 +324,17 @@ class CameraSupervisor:
             edge_margin=config.zones.edge_margin,
         )
 
+        nonce = getattr(self, "_run_nonce", None) or uuid_module.uuid4().hex[:8]
         self._assembler = PresenceAssembler(
-            emit=self._emit_event, zones=self._zoner.labeller
+            emit=self._emit_event, zones=self._zoner.labeller,
+            interval_prefix=f"iv_{nonce}",
         )
         self._binding = EngineBinding(
             arbiter=IdentityArbiter(matcher=self._matcher or _empty_matcher()),
             assembler=self._assembler,
             scheduler=self._scheduler,
             recognize=self._recognize,
+            uuid_prefix=f"tr_{nonce}",
         )
 
         if self._scheduler is not None:
@@ -262,11 +347,29 @@ class CameraSupervisor:
             # pipeline/zoning.py for what happens when they come apart.
             self._queue.set_consumer(self._count_attempt)
 
+        # Local recordings need a wall-clock gate: otherwise a fast GPU can
+        # report PTS 30 while the direct player is still showing second 10.
+        # Network sources already arrive in realtime; benchmark pacing remains
+        # independently controlled by engine.bench.
+        wrap_source = None
+        if config.source_type == "video_file":
+            lowered_uri = str(config.source_uri).lower()
+            is_network = lowered_uri.startswith(
+                ("rtsp://", "rtsps://", "rtmp://", "http://", "https://", "udp://")
+            )
+            if not is_network:
+                from ..ingest import PlaybackSource
+
+                wrap_source = lambda inner, _fps: PlaybackSource(inner)
+
         engine, source, source_fps = factory.build_engine(
             config,
             source_id=camera_id,
             max_frames=self._max_frames,
+            wrap_source=wrap_source,
+            detector=self._detector,
         )
+        self._detector = engine._detector
         engine._zoner = self._zoner
         engine._recognition_queue = self._queue
         engine.add_listener(self._binding)
@@ -410,9 +513,10 @@ class CameraSupervisor:
                 continue
             self._unidentified_reported.add(uuid)
             attempts = self.stats.attempts_by_uuid.get(uuid, 0)
+            clock = self._assembler.clock_for(self.spec.camera_id)
             self._emit_event(
                 events.person_unidentified_present(
-                    self.spec.camera_id, time.time(), uuid,
+                    self.spec.camera_id, clock.offset + pts, uuid,
                     duration_seconds=round(duration, 3), attempts=attempts,
                     reason=(
                         "no_face_detected"
@@ -456,6 +560,11 @@ class CameraSupervisor:
             source = getattr(identity, "identity_source", None)
             if source:
                 box["identity_source"] = source
+            # Detector score of the detection this track was last matched to.
+            # Display only -- identity similarity is a different number.
+            score = getattr(track, "confidence", None)
+            if isinstance(score, (int, float)) and 0.0 <= float(score) <= 1.0:
+                box["confidence"] = round(float(score), 3)
             boxes.append(box)
 
         # Empty frames are significant: without them the browser would keep the
@@ -486,11 +595,15 @@ class CameraSupervisor:
         if self.stats.state != "failed":
             self.stats.state = "stopped"
         self._close_open_tracks(reason="engine_shutdown")
+        self._stop_engine()
+
+    def _stop_engine(self) -> None:
         if self._engine is not None:
             try:
                 self._engine.stop()
             except Exception:  # noqa: BLE001
                 logger.exception("[%s] gagal berhenti rapi", self.spec.camera_id)
+            self._engine = None
 
     def _close_open_tracks(self, reason: str) -> None:
         """Nobody is left open. An interval with no end is a presence that
@@ -540,6 +653,7 @@ class CameraSupervisor:
             "state": self.stats.state,
             "frames": self.stats.frames,
             "epochs": self.stats.epochs,
+            "reopen_attempts": self.stats.attempts,
             "last_pts": round(self.stats.last_pts, 3),
             "error": self.stats.error,
             **binding,

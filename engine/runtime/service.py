@@ -59,7 +59,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from ..api import EngineApi, events
-from ..api.outbox import Outbox
+from ..api.outbox import Outbox, SqliteOutbox
 from ..config import EngineConfig, load_config
 from ..identity import RecognitionScheduler
 from .camera import CameraSpec, CameraSupervisor
@@ -105,6 +105,15 @@ class RuntimeOptions:
     health_interval_seconds: float = HEALTH_INTERVAL_SECONDS
     view_fps: float = 10.0
     max_frames: Optional[int] = None
+    # Berkas outbox durabel. `None` = di memori (hanya untuk tes). Engine asli
+    # (`python -m engine.runtime`) selalu mengisinya: nomor urut wajib bertahan
+    # melintasi restart, lihat docstring `api/outbox.py`.
+    outbox_path: Optional[str] = None
+    # Override core.target_fps (None = pakai nilai config). Frame di atas laju
+    # ini dibuang sebelum detector; cara paling murah membuat engine ringan.
+    target_fps: Optional[float] = None
+    # Ulang video file lokal dari awal saat habis (demo/testing).
+    loop_files: bool = False
 
 
 class EngineRuntime:
@@ -121,8 +130,22 @@ class EngineRuntime:
     ) -> None:
         self.options = options or RuntimeOptions()
         self.config = config or load_config(self.options.config_path)
+        if self.options.target_fps:
+            import dataclasses
+            self.config = dataclasses.replace(
+                self.config, target_fps=float(self.options.target_fps))
+
+        if recognize is None and self.config.recognition.recognizer != "none":
+            # The recognizer slot (config-driven). Fails loudly if the config
+            # asks for it and it cannot load — never a silent nameless engine.
+            recognize, reference_store, matcher = _build_identity(self.config)
+        outbox = (
+            SqliteOutbox(self.options.outbox_path)
+            if self.options.outbox_path
+            else Outbox()
+        )
         self.api = api or EngineApi(
-            outbox=Outbox(),
+            outbox=outbox,
             engine_version=self.options.engine_version,
             models=_model_names(self.config, recognize is not None),
         )
@@ -245,6 +268,7 @@ class EngineRuntime:
             recognize=self._recognize,
             view_fps=self.options.view_fps,
             max_frames=self.options.max_frames,
+            loop_files=self.options.loop_files,
         )
         self._cameras[spec.camera_id] = camera
         camera.start()
@@ -281,21 +305,37 @@ class EngineRuntime:
         return None
 
     def _on_enroll(self, message: Dict[str, Any]) -> Dict[str, Any]:
-        """Declined, with the reason, until an embedder exists.
+        """Answer with `enroll_result` (carrying request_id), never a bare ack.
 
-        Accepting an enrolment and storing nothing is the worst shape of §9 item
-        9: the UI says done, the reference never exists, and the person is
-        unrecognisable for months with no error anywhere.
+        A bare ack has no request_id, so the backend could not tell which
+        request it answered and the UI waited on "pending" forever.
         """
-        return {
-            "type": "ack", "v": 1, "ts": events.rfc3339(time.time()),
-            "in_reply_to": "enroll", "accepted": False,
-            "reason": (
-                "engine ini berjalan tanpa embedder, jadi tidak ada yang bisa "
-                "dihitung dari gambar. Enrollment aktif setelah model identitas "
-                "terpasang (ARCHITECTURE.md §10, langkah 15)."
-            ),
-        }
+        request_id = str(message.get("request_id") or "unknown")
+        images = message.get("images") or []
+        ts = events.rfc3339(time.time())
+        analyze = getattr(self._recognize, "analyze_image", None)
+        if analyze is None or self._store is None or self._matcher is None:
+            return {
+                "type": "enroll_result", "v": 1, "ts": ts,
+                "request_id": request_id, "accepted": False,
+                "reason": "recognizer_disabled",
+                "images": [{"id": str(img.get("id", "?")), "accepted": False} for img in images],
+            }
+
+        from ..identity.enrollment import EnrollmentPolicy, ImageCandidate
+
+        candidates = []
+        for image in images:
+            candidates.append(_candidate_from(image, analyze, ImageCandidate))
+        person_id = str(message.get("person_id"))
+        version = int(message.get("enrollment_version", 1))
+        with self._emit_lock:
+            policy = EnrollmentPolicy(self._matcher)
+            result = policy.evaluate(person_id, version, candidates)
+            policy.commit(result, self._store, candidates)
+            if result.accepted:
+                self._matcher.rebuild()
+        return result.to_message(request_id, self.config.recognition.embedding_version, ts)
 
     # -- periodic ---------------------------------------------------------
 
@@ -454,6 +494,65 @@ def _drop_rate(metrics: Dict[str, float]) -> float:
     return round(dropped / total, 4) if total else 0.0
 
 
+def _resolve_path(path: str) -> str:
+    from pathlib import Path
+
+    candidate = Path(path)
+    if candidate.is_absolute():
+        return str(candidate)
+    return str(Path(__file__).resolve().parents[2] / candidate)
+
+
+def _build_identity(config: EngineConfig):
+    """recognizer + reference store + matcher, from `recognition.*` config."""
+    from ..identity import MatrixMatcher
+    from ..identity.face_onnx import build_recognizer
+    from ..store.references import SqliteReferenceStore
+
+    rec = config.recognition
+    recognizer = build_recognizer(rec)
+    store = SqliteReferenceStore(_resolve_path(rec.reference_db_path), rec.embedding_version)
+    kwargs = {}
+    if rec.match_threshold is not None:
+        kwargs["threshold"] = rec.match_threshold
+    if rec.match_margin is not None:
+        kwargs["margin"] = rec.match_margin
+    matcher = MatrixMatcher(store, **kwargs)
+    return recognizer, store, matcher
+
+
+def _candidate_from(image: Dict[str, Any], analyze: Callable[..., Any], candidate_cls: Any) -> Any:
+    import base64
+
+    import cv2
+    import numpy as np
+
+    image_id = str(image.get("id", "?"))
+    try:
+        raw = base64.b64decode(str(image.get("jpeg_b64", "")), validate=False)
+        bgr = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
+    except Exception:  # noqa: BLE001
+        bgr, raw = None, b""
+    if bgr is None:
+        return candidate_cls(image_id=image_id, face_count=0, jpeg=raw)
+    analysis = analyze(bgr)
+    return candidate_cls(
+        image_id=image_id,
+        face_count=analysis.face_count,
+        embedding=analysis.embedding,
+        jpeg=raw,
+        face_width=analysis.face_width,
+        face_height=analysis.face_height,
+        sharpness=analysis.sharpness,
+        brightness=analysis.brightness,
+        contrast=analysis.contrast,
+        detector_confidence=analysis.detector_confidence,
+        landmarks=analysis.landmarks,
+        camera_id=image.get("camera_id"),
+        captured_at=image.get("captured_at"),
+    )
+
+
 def _model_names(config: EngineConfig, recognizer_wired: bool) -> Dict[str, str]:
     """What `hello_ack` tells the backend it is talking to.
 
@@ -463,6 +562,6 @@ def _model_names(config: EngineConfig, recognizer_wired: bool) -> Dict[str, str]
     """
     return {
         "detector": config.detector.model_path,
-        "embedder": "auraface-ir100" if recognizer_wired else "unset",
-        "embedding_version": "auraface-v1" if recognizer_wired else "unset",
+        "embedder": (config.recognition.face_embedder_model or "custom") if recognizer_wired else "unset",
+        "embedding_version": config.recognition.embedding_version if recognizer_wired else "unset",
     }

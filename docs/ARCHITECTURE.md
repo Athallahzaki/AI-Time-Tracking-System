@@ -7,6 +7,16 @@ antara keduanya. Isinya keputusan yang sudah diambil beserta alasannya, bug yang
 harus diperbaiki, dan urutan pekerjaan. Angka performa apa pun di sini adalah
 estimasi sampai `bench.py` ada.
 
+> **Keputusan 23 September 2026 (menggantikan arah §4.1 untuk hitungan jatah):**
+> kamera memantau **ruang fasilitas**, dan waktu karyawan **terlihat** di ruang itu
+> memakai jatah 30 menit hariannya. Jatah dihitung backend
+> (`backend/services/free_time.py`) dari event durabel — bukan dari celah antar
+> interval dan bukan dari kanal `view`. Kegagalan pengenalan di model ini
+> menyebabkan *kurang tagih*, bukan tuduhan palsu; risiko kebalikannya (salah
+> orang ditagih) ditangani dengan koreksi HR yang mengecualikan satu kunjungan.
+> Bagian di bawah tentang celah tetap berlaku untuk kualitas track, bukan untuk
+> tagihan jatah.
+
 **Perubahan dari revisi 2:** sistem ini bukan hanya absensi. Ada monitoring jatah
 istirahat pribadi 30 menit di luar jam istirahat resmi, dan itu **membalik apa
 yang diukur** — dari kehadiran jadi ketidakhadiran. Konsekuensinya masuk ke

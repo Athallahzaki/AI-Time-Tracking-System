@@ -35,7 +35,7 @@ function handleConfigure() {
         :is-connected="isConnected"
         :is-streaming="isStreaming"
       />
-      <BreakAllowancePanel />
+      <!-- <BreakAllowancePanel /> -->
       <UnidentifiedAlertPanel />
       <ManualCorrectionPanel ref="correctionPanelref" />
     </div>

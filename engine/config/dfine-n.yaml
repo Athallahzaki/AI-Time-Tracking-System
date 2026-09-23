@@ -74,6 +74,21 @@ recognition:
   # retry_interval_seconds:   1.0
   # reverify_interval_seconds: 60.0
   # per_camera_quota:           4   # one busy camera must not blind the others
+  recognizer: "none"
+  # --- recognizer slot (face identity) ---------------------------------------
+  # Default OFF. To turn it on: set enabled: true, recognizer: onnx_face, and
+  # point the two model paths at ONNX files on the engine machine (not bundled).
+  # If it is turned on and cannot load, the engine refuses to start.
+  #
+  #   recognizer: "onnx_face"                       # "none" | "onnx_face"
+  #   face_detector_model: "models/scrfd_10g_bnkps.onnx"
+  #   face_embedder_model: "models/auraface_v1.onnx"
+  #   embedding_version: "auraface-v1"
+  #   reference_db_path: "engine/data/references.sqlite3"
+  #   onnx_providers: ["CUDAExecutionProvider", "CPUExecutionProvider"]
+  #   face_detection_threshold: 0.5
+  #   min_face_px: 40
+
 
 detector:
   model_path: "LibreDFINEn.pt"

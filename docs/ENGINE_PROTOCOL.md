@@ -73,8 +73,19 @@ Balasan:
   "engine_version": "0.9.0",
   "models": { "detector": "yolo11s", "embedder": "auraface-ir100",
               "embedding_version": "auraface-v1" },
-  "oldest_available_seq": 9800 }
+  "oldest_available_seq": 9800,
+  "outbox_id": "sql-5f0c…" }
 ```
+
+`outbox_id` (opsional, dikirim engine asli) mengidentifikasi outbox. Bila berbeda
+dari yang terakhir disimpan backend, penomoran `seq` sudah dimulai ulang (berkas
+outbox dihapus atau engine in-memory restart). Backend lalu memulai kursor baru
+dari 0 dan menyimpan event dengan kunci `(outbox_id, seq)`, bukan membuang `seq`
+kecil sebagai duplikat.
+
+Backend juga wajib memeriksa kontinuitas: event dengan `seq > last_event_seq + 1`
+tanpa `replay_gap` sebelumnya berarti ada event yang terlewat. Backend tidak
+meng-ACK-nya dan menyambung ulang supaya engine memutar ulang dari kursor.
 
 Kalau `last_event_seq` lebih kecil dari `oldest_available_seq`, engine tidak bisa
 replay penuh. Ia tetap mengirim apa yang ada dan menandainya:
@@ -102,6 +113,10 @@ state-nya. Kamera yang tidak ada di daftar ditutup.
 ```
 
 `door_region` dalam koordinat ternormalisasi `[x1, y1, x2, y2]`, rentang 0–1.
+Field ini **opsional**: kamera tanpa `door_region` melabeli semua kotak
+`interior`. Dengan model jatah "hadir di ruang fasilitas" (keputusan
+23 Sep 2026), zona hanya dipakai untuk forensik `start_zone`/`end_zone`, bukan
+untuk hitungan jatah.
 
 ### 3.3 `set_roster`
 
@@ -138,6 +153,10 @@ Balasan membawa hasil per gambar, bukan sekadar sukses/gagal:
     { "id": "img2", "accepted": false, "reason": "duplicate_of:img1",
       "similarity": 0.94 } ] }
 ```
+
+`reason` tingkat-permintaan: `ok`, `collision`, `insufficient_references`, atau
+`recognizer_disabled` (engine berjalan dengan `recognition.enabled: false`, jadi
+tidak ada embedder untuk menghitung referensi).
 
 Nilai `reason` untuk gambar: `too_small`, `blurry`, `extreme_pose`, `bad_lighting`,
 `no_face`, `multiple_faces`, `duplicate_of:<id>`.

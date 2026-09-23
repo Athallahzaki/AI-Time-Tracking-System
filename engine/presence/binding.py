@@ -79,7 +79,11 @@ class EngineBinding:
         assembler: PresenceAssembler,
         scheduler: Optional[RecognitionScheduler] = None,
         recognize: Optional[Recognizer] = None,
+        uuid_prefix: str = "tr",
     ) -> None:
+        # The runtime passes `tr_<run nonce>` so a uuid is never reused across
+        # engine restarts or camera rebuilds (contract: "tidak pernah didaur ulang").
+        self._uuid_prefix = uuid_prefix
         self._arbiter = arbiter
         self._assembler = assembler
         self._scheduler = scheduler
@@ -111,7 +115,7 @@ class EngineBinding:
 
         generation = self._generation.get(key, 0) + 1
         self._generation[key] = generation
-        uuid = f"tr_{camera_id}-t{track_id}-g{generation}"
+        uuid = f"{self._uuid_prefix}_{camera_id}-t{track_id}-g{generation}"
         self._uuid_of[key] = uuid
         self._camera_by_uuid[uuid] = camera_id
         return uuid
