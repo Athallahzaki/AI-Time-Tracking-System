@@ -213,6 +213,11 @@ class SystemState:
             timer_fields = self._timer_fields(sess, now)
             box.update({key: round(value, 3) if isinstance(value, float) else value
                         for key, value in timer_fields.items()})
+            # Global clock: absolute server timestamps. The browser computes
+            # "how long" as server_now - first_seen_at, so every frame, card
+            # and browser reads the same clock and nothing accumulates.
+            box["first_seen_at"] = round(sess.first_seen, 3)
+            box["timer_as_of"] = round(now, 3)
             enriched_boxes.append(box)
 
         self.update_camera_status(
@@ -225,6 +230,7 @@ class SystemState:
         self.prune_stale_sessions(now=now)
         enriched = dict(message)
         enriched["boxes"] = enriched_boxes
+        enriched["server_time"] = round(now, 3)
         return enriched
 
     def prune_stale_sessions(self, max_idle_seconds: float = STALE_TRACK_SECONDS,

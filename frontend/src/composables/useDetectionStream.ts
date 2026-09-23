@@ -15,6 +15,10 @@ export interface DetectionItem {
   track_id?: string | number;
   elapsedSeconds?: number;
   elapsedObservedAtMs?: number;
+  /** Global clock: server epoch seconds when this track was first seen. */
+  firstSeenAt?: number;
+  /** Server epoch seconds at which daily/qualification values were computed. */
+  timerAsOf?: number;
   durationSuffix?: string;
   timerMode?: 'qualifying' | 'counting' | 'paused' | 'limit' | 'unidentified';
   qualificationRemainingSeconds?: number;
@@ -66,6 +70,8 @@ interface BackendPerson {
   track_id: string | number;
   bbox: BackendBbox;
   confidence: number | null;
+  first_seen_at?: number;
+  timer_as_of?: number;
   state?: string;
   dwell_time?: number;
   presence_status?: string;
@@ -88,6 +94,8 @@ interface ProtocolViewBox {
   person_id?: string | null;
   confidence?: number;
   similarity?: number;
+  first_seen_at?: number;
+  timer_as_of?: number;
   session_elapsed?: number;
   dwell_time?: number;
   presence_status?: string;
@@ -107,6 +115,7 @@ interface BackendDetectionPayload {
   ts?: string;
   pts?: number;
   stream_epoch?: number;
+  server_time?: number;
   width?: number;
   height?: number;
   fps?: number;
@@ -183,6 +192,36 @@ const liveStats = reactive<DashboardStats>({
   exceededDuration: 0,
 });
 
+// ---- Global clock ---------------------------------------------------------
+// Every timer on the dashboard is read from ONE clock: the backend's wall
+// clock. Each payload carries server_time; we keep the offset between it and
+// this browser's clock. Network delay only ever makes a sample look older, so
+// the largest (server - local) seen recently is the best estimate. Timers are
+// then "server_now - first_seen_at": no per-frame anchors, no accumulation,
+// so a second on screen is always exactly a second.
+const CLOCK_WINDOW = 64;
+const clockSamples: number[] = [];
+let serverOffsetMs = 0;
+let clockSynced = false;
+
+function updateServerClock(serverTimeS: unknown): void {
+  const serverMs = Number(serverTimeS) * 1000;
+  if (!Number.isFinite(serverMs) || serverMs <= 0) return;
+  clockSamples.push(serverMs - Date.now());
+  if (clockSamples.length > CLOCK_WINDOW) clockSamples.shift();
+  serverOffsetMs = Math.max(...clockSamples);
+  clockSynced = true;
+}
+
+/** Current time on the global (backend) clock, in epoch seconds. */
+export function serverNowSeconds(): number {
+  return (Date.now() + serverOffsetMs) / 1000;
+}
+
+export function isServerClockSynced(): boolean {
+  return clockSynced;
+}
+
 function finiteNumber(value: unknown, fallback = 0): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -205,6 +244,8 @@ function protocolBoxesToPeople(
       confidence: box.confidence ?? null,
       presence_status:
         box.presence_status ?? (box.person_id ? 'CONFIRMED' : 'TRACKED'),
+      first_seen_at: box.first_seen_at,
+      timer_as_of: box.timer_as_of,
       session_elapsed: box.session_elapsed ?? box.dwell_time ?? 0,
       is_official_break: box.is_official_break,
       is_qualified: box.is_qualified,
@@ -270,6 +311,7 @@ export function useDetectionStream() {
     try {
       const data = JSON.parse(rawPayload) as BackendDetectionPayload;
       if (!data?.camera_id) return;
+      updateServerClock(data.server_time);
 
       isStreaming.value = true;
       lastUpdated.value = new Date();
@@ -362,6 +404,10 @@ export function useDetectionStream() {
           extra: timerText,
           elapsedSeconds: finiteNumber(elapsed),
           elapsedObservedAtMs: Date.now(),
+          firstSeenAt: typeof person.first_seen_at === 'number'
+            ? person.first_seen_at : undefined,
+          timerAsOf: typeof person.timer_as_of === 'number'
+            ? person.timer_as_of : undefined,
           durationSuffix,
           timerMode,
           qualificationRemainingSeconds: qualificationRemaining,

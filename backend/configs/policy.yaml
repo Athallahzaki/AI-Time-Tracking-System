@@ -9,8 +9,8 @@ timezone: "Asia/Jakarta"
 # Untuk kunjungan yang lebih panjang, detik-detik pertama ini tetap gratis.
 qualification_seconds: 20
 
-daily_free_time_allowance_minutes: 30
-warning_remaining_minutes: 5
+daily_free_time_allowance_minutes: 2
+warning_remaining_minutes: 1
 
 # Jeda istirahat resmi: kehadiran di jam ini tidak dihitung. Menit dihormati
 # (mis. "12:30"). Boleh lebih dari satu.
