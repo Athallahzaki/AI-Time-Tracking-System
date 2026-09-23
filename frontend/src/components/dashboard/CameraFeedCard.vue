@@ -124,7 +124,7 @@ function withLiveTimers(detections) {
     let extra = `${formatLiveDuration(elapsed)}${detection.durationSuffix || ''}`;
     if (detection.timerMode === 'qualifying') {
       const remaining = Math.max(0, (detection.qualificationRemainingSeconds || 0) - sinceAsOf);
-      extra = `Validasi orang lewat ${Math.ceil(remaining)}s`;
+      extra = `${Math.ceil(remaining)}s`;
     } else if (detection.timerMode === 'paused') {
       extra = 'Istirahat 12:00–13:00 · timer dijeda';
     } else if (detection.timerMode === 'counting' || detection.timerMode === 'limit') {
