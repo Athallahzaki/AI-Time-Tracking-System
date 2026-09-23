@@ -1,80 +1,131 @@
-# MediaMTX deployment
+# Deployment (Docker Compose)
 
-Setup ini membuat satu jalur video yang konsisten:
+Semua berkas deployment tinggal di folder ini. Build context tetap root repo
+(`..`), tetapi Dockerfile, ignore file, dan konfigurasi nginx tidak disebar ke
+`frontend/` atau `backend/`.
 
-- MediaMTX menarik substream H.264 CCTV sebagai `cam01`.
-- Engine membaca `rtsp://127.0.0.1:8554/cam01`.
-- Frontend membaca `/whep/cam01/whep` atau `/hls/cam01/index.m3u8` melalui proxy Vite.
-
-## Persyaratan
-
-- Docker Desktop (Windows/macOS) atau Docker Engine + Compose plugin (Linux).
-- CCTV dapat dijangkau dari komputer Docker.
-- Gunakan substream H.264. MediaMTX melakukan relay/remux dan tidak mengubah H.265 menjadi H.264.
-
-## Setup pertama
-
-Windows PowerShell:
-
-```powershell
-Copy-Item deploy/.env.mediamtx.example deploy/.env.mediamtx
-notepad deploy/.env.mediamtx
-./deploy/start-mediamtx.ps1
+```
+deploy/
+├── docker-compose.yml          # MAIN compose: frontend + backend (+ profile mediamtx, demo)
+├── .env.example                # semua variabel; salin ke .env
+├── backend/
+│   ├── Dockerfile              # python:3.11-slim, uvicorn 1 worker, user non-root
+│   └── Dockerfile.dockerignore # whitelist backend/ + contracts/
+├── frontend/
+│   ├── Dockerfile              # node build -> nginx:alpine
+│   ├── Dockerfile.dockerignore # whitelist frontend/ + nginx conf
+│   └── nginx/
+│       ├── nginx.conf
+│       ├── templates/default.conf.template   # envsubst saat start
+│       └── snippets/{proxy-common,security-headers}.conf
+├── fake-engine/
+│   ├── Dockerfile              # engine/tools/fake_engine, tanpa GPU
+│   └── Dockerfile.dockerignore
+└── mediamtx/                   # relay CCTV (dipakai main compose & standalone)
+    ├── mediamtx.yml
+    ├── docker-compose.mediamtx.yml  # standalone, untuk mode dev (run_demo.py)
+    ├── .env.mediamtx.example
+    ├── start-mediamtx.{sh,ps1}
+    └── README.md
 ```
 
-Linux/macOS:
+`Dockerfile.dockerignore` adalah ignore file per-Dockerfile milik BuildKit
+(default sejak Docker 23). Jadi tidak perlu `.dockerignore` di root repo.
+
+## Topologi
+
+```
+browser ──:80──> frontend (nginx) ──/api/*──────────> backend:8000 ──TCP──> engine:8765
+                                  ├─/hls/*  ──> mediamtx:8888
+                                  ├─/whep/* ──> mediamtx:8889   (media WebRTC: UDP 8189 langsung)
+                                  └─/videos/* ─> frontend/public/videos (mount read-only)
+```
+
+Hanya port 80 yang dibuka ke jaringan. Backend dipublish ke `127.0.0.1:8000`
+untuk debugging saja.
+
+## Mulai cepat
 
 ```bash
-cp deploy/.env.mediamtx.example deploy/.env.mediamtx
-# edit CAM01_SOURCE dan MEDIAMTX_WEBRTC_ADDITIONAL_HOSTS
-sh deploy/start-mediamtx.sh
+cd deploy
+cp .env.example .env        # sesuaikan
+docker compose up -d --build
+docker compose ps
+docker compose logs -f backend
 ```
 
-`CAM01_SOURCE` harus berisi RTSP CCTV asli. Jangan commit `.env.mediamtx` karena
-berisi username dan password. Jika dashboard dibuka dari perangkat lain, isi
-`MEDIAMTX_WEBRTC_ADDITIONAL_HOSTS` dengan IP LAN komputer server.
+Dashboard: `http://<ip-server>/`. API docs: `http://<ip-server>/docs`.
 
-## Menjalankan seluruh aplikasi
+### Profile
 
-Urutan proses:
+| Perintah | Isi |
+|---|---|
+| `docker compose up -d` | frontend + backend. Engine asli di host. |
+| `docker compose --profile mediamtx up -d` | + MediaMTX (isi `CAM01_SOURCE`). |
+| `docker compose --profile demo up -d` | + fake engine. Set `ENGINE_HOST=fake-engine` di `.env`. |
 
-1. `./deploy/start-mediamtx.ps1` atau `sh deploy/start-mediamtx.sh`
-2. `python -m engine.runtime --config engine/config/dfine-m.yaml --tcp 127.0.0.1:8765`
-3. Backend pada port 8000 dengan `ENGINE_HOST=127.0.0.1` dan `ENGINE_PORT=8765`
-4. `cd frontend; npm run dev`
+Profile bisa digabung: `--profile mediamtx --profile demo`.
 
-Atau, setelah MediaMTX dan `cam01` berstatus READY, jalankan seluruh aplikasi:
+## Engine asli (GPU)
 
-```powershell
-python scripts/run_demo.py --mode mediamtx --frontend
-```
-
-Untuk video lokal tanpa MediaMTX gunakan:
-
-```powershell
-python scripts/run_demo.py --mode direct --frontend
-```
-
-## Pemeriksaan dan troubleshooting
+Engine D-FINE belum dikontainerkan: butuh CUDA, weights, dan akses kamera,
+dan itu keputusan terpisah. Backend di container menjangkaunya lewat
+`host.docker.internal`, jadi engine **harus listen di 0.0.0.0**:
 
 ```bash
-python scripts/check_mediamtx.py
-docker compose --env-file deploy/.env.mediamtx -f deploy/docker-compose.mediamtx.yml logs -f
+python -m engine.runtime --config engine/config/dfine-m.yaml --tcp 0.0.0.0:8765
 ```
 
-Hasil sehat harus menunjukkan `Path cam01 : READY`. Endpoint yang tersedia:
+Dengan `--tcp 127.0.0.1:8765` (default lama) backend di container akan
+reconnect selamanya. Di Linux, pastikan firewall mengizinkan bridge Docker ke
+port 8765. Jangan buka 8765 ke LAN — protokol engine tidak punya autentikasi.
 
-- RTSP engine: `rtsp://127.0.0.1:8554/cam01`
-- WHEP browser: `http://127.0.0.1:8889/cam01/whep`
-- HLS browser: `http://127.0.0.1:8888/cam01/index.m3u8`
-- API lokal: `http://127.0.0.1:9997/v3/paths/list`
+Catatan `source_uri` di `cameras.yaml` dibaca oleh **engine** (di host),
+bukan oleh backend, jadi path relatif seperti `frontend/public/videos/...`
+tetap relatif ke direktori kerja engine.
 
-Jika path `NOT READY`, periksa URL/kredensial CCTV, firewall, dan codec. Jika WHEP
-gagal dari PC lain tetapi HLS bekerja, periksa IP `MEDIAMTX_WEBRTC_ADDITIONAL_HOSTS`
-dan pastikan UDP 8189 dibuka pada firewall server.
+## Konfigurasi kamera & policy
 
-Untuk menghentikan MediaMTX:
+`backend/configs/` di-mount read-only ke container. Pilih berkas lewat
+`CAMERAS_CONFIG_FILE` / `POLICY_CONFIG_FILE` di `.env`, edit, lalu:
 
 ```bash
-docker compose --env-file deploy/.env.mediamtx -f deploy/docker-compose.mediamtx.yml down
+docker compose restart backend
 ```
+
+`stream_url` yang benar di balik nginx: `/whep/<path>/whep`,
+`/hls/<path>/index.m3u8`, atau `/videos/<file>.mp4`. Jangan pakai
+`http://localhost:8889/...` — itu localhost milik browser, bukan server.
+
+## Data
+
+SQLite backend ada di volume `ai-time-tracking-backend-data` (`/data/backend.db`).
+
+```bash
+# backup
+docker compose exec backend python -c "import sqlite3; s=sqlite3.connect('/data/backend.db'); d=sqlite3.connect('/data/backup.db'); s.backup(d)"
+docker compose cp backend:/data/backup.db ./backend-backup.db
+```
+
+`docker compose down -v` **menghapus** volume ini beserta seluruh event
+kehadiran. Pakai `down` tanpa `-v`.
+
+## API key
+
+Kalau `BACKEND_API_KEY` diisi, nginx menyuntikkan `X-API-Key` ke setiap
+request `/api`. Artinya kunci ini melindungi port backend langsung, **bukan**
+dashboard — siapa pun yang bisa membuka port 80 tetap bisa mengubah data.
+Autentikasi pengguna masih pekerjaan terbuka; sampai itu ada, batasi akses
+port 80 (`HTTP_BIND`, firewall, VPN).
+
+## Update
+
+```bash
+git pull
+cd deploy
+docker compose build
+docker compose up -d
+```
+
+`VITE_API_URL` di-bake saat build frontend; mengubahnya butuh rebuild.
+Perubahan nginx template cukup `docker compose up -d --build frontend`.

@@ -1,0 +1,150 @@
+# Diproses envsubst saat container start -> /etc/nginx/conf.d/default.conf
+# Variabel env yang disubstitusi (lihat NGINX_ENVSUBST_FILTER di Dockerfile):
+#   BACKEND_UPSTREAM, MEDIAMTX_HLS_UPSTREAM, MEDIAMTX_WHEP_UPSTREAM,
+#   BACKEND_API_KEY, NGINX_RESOLVER, CLIENT_MAX_BODY_SIZE
+#
+# Upstream sengaja ditaruh di variabel + `resolver`: nama host di-resolve saat
+# request, bukan saat nginx start. Akibatnya nginx tetap hidup walau MediaMTX
+# tidak dijalankan (profile `mediamtx` mati), dan IP backend yang berubah
+# setelah restart container tetap terlacak.
+
+resolver ${NGINX_RESOLVER} valid=10s ipv6=off;
+resolver_timeout 5s;
+
+server {
+    listen 80 default_server;
+    server_name _;
+
+    root  /usr/share/nginx/html;
+    index index.html;
+
+    # Enrollment mengirim foto sebagai base64 di dalam JSON.
+    client_max_body_size ${CLIENT_MAX_BODY_SIZE};
+
+    # Catatan: add_header di dalam location MENGGANTI (bukan menambah) yang di
+    # level server, jadi setiap location yang punya add_header sendiri ikut
+    # meng-include snippet ini.
+    include /etc/nginx/snippets/security-headers.conf;
+
+    set $backend_upstream   ${BACKEND_UPSTREAM};
+    set $mtx_hls_upstream   ${MEDIAMTX_HLS_UPSTREAM};
+    set $mtx_whep_upstream  ${MEDIAMTX_WHEP_UPSTREAM};
+
+    # ------------------------------------------------------------------
+    # Health check nginx sendiri (dipakai HEALTHCHECK Docker).
+    # ------------------------------------------------------------------
+    location = /healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    # ------------------------------------------------------------------
+    # Backend: SSE detection stream — tanpa buffering, timeout panjang.
+    # ------------------------------------------------------------------
+    location /api/detections/stream {
+        include /etc/nginx/snippets/proxy-common.conf;
+        proxy_set_header X-API-Key "${BACKEND_API_KEY}";
+
+        proxy_buffering           off;
+        proxy_cache               off;
+        proxy_request_buffering   off;
+        chunked_transfer_encoding on;
+        gzip                      off;
+        proxy_read_timeout        1h;
+        proxy_send_timeout        1h;
+        add_header X-Accel-Buffering no always;
+        include /etc/nginx/snippets/security-headers.conf;
+
+        proxy_pass $backend_upstream;
+    }
+
+    # ------------------------------------------------------------------
+    # Backend: REST API.
+    # X-API-Key disuntikkan DI SINI (server-side), sama seperti proxy Vite
+    # dev, supaya kunci tidak pernah masuk bundle browser. Kosong = header
+    # tidak dikirim.
+    # ------------------------------------------------------------------
+    location /api/ {
+        include /etc/nginx/snippets/proxy-common.conf;
+        proxy_set_header X-API-Key "${BACKEND_API_KEY}";
+
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+
+        proxy_pass $backend_upstream;
+    }
+
+    # FastAPI docs (opsional, berguna untuk debugging lewat satu port).
+    location ~ ^/(docs|redoc|openapi\.json)$ {
+        include /etc/nginx/snippets/proxy-common.conf;
+        proxy_pass $backend_upstream;
+    }
+
+    # ------------------------------------------------------------------
+    # MediaMTX HLS: /hls/<path>/index.m3u8  ->  mediamtx:8888/<path>/index.m3u8
+    # Low-Latency HLS memakai long-poll (_HLS_msn), jadi buffering dimatikan.
+    # ------------------------------------------------------------------
+    location /hls/ {
+        include /etc/nginx/snippets/proxy-common.conf;
+        proxy_buffering off;
+        proxy_read_timeout 60s;
+        rewrite ^/hls/(.*)$ /$1 break;
+        proxy_pass $mtx_hls_upstream;
+    }
+
+    # ------------------------------------------------------------------
+    # MediaMTX WHEP (WebRTC signalling): /whep/<path>/whep -> mediamtx:8889
+    # Hanya SDP offer/answer yang lewat sini. Media tetap UDP 8189 langsung
+    # ke host MediaMTX — lihat MEDIAMTX_WEBRTC_ADDITIONAL_HOSTS.
+    # ------------------------------------------------------------------
+    location /whep/ {
+        include /etc/nginx/snippets/proxy-common.conf;
+        proxy_buffering off;
+        proxy_read_timeout 60s;
+        rewrite ^/whep/(.*)$ /$1 break;
+        # Location sesi WHEP (untuk PATCH/DELETE) dikembalikan relatif ke root
+        # MediaMTX; tambahkan prefix /whep supaya tetap lewat proxy ini.
+        proxy_redirect ~^/(.*)$ /whep/$1;
+        proxy_pass $mtx_whep_upstream;
+    }
+
+    # ------------------------------------------------------------------
+    # Video demo (MP4 lokal) — dimount dari frontend/public/videos.
+    # Range request didukung bawaan, jadi seek di <video> berfungsi.
+    # ------------------------------------------------------------------
+    location /videos/ {
+        alias /usr/share/nginx/html/videos/;
+        add_header Cache-Control "no-cache";
+        add_header Accept-Ranges bytes;
+        include /etc/nginx/snippets/security-headers.conf;
+    }
+
+    # cameras.demo.yaml memakai path gaya repo (frontend/public/videos/...).
+    location /frontend/public/videos/ {
+        alias /usr/share/nginx/html/videos/;
+        add_header Accept-Ranges bytes;
+        include /etc/nginx/snippets/security-headers.conf;
+    }
+
+    # ------------------------------------------------------------------
+    # Static SPA
+    # ------------------------------------------------------------------
+    # Aset ber-hash dari Vite: aman di-cache lama.
+    location /assets/ {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        include /etc/nginx/snippets/security-headers.conf;
+        try_files $uri =404;
+    }
+
+    # index.html tidak boleh di-cache, supaya deploy baru langsung terambil.
+    location = /index.html {
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        include /etc/nginx/snippets/security-headers.conf;
+    }
+
+    # Fallback SPA untuk vue-router (history mode).
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

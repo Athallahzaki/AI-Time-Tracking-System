@@ -21,8 +21,8 @@ cd frontend && npm ci && cd ..
 ## Menjalankan
 
 Buka terminal dari root proyek. Untuk CCTV live, siapkan MediaMTX dahulu
-sesuai `deploy/README.md`, kemudian jalankan `./deploy/start-mediamtx.ps1` pada
-Windows atau `sh deploy/start-mediamtx.sh` pada Linux/macOS. Setelah sehat,
+sesuai `deploy/mediamtx/README.md`, kemudian jalankan `./deploy/mediamtx/start-mediamtx.ps1` pada
+Windows atau `sh deploy/mediamtx/start-mediamtx.sh` pada Linux/macOS. Setelah sehat,
 jalankan tiga proses aplikasi:
 
 ```bash

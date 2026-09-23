@@ -1,0 +1,11 @@
+# Context build = root repo. Whitelist: hanya frontend + konfigurasi nginx.
+*
+!frontend/
+!deploy/frontend/nginx/
+
+frontend/node_modules
+frontend/dist
+frontend/dist-ssr
+frontend/*.local
+# Video demo bisa ratusan MB — dimount saat runtime, jangan masuk context/image.
+frontend/public/videos

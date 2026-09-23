@@ -1,0 +1,18 @@
+# Context build = root repo. Whitelist: hanya yang dibutuhkan backend.
+*
+!backend/
+!contracts/
+
+# Sampah di dalam folder yang di-whitelist
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.venv
+**/venv
+backend/data/
+backend/tests/
+backend/**/*.db
+backend/**/*.db-shm
+backend/**/*.db-wal
+backend/**/*.log
+contracts/fixtures/

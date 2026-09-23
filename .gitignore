@@ -1,10 +1,11 @@
-mediamtx/
+/mediamtx/
 auto.crt
 auto.key
 license
 mediamtx.exe
 /mediamtx.yml
-deploy/.env.mediamtx
+deploy/mediamtx/.env.mediamtx
+deploy/.env
 
 # Editor
 .vscode/
