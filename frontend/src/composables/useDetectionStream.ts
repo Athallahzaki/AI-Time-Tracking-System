@@ -384,7 +384,7 @@ export function useDetectionStream() {
         const allowance = finiteNumber(person.allowance_seconds, 30 * 60);
         let timerText = `Jatah terpakai ${formatDuration(dailyUsed)} / ${formatDuration(allowance)}`;
         if (timerMode === 'qualifying') {
-          timerText = `Validasi orang lewat ${Math.ceil(qualificationRemaining)}s`;
+          timerText = `${Math.ceil(qualificationRemaining)}s`;
         } else if (timerMode === 'paused') {
           timerText = 'Istirahat 12:00–13:00 · timer dijeda';
         } else if (timerMode === 'unidentified') {

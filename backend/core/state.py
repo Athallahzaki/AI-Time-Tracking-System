@@ -262,6 +262,10 @@ class SystemState:
         with self._lock:
             return dict(self._camera_activity.get(camera_id, {}))
 
+    def get_camera_activity(self, camera_id: str) -> Dict[str, Any]:
+        with self._lock:
+            return dict(self._camera_activity.get(camera_id, {}))
+
     def get_active_sessions(self) -> List[Dict[str, Any]]:
         self.prune_stale_sessions()
         now = time.time()

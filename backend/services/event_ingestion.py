@@ -7,6 +7,7 @@ from backend.core.database import save_protocol_event
 from backend.core.state import system_state
 from backend.services.free_time import free_time_ledger
 from backend.services.protocol_adapter import protocol_adapter
+from backend.core.state import system_state
 
 
 def _timestamp(value: str) -> float:

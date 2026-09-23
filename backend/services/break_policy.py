@@ -124,7 +124,6 @@ def load_break_policy(path: Path) -> BreakPolicy:
     if not path.exists():
         raise FileNotFoundError(f"Policy config not found: {path}")
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-
     allowance = float(data.get(
         "daily_free_time_allowance_minutes",
         data.get("daily_break_allowance_minutes", 30),
