@@ -46,7 +46,7 @@ export interface UnidentifiedAlert {
  * (person.unidentified_present) tersambung ke endpoint apa pun, pindahkan
  * logikanya ke sana dan hapus ALERT_THRESHOLD_SECONDS di bawah.
  */
-const ALERT_THRESHOLD_SECONDS = 120; // tentatif — ganti kalau backend punya angka resmi
+const ALERT_THRESHOLD_SECONDS = 60; // tentatif — ganti kalau backend punya angka resmi
 
 const alerts = reactive<UnidentifiedAlert[]>([]);
 
