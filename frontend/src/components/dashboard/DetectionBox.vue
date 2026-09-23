@@ -38,7 +38,7 @@ const colorMap = {
           : 'bg-slate-950/85 text-white border border-white/10',
       ]"
     >
-      <span v-if="detection.sub"> · {{ detection.sub }}</span>
+      <span v-if="detection.sub">{{ detection.sub }}</span>
       <span v-if="detection.conf"> · {{ detection.conf }}</span>
     </div>
 
@@ -47,13 +47,13 @@ const colorMap = {
       v-if="detection.extra"
       class="absolute -bottom-6 sm:-bottom-7 left-0 z-10 whitespace-nowrap rounded px-1.5 sm:px-2 py-0.5 sm:py-1 font-medium backdrop-blur-xs transition-colors"
       :class="[
-        compact ? 'text-[12px] sm:text-[15px]' : 'text-[10px] sm:text-[11px]',
+        compact ? 'text-[10px] sm:text-[11px]' : 'text-[15px] sm:text-[16px]',
         detection.warning
           ? 'bg-red-500/90 text-white'
           : 'bg-slate-950/85 text-white border border-white/10'
       ]"
     >
-      Waktu bermain: {{ detection.extra }}
+      {{ detection.extra }}
     </div>
 
     <!-- HUD corner accents -->

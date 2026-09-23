@@ -610,6 +610,7 @@ function handleWarning() {
           class="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 rounded-md border px-2.5 py-1.5 text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer text-[11px] sm:text-xs"
           @click="handleInspect"
           title="View active presence sessions JSON"
+          :disabled="!displayDetections.length"
         >
           <ScanSearch class="h-3.5 w-3.5 shrink-0" />
           <span>Inspect Sessions</span>
@@ -617,6 +618,7 @@ function handleWarning() {
         <button
           class="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 font-medium text-red-500 hover:bg-red-50 transition-colors cursor-pointer text-[11px] sm:text-xs"
           @click="handleWarning"
+          :disabled="!displayDetections.length"
         >
           <TriangleAlert class="h-3.5 w-3.5 shrink-0" />
           <span>Manual Warning</span>
