@@ -262,10 +262,26 @@ class CameraSupervisor:
             # pipeline/zoning.py for what happens when they come apart.
             self._queue.set_consumer(self._count_attempt)
 
+        # Local recordings need a wall-clock gate: otherwise a fast GPU can
+        # report PTS 30 while the direct player is still showing second 10.
+        # Network sources already arrive in realtime; benchmark pacing remains
+        # independently controlled by engine.bench.
+        wrap_source = None
+        if config.source_type == "video_file":
+            lowered_uri = str(config.source_uri).lower()
+            is_network = lowered_uri.startswith(
+                ("rtsp://", "rtsps://", "rtmp://", "http://", "https://", "udp://")
+            )
+            if not is_network:
+                from ..ingest import PlaybackSource
+
+                wrap_source = lambda inner, _fps: PlaybackSource(inner)
+
         engine, source, source_fps = factory.build_engine(
             config,
             source_id=camera_id,
             max_frames=self._max_frames,
+            wrap_source=wrap_source,
         )
         engine._zoner = self._zoner
         engine._recognition_queue = self._queue
@@ -446,14 +462,20 @@ class CameraSupervisor:
                 "track_uuid": uuid,
                 "bbox": list(_normalized(track, frame)),
                 "person_id": getattr(identity, "person_id", None),
+                # Relative media time lets a direct MP4 player select the box
+                # belonging to video.currentTime, even when inference is faster
+                # than realtime.
+                "session_elapsed": max(
+                    0.0, pts - self._track_born_pts.get(uuid, pts)
+                ),
             }
             source = getattr(identity, "identity_source", None)
             if source:
                 box["identity_source"] = source
             boxes.append(box)
 
-        if not boxes:
-            return
+        # Empty frames are significant: without them the browser would keep the
+        # previous person's box over later frames that contain nobody.
         clock = self._assembler.clock_for(self.spec.camera_id)
         self._emit_view(events.view_frame(clock, pts, boxes))
 

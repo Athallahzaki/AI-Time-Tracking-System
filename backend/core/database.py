@@ -77,6 +77,70 @@ def init_database() -> None:
             )
         """)
 
+        # Normalized view-channel storage. protocol_events remains the durable
+        # event log; these tables make detector output queryable without
+        # unpacking JSON and survive frontend refresh/reconnect.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS detection_frames (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                camera_id TEXT NOT NULL,
+                stream_epoch INTEGER NOT NULL,
+                pts REAL NOT NULL,
+                observed_at REAL NOT NULL,
+                width INTEGER,
+                height INTEGER,
+                fps REAL,
+                people_count INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(camera_id, stream_epoch, pts)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS track_observations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                frame_id INTEGER NOT NULL REFERENCES detection_frames(id) ON DELETE CASCADE,
+                camera_id TEXT NOT NULL,
+                stream_epoch INTEGER NOT NULL,
+                pts REAL NOT NULL,
+                track_uuid TEXT NOT NULL,
+                person_id TEXT,
+                confidence REAL,
+                x1 REAL NOT NULL,
+                y1 REAL NOT NULL,
+                x2 REAL NOT NULL,
+                y2 REAL NOT NULL,
+                session_elapsed REAL NOT NULL DEFAULT 0,
+                presence_status TEXT,
+                daily_used_seconds REAL NOT NULL DEFAULT 0,
+                remaining_seconds REAL,
+                UNIQUE(camera_id, stream_epoch, pts, track_uuid)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS track_sessions (
+                camera_id TEXT NOT NULL,
+                stream_epoch INTEGER NOT NULL,
+                track_uuid TEXT NOT NULL,
+                person_id TEXT,
+                started_pts REAL NOT NULL,
+                last_pts REAL NOT NULL,
+                ended_pts REAL,
+                first_observed_at REAL NOT NULL,
+                last_observed_at REAL NOT NULL,
+                session_elapsed REAL NOT NULL DEFAULT 0,
+                presence_status TEXT,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                PRIMARY KEY(camera_id, stream_epoch, track_uuid)
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_observations_person_pts "
+            "ON track_observations(person_id, pts)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sessions_person_active "
+            "ON track_sessions(person_id, is_active)"
+        )
+
         conn.commit()
 
 
@@ -416,3 +480,126 @@ def get_protocol_events(event_type: str | None = None, limit: int = 1000) -> Lis
         rows = conn.execute(query, params).fetchall()
     return [{"seq": seq, "timestamp": timestamp, "type": stored_type,
              "payload": json.loads(payload)} for seq, timestamp, stored_type, payload in rows]
+
+
+def save_detection_frame(message: Dict[str, Any], observed_at: float) -> bool:
+    """Persist one enriched view.frame and its boxes atomically and idempotently."""
+    camera_id = str(message.get("camera_id") or "")
+    if not camera_id:
+        raise ValueError("view.frame must contain camera_id")
+    stream_epoch = int(message.get("stream_epoch") or 0)
+    pts = float(message.get("pts") or 0.0)
+    boxes = message.get("boxes") if isinstance(message.get("boxes"), list) else []
+
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute("""
+            INSERT OR IGNORE INTO detection_frames (
+                camera_id, stream_epoch, pts, observed_at, width, height, fps, people_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            camera_id, stream_epoch, pts, float(observed_at),
+            int(message.get("width") or 0), int(message.get("height") or 0),
+            float(message.get("fps") or 0.0), len(boxes),
+        ))
+        if cursor.rowcount == 0:
+            return False
+        frame_id = int(cursor.lastrowid)
+        live_tracks: set[str] = set()
+
+        for raw_box in boxes:
+            if not isinstance(raw_box, dict):
+                continue
+            track_uuid = str(raw_box.get("track_uuid") or raw_box.get("track_id") or "")
+            bbox = raw_box.get("bbox")
+            if not track_uuid or not isinstance(bbox, list) or len(bbox) != 4:
+                continue
+            live_tracks.add(track_uuid)
+            person_id = raw_box.get("person_id")
+            person_text = str(person_id) if person_id is not None else None
+            elapsed = max(0.0, float(raw_box.get("session_elapsed") or 0.0))
+            status = raw_box.get("presence_status")
+            conn.execute("""
+                INSERT INTO track_observations (
+                    frame_id, camera_id, stream_epoch, pts, track_uuid, person_id,
+                    confidence, x1, y1, x2, y2, session_elapsed, presence_status,
+                    daily_used_seconds, remaining_seconds
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                frame_id, camera_id, stream_epoch, pts, track_uuid, person_text,
+                float(raw_box.get("confidence") or raw_box.get("similarity") or 0.0),
+                *(float(value) for value in bbox), elapsed, status,
+                float(raw_box.get("daily_used_seconds") or 0.0),
+                float(raw_box["remaining_seconds"])
+                if raw_box.get("remaining_seconds") is not None else None,
+            ))
+            conn.execute("""
+                INSERT INTO track_sessions (
+                    camera_id, stream_epoch, track_uuid, person_id, started_pts,
+                    last_pts, ended_pts, first_observed_at, last_observed_at,
+                    session_elapsed, presence_status, is_active
+                ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 1)
+                ON CONFLICT(camera_id, stream_epoch, track_uuid) DO UPDATE SET
+                    person_id = COALESCE(excluded.person_id, track_sessions.person_id),
+                    last_pts = MAX(track_sessions.last_pts, excluded.last_pts),
+                    ended_pts = NULL,
+                    last_observed_at = excluded.last_observed_at,
+                    session_elapsed = MAX(track_sessions.session_elapsed, excluded.session_elapsed),
+                    presence_status = excluded.presence_status,
+                    is_active = 1
+            """, (
+                camera_id, stream_epoch, track_uuid, person_text,
+                max(0.0, pts - elapsed), pts, observed_at, observed_at,
+                elapsed, status,
+            ))
+            if person_text:
+                conn.execute(
+                    "UPDATE enrollments SET last_seen_at = ? WHERE person_id = ?",
+                    (observed_at, person_text),
+                )
+
+        if live_tracks:
+            placeholders = ",".join("?" for _ in live_tracks)
+            conn.execute(f"""
+                UPDATE track_sessions
+                SET ended_pts = ?, last_observed_at = ?, is_active = 0
+                WHERE camera_id = ? AND stream_epoch = ? AND is_active = 1
+                  AND track_uuid NOT IN ({placeholders})
+            """, (pts, observed_at, camera_id, stream_epoch, *sorted(live_tracks)))
+        else:
+            conn.execute("""
+                UPDATE track_sessions
+                SET ended_pts = ?, last_observed_at = ?, is_active = 0
+                WHERE camera_id = ? AND stream_epoch = ? AND is_active = 1
+            """, (pts, observed_at, camera_id, stream_epoch))
+        conn.commit()
+    return True
+
+
+def get_detection_observations(
+    camera_id: str | None = None,
+    person_id: str | None = None,
+    limit: int = 500,
+) -> List[Dict[str, Any]]:
+    init_database()
+    clauses: list[str] = []
+    params: list[Any] = []
+    if camera_id:
+        clauses.append("camera_id = ?")
+        params.append(camera_id)
+    if person_id:
+        clauses.append("person_id = ?")
+        params.append(person_id)
+    query = """SELECT camera_id, stream_epoch, pts, track_uuid, person_id,
+                      confidence, x1, y1, x2, y2, session_elapsed,
+                      presence_status, daily_used_seconds, remaining_seconds
+               FROM track_observations"""
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+    query += " ORDER BY id DESC LIMIT ?"
+    params.append(max(1, min(int(limit), 5000)))
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(query, params).fetchall()
+    keys = ("camera_id", "stream_epoch", "pts", "track_uuid", "person_id",
+            "confidence", "x1", "y1", "x2", "y2", "session_elapsed",
+            "presence_status", "daily_used_seconds", "remaining_seconds")
+    return [dict(zip(keys, row)) for row in reversed(rows)]

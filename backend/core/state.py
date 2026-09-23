@@ -180,6 +180,8 @@ class SystemState:
         with self._lock:
             if session_key in self._active_sessions:
                 sess = self._active_sessions[session_key]
+                if reported_elapsed > 0:
+                    sess.first_seen = min(sess.first_seen, now - reported_elapsed)
                 sess.last_seen = now
                 sess.dwell_time = dwell_time
                 sess.session_elapsed = max(

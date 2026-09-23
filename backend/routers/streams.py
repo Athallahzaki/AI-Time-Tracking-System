@@ -6,6 +6,8 @@ import queue
 from typing import Optional
 
 from fastapi import APIRouter, Query, Request
+
+from backend.core.database import get_detection_observations
 from sse_starlette.sse import EventSourceResponse
 
 from backend.services.view_stream import (
@@ -16,12 +18,26 @@ from backend.services.view_stream import (
 router = APIRouter(tags=["Streams"])
 
 
+@router.get("/api/detections/history")
+def detections_history(
+    camera_id: str | None = None,
+    person_id: str | None = None,
+    limit: int = Query(500, ge=1, le=5000),
+):
+    data = get_detection_observations(camera_id, person_id, limit)
+    return {"status": "success", "count": len(data), "detections": data}
+
+
 @router.get("/api/detections/stream")
 async def detections_sse_stream(
     request: Request,
     camera_id: Optional[str] = Query(
         "cam-01",
         description="Camera ID to stream from",
+    ),
+    replay: bool = Query(
+        False,
+        description="Replay buffered PTS frames for direct MP4 synchronization",
     ),
 ):
     """
@@ -34,7 +50,8 @@ async def detections_sse_stream(
 
     client_queue = (
         view_stream_service.subscribe(
-            selected_camera
+            selected_camera,
+            replay_history=replay,
         )
     )
 

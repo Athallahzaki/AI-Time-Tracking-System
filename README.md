@@ -100,19 +100,30 @@ Untuk CI atau demo mock tanpa model, cukup pasang `engine/requirements.txt`;
 dependency PyTorch/D-FINE hanya dipasang pada mesin engine nyata melalui
 `engine/requirements-dfine.txt`.
 
-## Mode demo satu perintah
+## Mode runtime satu perintah
 
 ```bash
-python scripts/run_demo.py
+python scripts/run_demo.py --mode mock --frontend
+python scripts/run_demo.py --mode direct --frontend
+python scripts/run_demo.py --mode mediamtx --frontend
 ```
 
-Tambahkan `--frontend` untuk ikut menjalankan Vite. Mode ini memakai
-`backend/configs/cameras.demo.yaml`, otomatis reconnect ke engine, lalu mengirim
-`set_cameras` dan `set_roster` setiap koneksi baru.
+`mock` tidak memerlukan video atau model nyata. `direct` membuka
+`frontend/public/videos/video2.mp4` pada engine dan browser lalu menyelaraskan
+bbox melalui PTS. `mediamtx` memakai RTSP untuk engine dan HLS untuk frontend;
+launcher melakukan preflight API dan path `cam01` sebelum memulai aplikasi.
+Ketiga mode otomatis memilih profil kamera dan memakai D-FINE Medium secara
+eksplisit. Opsi `--frontend` ikut menjalankan Vite.
+
+Pada Windows launcher otomatis memakai `npm.cmd` dan menghentikan seluruh proses
+dengan process group Windows. Jika muncul `npm tidak ditemukan`, instal Node.js,
+buka terminal baru, lalu jalankan `cd frontend; npm ci` sebelum mengulang demo.
 
 ## Konfigurasi
 
-- Kamera: `backend/configs/cameras.yaml`, atau set `CAMERAS_CONFIG` ke YAML lain.
+- Kamera default: `backend/configs/cameras.yaml`.
+- Profil runtime: `cameras.demo.yaml`, `cameras.direct.yaml`, dan
+  `cameras.mediamtx.yaml`; launcher mengatur `CAMERAS_CONFIG` otomatis.
 - Kebijakan: `backend/configs/policy.yaml`, atau set `POLICY_CONFIG`.
 - Engine: `ENGINE_HOST`, `ENGINE_PORT`, dan `ENGINE_RECONNECT_SECONDS`.
 - Pemakaian istirahat: `GET /api/attendance/break-usage?person_id=4471&date=2026-09-20`.

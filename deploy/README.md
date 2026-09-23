@@ -43,6 +43,18 @@ Urutan proses:
 3. Backend pada port 8000 dengan `ENGINE_HOST=127.0.0.1` dan `ENGINE_PORT=8765`
 4. `cd frontend; npm run dev`
 
+Atau, setelah MediaMTX dan `cam01` berstatus READY, jalankan seluruh aplikasi:
+
+```powershell
+python scripts/run_demo.py --mode mediamtx --frontend
+```
+
+Untuk video lokal tanpa MediaMTX gunakan:
+
+```powershell
+python scripts/run_demo.py --mode direct --frontend
+```
+
 ## Pemeriksaan dan troubleshooting
 
 ```bash

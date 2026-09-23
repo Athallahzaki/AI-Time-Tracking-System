@@ -17,8 +17,9 @@ from backend.services.view_stream import (
 )
 
 import json
+import time
 
-from backend.core.database import set_integration_state
+from backend.core.database import save_detection_frame, set_integration_state
 from backend.core.state import system_state
 
 class EngineIntegration:
@@ -54,6 +55,7 @@ class EngineIntegration:
     def handle_view(self, message) -> None:
         """Feed the same real-engine frame into backend state and browser SSE."""
         enriched = system_state.update_view_frame(message)
+        save_detection_frame(enriched, observed_at=time.time())
         self.view_stream.publish(enriched)
         
     def configure(self) -> None:

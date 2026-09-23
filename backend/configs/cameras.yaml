@@ -21,7 +21,7 @@ cameras:
     source_uri: "rtsp://localhost:8554/cam01"
     stream_url: "/whep/cam01/whep"
     enabled_by_default: true
-    fps: 30
+    fps: 25
 
   # - id: "cam-02"
   #   code: "CAM-02"
