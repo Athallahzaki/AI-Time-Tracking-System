@@ -109,6 +109,11 @@ class RuntimeOptions:
     # (`python -m engine.runtime`) selalu mengisinya: nomor urut wajib bertahan
     # melintasi restart, lihat docstring `api/outbox.py`.
     outbox_path: Optional[str] = None
+    # Override core.target_fps (None = pakai nilai config). Frame di atas laju
+    # ini dibuang sebelum detector; cara paling murah membuat engine ringan.
+    target_fps: Optional[float] = None
+    # Ulang video file lokal dari awal saat habis (demo/testing).
+    loop_files: bool = False
 
 
 class EngineRuntime:
@@ -125,6 +130,10 @@ class EngineRuntime:
     ) -> None:
         self.options = options or RuntimeOptions()
         self.config = config or load_config(self.options.config_path)
+        if self.options.target_fps:
+            import dataclasses
+            self.config = dataclasses.replace(
+                self.config, target_fps=float(self.options.target_fps))
 
         if recognize is None and self.config.recognition.recognizer != "none":
             # The recognizer slot (config-driven). Fails loudly if the config
@@ -259,6 +268,7 @@ class EngineRuntime:
             recognize=self._recognize,
             view_fps=self.options.view_fps,
             max_frames=self.options.max_frames,
+            loop_files=self.options.loop_files,
         )
         self._cameras[spec.camera_id] = camera
         camera.start()

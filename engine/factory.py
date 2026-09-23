@@ -228,6 +228,7 @@ def build_engine(
     recorder: Optional[Recorder] = None,
     source_id: Optional[str] = None,
     wrap_source: Optional[SourceWrapper] = None,
+    detector: Any = None,
 ) -> Tuple[Any, Any, float]:
     """
     Wires source, detector and tracker into a VisionEngine.
@@ -244,7 +245,11 @@ def build_engine(
     source = build_source(config, max_frames=max_frames, source_id=source_id)
     source_fps = resolve_source_fps(config, source)
 
-    detector = build_detector(config)
+    # A caller may hand in an already-loaded detector (looping a file re-opens
+    # the source every lap; reloading D-FINE weights each time is pure waste).
+    # The tracker is always new: its state belongs to one run.
+    if detector is None:
+        detector = build_detector(config)
     tracker = build_tracker(config, source_fps=source_fps, detector=detector)
 
     engine_source = source if wrap_source is None else wrap_source(source, source_fps)

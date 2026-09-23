@@ -71,6 +71,14 @@ class VisionEngine:
         self._is_running = False
         self._frame_count = 0
         self._cached_detections: List[Detection] = []
+        # Frame decimation (core.target_fps). The tracker is already built for
+        # effective_fps = min(target_fps, source_fps) (factory.build_tracker),
+        # so frames above that rate must really be dropped here -- otherwise
+        # the tracker's seconds->frames conversion is wrong and every frame
+        # still pays for a detector pass.
+        self._next_due_pts: Optional[float] = None
+        self._last_read_pts: Optional[float] = None
+        self._decimated_frames = 0
 
         # Known tracks are retained until the tracker stops returning them.
         # This lets us distinguish LOST from actual removal.
@@ -153,7 +161,7 @@ class VisionEngine:
         # 1. Fetch frame
         t0 = time.perf_counter()
 
-        frame = self._source.read()
+        frame = self._read_due_frame()
 
         if frame is None:
             return None, []
@@ -367,6 +375,38 @@ class VisionEngine:
         self._metrics.record_frame()
 
         return frame, tracks
+
+    @property
+    def decimated_frames(self) -> int:
+        return self._decimated_frames
+
+    def _read_due_frame(self) -> Optional[Frame]:
+        """Next frame at or after the target_fps cadence (PTS based).
+
+        Decoding still happens for every frame (H.264 needs it); only the
+        expensive part -- detector + tracker -- is skipped. Frames without PTS
+        are never dropped.
+        """
+        target = self._config.target_fps
+        while True:
+            frame = self._source.read()
+            if frame is None or not target or target <= 0:
+                return frame
+            pts = frame.metadata.pts
+            if pts is None:
+                return frame
+            pts = float(pts)
+            period = 1.0 / float(target)
+            if self._last_read_pts is not None and pts < self._last_read_pts - 1.0:
+                self._next_due_pts = None      # timeline restarted (new epoch / loop)
+            self._last_read_pts = pts
+            # Small tolerance so source jitter does not drop a frame that is
+            # "just" early; 25 fps with target 30 keeps every frame.
+            if self._next_due_pts is None or pts >= self._next_due_pts - 0.25 * period:
+                base = self._next_due_pts if self._next_due_pts is not None else pts
+                self._next_due_pts = max(base + period, pts + 0.5 * period)
+                return frame
+            self._decimated_frames += 1
 
     @staticmethod
     def _frame_pts(frame: Frame) -> float:

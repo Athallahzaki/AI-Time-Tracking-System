@@ -129,3 +129,29 @@ def test_failed_camera_is_reopened(monkeypatch, tmp_path):
     finally:
         supervisor.stop()
     assert not supervisor.alive
+
+
+def test_local_file_loops_when_enabled(tmp_path):
+    from engine.runtime.camera import CameraSpec, CameraSupervisor
+
+    def make(loop):
+        sup = CameraSupervisor(
+            spec=CameraSpec("r7", str(tmp_path / "clip.mp4")),
+            config=load_config("engine/config/default_config.yaml"),
+            emit_event=lambda m: None, emit_view=lambda m: True, loop_files=loop,
+        )
+        calls = {"n": 0}
+
+        def run_once():
+            calls["n"] += 1
+            if calls["n"] >= 4:
+                sup._stop.set()
+                return "stopped"
+            return "finished"
+
+        sup._run_once = run_once
+        sup._run()
+        return calls["n"], sup.stats.loops
+
+    assert make(False) == (1, 0)          # default: file end means finished
+    assert make(True) == (4, 3)           # looping: reopened right away, no backoff

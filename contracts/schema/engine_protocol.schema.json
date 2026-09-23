@@ -703,7 +703,11 @@
               "track_uuid": { "$ref": "#/$defs/track_uuid" },
               "bbox": { "$ref": "#/$defs/normalized_bbox" },
               "person_id": { "oneOf": [{ "$ref": "#/$defs/person_id" }, { "type": "null" }] },
-              "identity_source": { "enum": ["face", "tracking"] }
+              "identity_source": { "enum": ["face", "tracking"] },
+              "confidence": {
+                "type": "number", "minimum": 0, "maximum": 1,
+                "description": "Skor detector (bukan kemiripan wajah). Hanya untuk tampilan."
+              }
             }
           }
         }
