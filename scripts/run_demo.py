@@ -102,9 +102,15 @@ def main() -> int:
         help="camera profile: mock, direct MP4, or MediaMTX (default: mock)",
     )
     parser.add_argument(
+        "--model",
+        choices=("m", "s"),
+        default=os.getenv("AI_TIME_DFINE", "m"),
+        help="LibreYOLO D-FINE size: m (Medium, default) or s (Small)",
+    )
+    parser.add_argument(
         "--engine-config",
-        default=str(ROOT / "engine" / "config" / "dfine-m.yaml"),
-        help="engine YAML (default: D-FINE Medium)",
+        default=None,
+        help="engine YAML; overrides --model (default: engine/config/dfine-<model>.yaml)",
     )
     args = parser.parse_args()
 
@@ -113,7 +119,10 @@ def main() -> int:
     print(f"Python        : {sys.executable}")
     print(f"Mode          : {args.mode}")
     print(f"Camera config : {MODE_CONFIGS[args.mode]}")
-    engine_config = Path(args.engine_config).resolve()
+    engine_config = Path(
+        args.engine_config or ROOT / "engine" / "config" / f"dfine-{args.model}.yaml"
+    ).resolve()
+    print(f"Engine config : {engine_config}")
     if not engine_config.exists():
         raise RuntimeError(f"Engine config tidak ditemukan: {engine_config}")
     if args.mode == "direct":

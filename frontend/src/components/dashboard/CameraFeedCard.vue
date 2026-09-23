@@ -77,24 +77,76 @@ function formatLiveDuration(seconds) {
   return `${hours}h ${minutes % 60}m ${remaining}s`;
 }
 
+// Per-track anchor so the displayed timer advances exactly 1 s per second.
+// Frames arrive in bursts on the best-effort view channel; anchoring each
+// frame to its own arrival time made the timer jump forward whenever the
+// displayed frame changed. We only re-anchor when the server drifts away.
+const TIMER_RESYNC_SECONDS = 2;
+const TIMER_ANCHOR_TTL_MS = 30000;
+const timerAnchors = new Map();
+
+function anchorFor(detection, now) {
+  const key = detection.track_id ?? detection.id;
+  const age = Math.max(0, now - detection.elapsedObservedAtMs) / 1000;
+  const serverElapsed = detection.elapsedSeconds + age;
+  const serverUsed = (detection.dailyUsedSeconds || 0) + age;
+  let anchor = timerAnchors.get(key);
+  if (anchor) {
+    const delta = (now - anchor.ms) / 1000;
+    const drift = Math.max(
+      Math.abs(anchor.elapsed + delta - serverElapsed),
+      Math.abs(anchor.used + delta - serverUsed),
+    );
+    if (anchor.mode !== detection.timerMode || drift > TIMER_RESYNC_SECONDS) {
+      anchor = null;
+    }
+  }
+  if (!anchor) {
+    anchor = {
+      ms: now,
+      elapsed: serverElapsed,
+      used: serverUsed,
+      qualification: Math.max(0, (detection.qualificationRemainingSeconds || 0) - age),
+      mode: detection.timerMode,
+    };
+    timerAnchors.set(key, anchor);
+  }
+  anchor.seenMs = now;
+  return anchor;
+}
+
+function pruneTimerAnchors(now) {
+  for (const [key, anchor] of timerAnchors) {
+    if (now - anchor.seenMs > TIMER_ANCHOR_TTL_MS) timerAnchors.delete(key);
+  }
+}
+
 function withLiveTimers(detections, freeze = false) {
   const now = Date.now();
+  pruneTimerAnchors(now);
   return (detections || []).map((detection) => {
     if (detection.elapsedSeconds == null || detection.elapsedObservedAtMs == null) {
       return detection;
     }
-    const delta = freeze
-      ? 0
-      : Math.max(0, now - detection.elapsedObservedAtMs) / 1000;
-    const elapsed = detection.elapsedSeconds + delta;
+    // Direct mode follows video PTS: show each frame's own value, no ticking.
+    const anchor = freeze
+      ? {
+          ms: now,
+          elapsed: detection.elapsedSeconds,
+          used: detection.dailyUsedSeconds || 0,
+          qualification: detection.qualificationRemainingSeconds || 0,
+        }
+      : anchorFor(detection, now);
+    const delta = Math.max(0, now - anchor.ms) / 1000;
+    const elapsed = anchor.elapsed + delta;
     let extra = `${formatLiveDuration(elapsed)}${detection.durationSuffix || ''}`;
     if (detection.timerMode === 'qualifying') {
-      const remaining = Math.max(0, (detection.qualificationRemainingSeconds || 0) - delta);
+      const remaining = Math.max(0, anchor.qualification - delta);
       extra = `Validasi orang lewat ${Math.ceil(remaining)}s`;
     } else if (detection.timerMode === 'paused') {
       extra = 'Istirahat 12:00–13:00 · timer dijeda';
     } else if (detection.timerMode === 'counting' || detection.timerMode === 'limit') {
-      const used = (detection.dailyUsedSeconds || 0) + delta;
+      const used = anchor.used + delta;
       const allowance = detection.allowanceSeconds || 1800;
       extra = detection.timerMode === 'limit'
         ? `BATAS TERCAPAI · ${formatLiveDuration(used)} / ${formatLiveDuration(allowance)}`

@@ -1,5 +1,13 @@
 # Status Kesesuaian Workplan
 
+> **Update 23 Sep 2026** (lihat `CHANGES.md`): kanal event diperbaiki (outbox
+> durabel, tanpa kehilangan saat handshake, deteksi lubang seq, dead-letter);
+> jatah dihitung dari event durabel dengan model "hadir di ruang fasilitas";
+> recognizer punya slot yang dinyalakan lewat config (default mati). Belum:
+> model identitas diuji dengan bobot nyata, autentikasi pengguna, benchmark
+> lapangan, build frontend diverifikasi di mesin tim. Posisi realistis tetap M1
+> menuju M2 sampai recognizer terpasang dan diuji di rekaman nyata.
+
 Review 21 September 2026: implementasi sesuai arah arsitektur, tetapi belum M5
 (siap uji lapangan). Posisi realistis berada di M1 menuju M2.
 
@@ -12,15 +20,15 @@ Review 21 September 2026: implementasi sesuai arah arsitektur, tetapi belum M5
 | 0.5 benchmark/rekaman | Sebagian | harness ada; baseline lapangan belum ada |
 | 0.6 PROGRAM-DATE-TIME | Siap diuji lapangan | MediaMTX tersedia; akurasi kamera nyata belum divalidasi |
 | A2–A7 engine | Mayoritas selesai | identity, presence, outbox, runtime diuji |
-| A8 enrollment | Sebagian besar | admission ada; model nyata belum terpasang |
+| A8 enrollment | Slot siap | policy + store + recognizer ONNX terpasang di belakang config; belum diuji dengan model nyata |
 | B2–B6 pipeline | Sebagian besar | PTS, zone, queue, matcher ada |
 | B7–B9 model/NVDEC | Sebagian | D-FINE Nano terpasang; benchmark lapangan dan NVDEC belum |
 | C1–C4 API/protokol/storage | Selesai minimum | replay dan event mentah tersedia |
-| C5 session derivation | Selesai minimum | endpoint `/api/attendance/derived` |
+| C5 session derivation | Diganti | ledger kunjungan fasilitas dari event durabel (`free_time.py`) |
 | C6 break quota/alert | Selesai minimum | kuota, warning, timezone, dan endpoint tersedia |
 | C7 camera/roster reconcile | Selesai minimum | otomatis saat startup dan reconnect |
 | C8 MediaMTX/auth | Sebagian | Compose, WHEP/HLS, health check tersedia; auth/TLS produksi belum |
-| C9 koreksi append-only | Selesai minimum | double-write diperbaiki |
+| C9 koreksi append-only | Selesai | tabel `corrections`, diterapkan ke hitungan jatah |
 | C10 enrollment API | Selesai minimum | request/result tersedia |
 | D1–D7 frontend | Sebagian besar | WHEP/HLS dan overlay tersedia; auth produksi belum |
 

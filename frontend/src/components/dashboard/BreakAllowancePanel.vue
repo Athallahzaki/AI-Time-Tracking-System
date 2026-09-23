@@ -2,7 +2,6 @@
 import { reactive } from 'vue';
 import { ChevronDown } from '@lucide/vue';
 import { useEmployeeAllowance } from '@/composables/useEmployeeAllowance';
-import GapClassificationBadge from './GapClassificationBadge.vue';
 
 const { sortedUsages, isLoading, loadError, refetch, getEmployeeName } =
   useEmployeeAllowance();
@@ -37,7 +36,7 @@ function usagePct(u) {
   );
 }
 
-// Warna dari status yang SUDAH DIHITUNG backend (session_deriver.py / break_policy.py) —
+// Warna dari status yang SUDAH DIHITUNG backend (services/free_time.py) —
 // bukan ambang batas yang ditebak sendiri di frontend.
 const STATUS_BAR_COLOR = {
   ok: 'bg-emerald-500',
@@ -50,7 +49,7 @@ const STATUS_BAR_COLOR = {
   <div class="rounded-xl border bg-white shadow-xs">
     <div class="flex items-center justify-between border-b px-4 py-3">
       <h3 class="text-sm font-semibold text-slate-800">
-        Jatah Istirahat Karyawan
+        Jatah Free Time Karyawan
       </h3>
       <button
         class="text-xs text-slate-500 hover:text-slate-700"
@@ -70,7 +69,7 @@ const STATUS_BAR_COLOR = {
     >
       Gagal memuat: {{ loadError }}
       <p class="mt-1 text-[11px] text-slate-400">
-        (Endpoint GET /api/attendance/breaks mungkin belum tersedia di backend)
+        (Periksa backend: GET /api/attendance/breaks)
       </p>
     </div>
 
@@ -78,7 +77,7 @@ const STATUS_BAR_COLOR = {
       v-else-if="sortedUsages.length === 0"
       class="px-4 py-6 text-center text-sm text-slate-400"
     >
-      Belum ada data jatah istirahat hari ini.
+      Belum ada pemakaian jatah free time hari ini.
     </div>
 
     <ul v-else class="divide-y">
@@ -116,7 +115,7 @@ const STATUS_BAR_COLOR = {
               >
             </p>
             <p class="text-[11px] text-slate-400">
-              {{ u.break_count }} istirahat
+              {{ u.break_count }} kunjungan
             </p>
           </div>
           <ChevronDown
@@ -130,7 +129,7 @@ const STATUS_BAR_COLOR = {
           class="bg-slate-50/60 px-4 pb-3"
         >
           <div v-if="u.breaks.length === 0" class="py-3 text-xs text-slate-400">
-            Tidak ada istirahat tercatat hari ini.
+            Tidak ada kunjungan ke ruang fasilitas hari ini.
           </div>
           <ul v-else class="space-y-2 pt-2">
             <li
@@ -149,7 +148,9 @@ const STATUS_BAR_COLOR = {
                   <span class="text-slate-400"> · {{ b.camera_id }}</span>
                 </div>
                 <div class="flex items-center gap-1.5">
-                  <GapClassificationBadge classification="break" />
+                  <span class="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+                    {{ b.end_reason === 'open' ? 'Sedang di ruangan' : 'Kunjungan' }}
+                  </span>
                   <span
                     v-if="b.corrected"
                     class="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-700"
@@ -163,7 +164,7 @@ const STATUS_BAR_COLOR = {
                 v-if="b.corrected && b.original_duration_seconds != null"
                 class="mt-1.5 text-[11px] text-slate-400"
               >
-                Durasi asli sebelum koreksi:
+                Dikecualikan. Durasi terhitung sebelum koreksi:
                 {{ formatDurationShort(b.original_duration_seconds) }}
               </p>
 
@@ -171,14 +172,8 @@ const STATUS_BAR_COLOR = {
                 class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400"
               >
                 <span
-                  >Keluar via:
-                  <strong class="text-slate-600">{{ b.end_zone }}</strong></span
-                >
-                <span
-                  >Alasan:
-                  <strong class="text-slate-600">{{
-                    b.end_reason
-                  }}</strong></span
+                  >Visit ID:
+                  <strong class="text-slate-600">{{ b.gap_id }}</strong></span
                 >
               </div>
             </li>

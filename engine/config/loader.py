@@ -197,6 +197,18 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
             ),
             per_camera_quota=_optional_int(rec.get("per_camera_quota")),
             max_requests_per_frame=int(rec.get("max_requests_per_frame", 2)),
+            recognizer=str(rec.get("recognizer", "none") or "none"),
+            face_detector_model=rec.get("face_detector_model"),
+            face_embedder_model=rec.get("face_embedder_model"),
+            embedding_version=str(rec.get("embedding_version", "auraface-v1")),
+            reference_db_path=str(rec.get("reference_db_path", "engine/data/references.sqlite3")),
+            onnx_providers=(
+                tuple(str(p) for p in rec["onnx_providers"]) if rec.get("onnx_providers") else None
+            ),
+            face_detection_threshold=float(rec.get("face_detection_threshold", 0.5)),
+            min_face_px=float(rec.get("min_face_px", 40.0)),
+            match_threshold=_optional_float(rec.get("match_threshold")),
+            match_margin=_optional_float(rec.get("match_margin")),
         ),
     )
 

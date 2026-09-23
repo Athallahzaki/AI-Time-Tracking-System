@@ -136,6 +136,7 @@ class HelloAckMessage(BaseMessage):
     engine_version: str = ""
     models: Dict[str, str] = {}
     oldest_available_seq: int = 0
+    outbox_id: Optional[str] = None
 
 
 class AckMessage(BaseMessage):

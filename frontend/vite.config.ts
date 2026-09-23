@@ -16,6 +16,12 @@ export default defineConfig({
       '/api': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
+        // BACKEND_API_KEY is added server-side by the dev proxy so the key
+        // never ships in the browser bundle. Leave unset when the backend
+        // runs without BACKEND_API_KEY.
+        headers: process.env.BACKEND_API_KEY
+          ? { 'X-API-Key': process.env.BACKEND_API_KEY }
+          : undefined,
       },
       // Proxy MediaMTX HLS endpoint to avoid CORS when embedding streams.
       // cameras.yaml stream_url should use /hls/<stream-name>/index.m3u8

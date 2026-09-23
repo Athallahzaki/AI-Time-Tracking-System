@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+import uuid
 from collections import deque
 from pathlib import Path
 from typing import Deque, Dict, Iterable, Iterator, List, Optional, Tuple, Union
@@ -47,7 +48,9 @@ class _OutboxBase:
     def oldest_available_seq(self) -> int:
         raise NotImplementedError
 
-    def since(self, last_event_seq: int) -> List[Dict]:
+    outbox_id: str = ""
+
+    def since(self, last_event_seq: int, limit: Optional[int] = None) -> List[Dict]:
         raise NotImplementedError
 
     def gap_for(self, last_event_seq: int) -> Optional[Dict]:
@@ -78,6 +81,10 @@ class Outbox(_OutboxBase):
     def __init__(self, max_entries: int = 10_000) -> None:
         self._entries: Deque[Tuple[int, Dict]] = deque(maxlen=max_entries)
         self._next_seq = 1
+        self._lock = threading.Lock()
+        # Baru setiap proses: penomoran di memori memang mulai ulang saat
+        # restart, dan backend harus bisa melihatnya dari identitas ini.
+        self.outbox_id = f"mem-{uuid.uuid4().hex}"
 
     @property
     def next_seq(self) -> int:
@@ -88,28 +95,33 @@ class Outbox(_OutboxBase):
         return self._entries[0][0] if self._entries else 0
 
     def append(self, message: Dict) -> Dict:
-        message = dict(message)
-        message["seq"] = self._next_seq
-        self._next_seq += 1
-        self._entries.append((message["seq"], message))
-        return message
+        with self._lock:
+            message = dict(message)
+            message["seq"] = self._next_seq
+            self._next_seq += 1
+            self._entries.append((message["seq"], message))
+            return message
 
-    def since(self, last_event_seq: int) -> List[Dict]:
-        return [message for seq, message in self._entries if seq > last_event_seq]
+    def since(self, last_event_seq: int, limit: Optional[int] = None) -> List[Dict]:
+        with self._lock:
+            out = [message for seq, message in self._entries if seq > last_event_seq]
+        return out[:limit] if limit is not None else out
 
     def ack(self, through_seq: int) -> int:
         """Buang apa pun sampai `through_seq`. Kembalikan jumlah yang dibuang."""
         removed = 0
-        while self._entries and self._entries[0][0] <= through_seq:
-            self._entries.popleft()
-            removed += 1
+        with self._lock:
+            while self._entries and self._entries[0][0] <= through_seq:
+                self._entries.popleft()
+                removed += 1
         return removed
 
     def __len__(self) -> int:
         return len(self._entries)
 
     def __iter__(self) -> Iterator[Dict]:
-        return (message for _, message in self._entries)
+        with self._lock:
+            return iter([message for _, message in self._entries])
 
 
 class SqliteOutbox(_OutboxBase):
@@ -160,6 +172,16 @@ class SqliteOutbox(_OutboxBase):
         self._high_water = max(highest_stored, high_water)
         self._next_seq = self._high_water + 1
 
+        row = self._db.execute("SELECT value FROM meta WHERE key='outbox_id'").fetchone()
+        if row is None:
+            self.outbox_id = f"sql-{uuid.uuid4().hex}"
+            self._db.execute(
+                "INSERT INTO meta (key, value) VALUES ('outbox_id', ?)", (self.outbox_id,)
+            )
+            self._db.commit()
+        else:
+            self.outbox_id = str(row[0])
+
     @property
     def next_seq(self) -> int:
         with self._lock:
@@ -202,21 +224,28 @@ class SqliteOutbox(_OutboxBase):
             return message
 
     def _enforce_cap(self) -> None:
-        count = self._db.execute("SELECT COUNT(*) FROM outbox").fetchone()[0]
-        if count <= self._max_entries:
+        # seq bersambung dan hanya dipangkas dari depan, jadi MIN(seq) (indeks
+        # primary key) cukup untuk menghitung isi tanpa COUNT(*) per event.
+        oldest = self._db.execute("SELECT MIN(seq) FROM outbox").fetchone()[0]
+        if oldest is None:
             return
-        surplus = count - self._max_entries
-        self._db.execute(
-            "DELETE FROM outbox WHERE seq IN (SELECT seq FROM outbox ORDER BY seq LIMIT ?)",
-            (surplus,),
-        )
+        cutoff = self._high_water - self._max_entries
+        if oldest > cutoff:
+            return
+        self._db.execute("DELETE FROM outbox WHERE seq <= ?", (cutoff,))
         self._db.commit()
 
-    def since(self, last_event_seq: int) -> List[Dict]:
+    def since(self, last_event_seq: int, limit: Optional[int] = None) -> List[Dict]:
         with self._lock:
-            rows = self._db.execute(
-                "SELECT payload FROM outbox WHERE seq > ? ORDER BY seq", (last_event_seq,)
-            ).fetchall()
+            if limit is None:
+                rows = self._db.execute(
+                    "SELECT payload FROM outbox WHERE seq > ? ORDER BY seq", (last_event_seq,)
+                ).fetchall()
+            else:
+                rows = self._db.execute(
+                    "SELECT payload FROM outbox WHERE seq > ? ORDER BY seq LIMIT ?",
+                    (last_event_seq, int(limit)),
+                ).fetchall()
             return [json.loads(row[0]) for row in rows]
 
     def ack(self, through_seq: int) -> int:

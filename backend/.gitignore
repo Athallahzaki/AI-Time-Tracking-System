@@ -36,14 +36,11 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-tests/
-test_break_policy.py
-test_corrections.py
-test_enrollment_service.py
-test_protocol_adapter.py
-test_session__deriver.py
+# NOTE: tests/ used to be ignored here, so backend tests never reached the
+# repo. Tests belong in version control.
 
 # Local Database
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/

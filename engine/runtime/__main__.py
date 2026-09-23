@@ -17,11 +17,15 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
+from pathlib import Path
 import signal
 import sys
 from typing import Optional
 
 from .service import EngineRuntime, RuntimeOptions
+
+_DEFAULT_OUTBOX = Path(__file__).resolve().parents[1] / "data" / "outbox.sqlite3"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -45,6 +49,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--snapshot-seconds", type=float, default=10.0,
         help="how often the whole live picture is restated (§4.5)",
+    )
+    parser.add_argument(
+        "--outbox",
+        default=os.environ.get("ENGINE_OUTBOX_PATH", str(_DEFAULT_OUTBOX)),
+        help="berkas SQLite outbox durabel (default engine/data/outbox.sqlite3). "
+             "Jangan dihapus saat backend masih menyimpan last_event_seq.",
     )
     parser.add_argument("--quiet", action="store_true")
     return parser
@@ -72,6 +82,7 @@ def main(argv: Optional[list] = None) -> int:
             socket_path=args.socket,
             view_fps=args.view_fps,
             snapshot_interval_seconds=args.snapshot_seconds,
+            outbox_path=args.outbox,
         )
     )
 

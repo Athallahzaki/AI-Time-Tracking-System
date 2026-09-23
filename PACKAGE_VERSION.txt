@@ -1,36 +1,9 @@
 Package: AI Time Tracking System
-Build: 2026.09.23-realtime-persistence-v5
+Build: 2026.09.23-audit-fixes
 
-Expected demo startup header:
-  Demo launcher : 2026.09.22-windows-v2
-
-Direct MP4 synchronization:
-  Bounding boxes are selected by engine PTS against video.currentTime.
+Lihat CHANGES.md untuk daftar perbaikan dan keputusan yang dipakai.
 
 Runtime profiles:
   python scripts/run_demo.py --mode mock --frontend
-  python scripts/run_demo.py --mode direct --frontend
-  python scripts/run_demo.py --mode mediamtx --frontend
-
-Direct playback backpressure:
-  The MP4 pauses with "SYNCING AI" whenever playback catches the latest
-  analyzed PTS, then resumes after a two-second detection buffer is available.
-
-Direct SSE history replay:
-  The backend retains direct-MP4 view frames and replays them from PTS zero to
-  late frontend subscribers. MediaMTX/live subscribers never receive old frames.
-
-Direct sync tolerance:
-  After initial buffering, playback tolerates up to one second of AI lag for
-  1.5 seconds before pausing. It resumes with a two-second analyzed lead.
-
-Realtime file clock:
-  Direct MP4 runtime is paced by container PTS without dropping frames, so
-  second 10 in the player cannot be counted as second 30 by the backend.
-
-Detection persistence:
-  Engine view frames, per-person bounding-box observations, and track sessions
-  are stored in detection_frames, track_observations, and track_sessions.
-  Query them through GET /api/detections/history.
-
-If this header does not appear, scripts/run_demo.py from an older folder is being executed.
+  python scripts/run_demo.py --mode direct --model m --frontend
+  python scripts/run_demo.py --mode mediamtx --model s --frontend
