@@ -19,6 +19,7 @@ from backend.services.view_stream import (
 import json
 
 from backend.core.database import set_integration_state
+from backend.core.state import system_state
 
 class EngineIntegration:
     def __init__(
@@ -49,15 +50,18 @@ class EngineIntegration:
                 json.dumps(message),
             )
             return
+
+    def handle_view(self, message) -> None:
+        """Feed the same real-engine frame into backend state and browser SSE."""
+        enriched = system_state.update_view_frame(message)
+        self.view_stream.publish(enriched)
         
     def configure(self) -> None:
         self.client.set_event_handler(
             self.ingestion.ingest
         )
 
-        self.client.set_view_handler(
-            self.view_stream.publish
-        )
+        self.client.set_view_handler(self.handle_view)
 
         # Real EngineClient supports control messages.
         # Older test doubles may not implement this yet.

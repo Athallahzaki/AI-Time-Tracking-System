@@ -32,7 +32,7 @@ def load_cameras_from_yaml(yaml_path: Path) -> Dict[str, CameraConfig]:
                 code="CAM-01",
                 name="Camera 1",
                 source_uri="rtsp://localhost:8554/cam01",
-                stream_url="http://localhost:8889/cam01/whep",
+                stream_url="/whep/cam01/whep",
                 enabled_by_default=True,
             )
         }

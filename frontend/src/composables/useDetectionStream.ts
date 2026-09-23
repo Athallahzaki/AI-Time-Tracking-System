@@ -13,10 +13,23 @@ export interface DetectionItem {
   height: string;
   warning?: boolean;
   track_id?: string | number;
+  elapsedSeconds?: number;
+  elapsedObservedAtMs?: number;
+  durationSuffix?: string;
+  timerMode?: 'qualifying' | 'counting' | 'paused' | 'limit' | 'unidentified';
+  qualificationRemainingSeconds?: number;
+  dailyUsedSeconds?: number;
+  allowanceSeconds?: number;
 }
 
 export interface DetectionFrame {
   atMs: number;
+  detections: DetectionItem[];
+}
+
+export interface PtsDetectionFrame {
+  pts: number;
+  streamEpoch: number;
   detections: DetectionItem[];
 }
 
@@ -30,6 +43,7 @@ export interface CameraItem {
   active_people?: number;
   detections: DetectionItem[];
   frameBuffer: DetectionFrame[];
+  ptsFrameBuffer: PtsDetectionFrame[];
 }
 
 export interface DashboardStats {
@@ -58,6 +72,13 @@ interface BackendPerson {
   identity?: string | null;
   similarity?: number;
   session_elapsed?: number;
+  is_official_break?: boolean;
+  is_qualified?: boolean;
+  qualification_remaining_seconds?: number;
+  visit_free_time_seconds?: number;
+  daily_used_seconds?: number;
+  remaining_seconds?: number;
+  allowance_seconds?: number;
 }
 
 interface ProtocolViewBox {
@@ -67,6 +88,16 @@ interface ProtocolViewBox {
   person_id?: string | null;
   confidence?: number;
   similarity?: number;
+  session_elapsed?: number;
+  dwell_time?: number;
+  presence_status?: string;
+  is_official_break?: boolean;
+  is_qualified?: boolean;
+  qualification_remaining_seconds?: number;
+  visit_free_time_seconds?: number;
+  daily_used_seconds?: number;
+  remaining_seconds?: number;
+  allowance_seconds?: number;
 }
 
 interface BackendDetectionPayload {
@@ -75,6 +106,7 @@ interface BackendDetectionPayload {
   at?: string;
   ts?: string;
   pts?: number;
+  stream_epoch?: number;
   width?: number;
   height?: number;
   fps?: number;
@@ -83,6 +115,10 @@ interface BackendDetectionPayload {
 }
 
 const DETECTION_BUFFER_WINDOW_MS = 8000;
+const MAX_PTS_BUFFER_FRAMES = 20_000;
+// Match the direct-player lag tolerance. A larger value would make boxes visibly
+// lead/lag the recorded person; a smaller one would flicker during brief GPU dips.
+const MAX_DIRECT_PTS_DIFFERENCE_SECONDS = 1.0;
 const MAX_CLOCK_DIFFERENCE_MS = 30_000;
 
 function formatDuration(seconds: number): string {
@@ -109,6 +145,32 @@ export function resolveDetectionsAt(
     }
   }
   return best.detections;
+}
+
+export function resolveDetectionsAtPts(
+  camera: CameraItem,
+  targetPts: number,
+): DetectionItem[] {
+  const buffer = camera.ptsFrameBuffer;
+  if (!buffer?.length || !Number.isFinite(targetPts)) return [];
+
+  // Frames arrive in ascending PTS order. Binary search keeps this cheap for
+  // long recordings while retaining the full file timeline.
+  let low = 0;
+  let high = buffer.length - 1;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (buffer[middle].pts < targetPts) low = middle + 1;
+    else high = middle;
+  }
+  const after = buffer[low];
+  const before = low > 0 ? buffer[low - 1] : after;
+  const best = Math.abs(before.pts - targetPts) <= Math.abs(after.pts - targetPts)
+    ? before
+    : after;
+  return Math.abs(best.pts - targetPts) <= MAX_DIRECT_PTS_DIFFERENCE_SECONDS
+    ? best.detections
+    : [];
 }
 
 const liveCameras = reactive<CameraItem[]>([]);
@@ -140,7 +202,16 @@ function protocolBoxesToPeople(
       track_id: box.track_id ?? box.track_uuid ?? index + 1,
       identity: box.person_id ?? null,
       confidence: box.confidence ?? box.similarity ?? 0.95,
-      presence_status: box.person_id ? 'CONFIRMED' : 'TRACKED',
+      presence_status:
+        box.presence_status ?? (box.person_id ? 'CONFIRMED' : 'TRACKED'),
+      session_elapsed: box.session_elapsed ?? box.dwell_time ?? 0,
+      is_official_break: box.is_official_break,
+      is_qualified: box.is_qualified,
+      qualification_remaining_seconds: box.qualification_remaining_seconds,
+      visit_free_time_seconds: box.visit_free_time_seconds,
+      daily_used_seconds: box.daily_used_seconds,
+      remaining_seconds: box.remaining_seconds,
+      allowance_seconds: box.allowance_seconds,
       bbox: {
         x1: finiteNumber(raw[0]) * (normalized ? frameWidth : 1),
         y1: finiteNumber(raw[1]) * (normalized ? frameHeight : 1),
@@ -161,14 +232,15 @@ function eventTimeMs(data: BackendDetectionPayload): number {
     : parsed;
 }
 
-function detectionStreamUrl(cameraId: string): string {
+function detectionStreamUrl(cameraId: string, replay = false): string {
   const configured = import.meta.env.VITE_API_URL as string | undefined;
   const base =
     configured ||
     (window.location.port === '5173'
       ? '/api/detections/stream'
       : 'http://localhost:8000/api/detections/stream');
-  return `${base}${base.includes('?') ? '&' : '?'}camera_id=${encodeURIComponent(cameraId)}`;
+  const separator = base.includes('?') ? '&' : '?';
+  return `${base}${separator}camera_id=${encodeURIComponent(cameraId)}${replay ? '&replay=true' : ''}`;
 }
 
 export function useDetectionStream() {
@@ -213,6 +285,7 @@ export function useDetectionStream() {
           active_people: 0,
           detections: [],
           frameBuffer: [],
+          ptsFrameBuffer: [],
         };
         liveCameras.push(camera);
       }
@@ -235,17 +308,44 @@ export function useDetectionStream() {
 
         let color: DetectionItem['color'] = 'cyan';
         let warning = false;
-        let extra = formatDuration(finiteNumber(elapsed));
+        let durationSuffix = '';
+        let timerMode: DetectionItem['timerMode'] = 'counting';
         if (person.presence_status === 'LIMIT') {
           color = 'red';
           warning = true;
-          extra += ' (LIMIT REACHED)';
+          durationSuffix = ' (LIMIT REACHED)';
+          timerMode = 'limit';
         } else if (person.presence_status === 'WARNING') {
           color = 'amber';
           warning = true;
-          extra += ' (LIMIT NEAR)';
+          durationSuffix = ' (LIMIT NEAR)';
         } else if (person.presence_status === 'CONFIRMED') {
           color = 'emerald';
+        } else if (person.presence_status === 'VERIFYING') {
+          color = 'cyan';
+          timerMode = 'qualifying';
+        } else if (person.presence_status === 'OFFICIAL_BREAK') {
+          color = 'emerald';
+          timerMode = 'paused';
+        } else if (person.presence_status === 'UNIDENTIFIED') {
+          color = 'cyan';
+          timerMode = 'unidentified';
+        }
+
+        const qualificationRemaining = finiteNumber(
+          person.qualification_remaining_seconds,
+        );
+        const dailyUsed = finiteNumber(person.daily_used_seconds);
+        const allowance = finiteNumber(person.allowance_seconds, 30 * 60);
+        let timerText = `Jatah terpakai ${formatDuration(dailyUsed)} / ${formatDuration(allowance)}`;
+        if (timerMode === 'qualifying') {
+          timerText = `Passing ${Math.ceil(qualificationRemaining)}s`;
+        } else if (timerMode === 'paused') {
+          timerText = 'Istirahat 12:00–13:00 · timer dijeda';
+        } else if (timerMode === 'unidentified') {
+          timerText = `Belum dikenali · kunjungan ${formatDuration(finiteNumber(person.visit_free_time_seconds))}`;
+        } else if (timerMode === 'limit') {
+          timerText = `BATAS TERCAPAI · ${formatDuration(dailyUsed)} / ${formatDuration(allowance)}`;
         }
 
         return {
@@ -256,7 +356,14 @@ export function useDetectionStream() {
             : `ID #${person.track_id}`,
           sub: person.presence_status || person.state || 'TRACKED',
           conf: `${Math.round(confidence)}%`,
-          extra,
+          extra: timerText,
+          elapsedSeconds: finiteNumber(elapsed),
+          elapsedObservedAtMs: Date.now(),
+          durationSuffix,
+          timerMode,
+          qualificationRemainingSeconds: qualificationRemaining,
+          dailyUsedSeconds: dailyUsed,
+          allowanceSeconds: allowance,
           color,
           warning,
           left: `${((x1 / frameWidth) * 100).toFixed(2)}%`,
@@ -271,6 +378,25 @@ export function useDetectionStream() {
       const cutoff = Date.now() - DETECTION_BUFFER_WINDOW_MS;
       while (camera.frameBuffer.length && camera.frameBuffer[0].atMs < cutoff) {
         camera.frameBuffer.shift();
+      }
+
+      if (data.pts != null && Number.isFinite(Number(data.pts))) {
+        const pts = Number(data.pts);
+        const streamEpoch = finiteNumber(data.stream_epoch);
+        const lastPtsFrame = camera.ptsFrameBuffer.at(-1);
+        if (
+          lastPtsFrame
+          && (lastPtsFrame.streamEpoch !== streamEpoch || pts < lastPtsFrame.pts)
+        ) {
+          camera.ptsFrameBuffer.splice(0);
+        }
+        camera.ptsFrameBuffer.push({ pts, streamEpoch, detections });
+        if (camera.ptsFrameBuffer.length > MAX_PTS_BUFFER_FRAMES) {
+          camera.ptsFrameBuffer.splice(
+            0,
+            camera.ptsFrameBuffer.length - MAX_PTS_BUFFER_FRAMES,
+          );
+        }
       }
 
       camera.detections = detections;
@@ -290,10 +416,12 @@ export function useDetectionStream() {
     }, 3000);
   }
 
-  function connectCamera(cameraId: string) {
+  function connectCamera(camera: CameraItem) {
+    const cameraId = camera.id;
     if (!cameraId || eventSources.has(cameraId)) return;
 
-    const source = new EventSource(detectionStreamUrl(cameraId));
+    const directMp4 = camera.stream_url?.toLowerCase().split('?', 1)[0].endsWith('.mp4');
+    const source = new EventSource(detectionStreamUrl(cameraId, Boolean(directMp4)));
     eventSources.set(cameraId, source);
     source.onopen = () => {
       isConnected.value = true;
@@ -316,7 +444,10 @@ export function useDetectionStream() {
     for (const cameraId of eventSources.keys()) {
       if (!cameraIds.has(cameraId)) closeCameraStream(cameraId);
     }
-    for (const cameraId of cameraIds) connectCamera(cameraId);
+    for (const cameraId of cameraIds) {
+      const camera = liveCameras.find((item) => item.id === cameraId);
+      if (camera) connectCamera(camera);
+    }
   }
 
   function connect() {
@@ -354,6 +485,7 @@ export function useDetectionStream() {
             active_people: backendCamera.active_people || 0,
             detections: [],
             frameBuffer: [],
+            ptsFrameBuffer: [],
           };
           liveCameras.push(camera);
         } else {

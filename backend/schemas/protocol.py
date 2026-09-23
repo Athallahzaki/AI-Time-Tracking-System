@@ -279,15 +279,21 @@ class EngineHealthEvent(SequencedMessage):
 class SnapshotLiveTrack(BaseModel):
     track_uuid: str
     camera_id: str
+    stream_epoch: int
     person_id: Optional[str] = None
     identity_source: Optional[IdentitySource] = None
     since_pts: float
 
 
+class SnapshotClock(BaseModel):
+    stream_epoch: int
+    offset: float
+
+
 class SnapshotEvent(SequencedMessage):
     type: str = "snapshot"
-    pts_wallclock_offset: Dict[str, float] = {}
-    live: List[SnapshotLiveTrack] = []
+    pts_wallclock_offset: Dict[str, SnapshotClock] = Field(default_factory=dict)
+    live: List[SnapshotLiveTrack] = Field(default_factory=list)
 
 
 # Events: enrollment
@@ -321,6 +327,17 @@ class ViewBox(BaseModel):
     bbox: List[float]  # [x1, y1, x2, y2] normalised 0-1
     person_id: Optional[str] = None
     identity_source: Optional[IdentitySource] = None
+    session_elapsed: Optional[float] = None
+    dwell_time: Optional[float] = None
+    is_official_break: Optional[bool] = None
+    is_qualified: Optional[bool] = None
+    qualification_seconds: Optional[float] = None
+    qualification_remaining_seconds: Optional[float] = None
+    visit_free_time_seconds: Optional[float] = None
+    daily_used_seconds: Optional[float] = None
+    remaining_seconds: Optional[float] = None
+    allowance_seconds: Optional[float] = None
+    presence_status: Optional[str] = None
 
 
 class ViewFrameMessage(BaseMessage):

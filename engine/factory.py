@@ -103,7 +103,7 @@ def build_detector(config: EngineConfig) -> Any:
     )
 
 
-def build_tracker(config: EngineConfig, source_fps: float) -> Any:
+def build_tracker(config: EngineConfig, source_fps: float, detector: Any = None) -> Any:
     """
     Constructs the tracker named by the config.
 
@@ -139,6 +139,7 @@ def build_tracker(config: EngineConfig, source_fps: float) -> Any:
         track_buffer=buffer_frames,
         frame_rate=int(round(fps)),
         strict=config.strict_mode,
+        detector=detector,
     )
 
 
@@ -244,7 +245,7 @@ def build_engine(
     source_fps = resolve_source_fps(config, source)
 
     detector = build_detector(config)
-    tracker = build_tracker(config, source_fps=source_fps)
+    tracker = build_tracker(config, source_fps=source_fps, detector=detector)
 
     engine_source = source if wrap_source is None else wrap_source(source, source_fps)
 

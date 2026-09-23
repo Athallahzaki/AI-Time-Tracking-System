@@ -23,6 +23,10 @@ async def detections_sse_stream(
         "cam-01",
         description="Camera ID to stream from",
     ),
+    replay: bool = Query(
+        False,
+        description="Replay buffered PTS frames for direct MP4 synchronization",
+    ),
 ):
     """
     SSE stream for engine view.frame messages.
@@ -34,7 +38,8 @@ async def detections_sse_stream(
 
     client_queue = (
         view_stream_service.subscribe(
-            selected_camera
+            selected_camera,
+            replay_history=replay,
         )
     )
 

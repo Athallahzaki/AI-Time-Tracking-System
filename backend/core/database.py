@@ -67,6 +67,59 @@ def init_database() -> None:
             )
         """)
 
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS free_time_usage (
+                person_id TEXT NOT NULL,
+                local_date TEXT NOT NULL,
+                used_seconds REAL NOT NULL DEFAULT 0,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY (person_id, local_date)
+            )
+        """)
+
+        conn.commit()
+
+
+def get_free_time_usage() -> Dict[tuple[str, str], float]:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS free_time_usage (
+                person_id TEXT NOT NULL,
+                local_date TEXT NOT NULL,
+                used_seconds REAL NOT NULL DEFAULT 0,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY (person_id, local_date)
+            )
+        """)
+        rows = conn.execute(
+            "SELECT person_id, local_date, used_seconds FROM free_time_usage"
+        ).fetchall()
+    return {(person_id, local_date): float(seconds)
+            for person_id, local_date, seconds in rows}
+
+
+def add_free_time_usage(person_id: str, local_date: str, seconds: float) -> None:
+    if seconds <= 0:
+        return
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS free_time_usage (
+                person_id TEXT NOT NULL,
+                local_date TEXT NOT NULL,
+                used_seconds REAL NOT NULL DEFAULT 0,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY (person_id, local_date)
+            )
+        """)
+        conn.execute("""
+            INSERT INTO free_time_usage (person_id, local_date, used_seconds, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(person_id, local_date) DO UPDATE SET
+                used_seconds = free_time_usage.used_seconds + excluded.used_seconds,
+                updated_at = excluded.updated_at
+        """, (person_id, local_date, float(seconds), time.time()))
         conn.commit()
 
 def create_enrollment(

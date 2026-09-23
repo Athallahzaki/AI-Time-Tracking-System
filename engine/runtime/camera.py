@@ -357,6 +357,7 @@ class CameraSupervisor:
             self._live[uuid] = {
                 "track_uuid": uuid,
                 "camera_id": self.spec.camera_id,
+                "stream_epoch": frame.metadata.stream_epoch,
                 "identity_state": identity,
                 "person_id": getattr(identity, "person_id", None),
                 "identity_source": getattr(identity, "identity_source", None),
@@ -445,14 +446,20 @@ class CameraSupervisor:
                 "track_uuid": uuid,
                 "bbox": list(_normalized(track, frame)),
                 "person_id": getattr(identity, "person_id", None),
+                # Relative media time lets a direct MP4 player select the box
+                # belonging to video.currentTime, even when inference is faster
+                # than realtime.
+                "session_elapsed": max(
+                    0.0, pts - self._track_born_pts.get(uuid, pts)
+                ),
             }
             source = getattr(identity, "identity_source", None)
             if source:
                 box["identity_source"] = source
             boxes.append(box)
 
-        if not boxes:
-            return
+        # Empty frames are significant: without them the browser would keep the
+        # previous person's box over later frames that contain nobody.
         clock = self._assembler.clock_for(self.spec.camera_id)
         self._emit_view(events.view_frame(clock, pts, boxes))
 
@@ -509,6 +516,7 @@ class CameraSupervisor:
             item = {
                 "track_uuid": entry["track_uuid"],
                 "camera_id": entry["camera_id"],
+                "stream_epoch": entry["stream_epoch"],
                 "person_id": entry["person_id"],
                 "since_pts": round(entry["since_pts"], 4),
             }

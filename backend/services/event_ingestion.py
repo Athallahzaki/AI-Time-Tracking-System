@@ -5,6 +5,7 @@ from typing import Any, Dict
 
 from backend.core.database import save_protocol_event
 from backend.services.protocol_adapter import protocol_adapter
+from backend.core.state import system_state
 
 
 def _timestamp(value: str) -> float:
@@ -47,11 +48,14 @@ class EventIngestionService:
                 "Protocol event must contain at or ts"
             )
 
-        return save_protocol_event(
+        inserted = save_protocol_event(
             timestamp=_timestamp(event_time),
             event_type=event_type,
             payload=validated,
             seq=seq,
         )
+        if inserted:
+            system_state.record_event(event_type, validated)
+        return inserted
 
 event_ingestion_service = EventIngestionService()

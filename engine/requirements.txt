@@ -18,7 +18,7 @@ PyYAML>=6.0              # config loading
 # Not needed for the mock path, which is what CI runs. Installing these is what
 # makes `--source <file>` work with real weights.
 #
-# ultralytics>=8.0        # optional only for tracker.backend=bytetrack; not used by detector
+# libreyolo>=1.5,<2        # installed by requirements-dfine.txt for the real detector/tracker path
 
 # --- B1 benchmark ----------------------------------------------------------
 # No new runtime dependency. The face probe uses the frontal cascade bundled

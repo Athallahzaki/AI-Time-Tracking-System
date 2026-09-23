@@ -11,11 +11,11 @@ from engine.config import DetectorConfig, EngineConfig
 def test_dfine_is_the_default_real_detector():
     config = EngineConfig()
     assert config.detector == DetectorConfig()
-    assert config.detector.model_path == "ustc-community/dfine-nano-coco"
+    assert config.detector.model_path == "LibreDFINEn.pt"
     assert config.tracker.backend == "iou"
 
 
-def test_dfine_adapter_does_not_import_yolo_or_ultralytics():
+def test_dfine_adapter_keeps_libreyolo_lazy():
     path = Path(__file__).resolve().parents[1] / "perception" / "dfine_detector.py"
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     imports = set()
@@ -25,7 +25,10 @@ def test_dfine_adapter_does_not_import_yolo_or_ultralytics():
         elif isinstance(node, ast.ImportFrom) and node.module:
             imports.add(node.module.split(".", 1)[0])
     assert "ultralytics" not in imports
-    assert "libreyolo" not in imports
+    assert "transformers" not in imports
+    # LibreYOLO is intentionally imported lazily inside _load_model(), so the
+    # module boundary stays safe for the mock/CI path.
+    assert "libreyolo" in imports
 
 
 def test_only_dfine_detector_is_exported():

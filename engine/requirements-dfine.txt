@@ -1,7 +1,9 @@
 # Full dependency set for the real D-FINE engine machine.
-# Mock tests/CI can keep using requirements.txt without downloading PyTorch.
+# Mock tests/CI can keep using requirements.txt without installing the model
+# runtime or downloading weights.
 -r requirements.txt
 
-torch>=2.1
-transformers>=4.51,<6
+# Unified model + tracking runtime. D-FINE and ByteTrack are both provided
+# through LibreYOLO; no separate YOLO framework is required.
+libreyolo>=1.5,<2
 Pillow>=10

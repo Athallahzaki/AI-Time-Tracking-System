@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { LayoutGrid, MonitorPlay, Radio } from '@lucide/vue';
 import {
   Select,
@@ -8,16 +8,29 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useDetectionStream } from '@/composables/useDetectionStream';
 import CameraFeedCard from './CameraFeedCard.vue';
 
-const { cameras, isConnected, isStreaming } = useDetectionStream();
+const props = defineProps({
+  cameras: { type: Array, required: true },
+  isConnected: { type: Boolean, default: false },
+  isStreaming: { type: Boolean, default: false },
+});
 
 const viewMode = ref('grid');
-const activeCameraId = ref(cameras[0]?.id || 'cam-01');
+const activeCameraId = ref(props.cameras[0]?.id || 'cam-01');
+
+watch(
+  () => props.cameras.map((camera) => camera.id),
+  (ids) => {
+    if (ids.length && !ids.includes(activeCameraId.value)) {
+      activeCameraId.value = ids[0];
+    }
+  },
+  { immediate: true },
+);
 
 const activeCamera = computed(
-  () => cameras.find((c) => c.id === activeCameraId.value) || cameras[0],
+  () => props.cameras.find((c) => c.id === activeCameraId.value) || props.cameras[0],
 );
 </script>
 

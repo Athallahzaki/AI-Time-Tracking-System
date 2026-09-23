@@ -7,7 +7,7 @@ import time
 
 from fastapi import APIRouter, HTTPException, Query
 
-from backend.core.database import get_protocol_events
+from backend.core.database import get_enrollments, get_protocol_events
 from backend.core.state import system_state
 from backend.schemas.attendance import GapClassification
 from backend.schemas.corrections import CorrectionCreate
@@ -153,6 +153,85 @@ def get_break_usage(person_id: str, date: str | None = None):
         "suspicious_gap_count": suspicious,
         "status": status,
     }
+
+
+@router.get("/breaks")
+def get_all_break_usage(date: str | None = None):
+    """Return the dashboard's daily break summary for every known person."""
+    target_date = date or datetime.now(break_policy.timezone).date().isoformat()
+    try:
+        date_type.fromisoformat(target_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="date must use YYYY-MM-DD") from exc
+
+    grouped: dict[str, list[dict]] = {}
+    for item in get_protocol_events("presence.interval"):
+        payload = item["payload"]
+        person_id = payload.get("person_id")
+        if person_id:
+            grouped.setdefault(str(person_id), []).append(payload)
+
+    person_ids = {str(item["person_id"]) for item in get_enrollments()}
+    person_ids.update(grouped)
+    data = []
+
+    for person_id in sorted(person_ids):
+        intervals = sorted(grouped.get(person_id, []), key=lambda item: item["start_at"])
+        result = session_deriver.classify_gaps(intervals, break_policy)
+        entries = []
+        suspicious = 0
+
+        for gap in result["gaps"]:
+            local_date = datetime.fromisoformat(
+                gap["gap_started_at"].replace("Z", "+00:00")
+            ).astimezone(break_policy.timezone).date().isoformat()
+            if local_date != target_date:
+                continue
+
+            classification = gap["classification"]
+            previous = next(
+                (item for item in intervals if item["interval_id"] == gap["previous_interval_id"]),
+                {},
+            )
+            if classification == "break":
+                entries.append({
+                    "gap_id": (
+                        f"gap_{gap['previous_interval_id']}_{gap['next_interval_id']}"
+                    ),
+                    "start_at": gap["gap_started_at"],
+                    "end_at": gap["gap_ended_at"],
+                    "duration_seconds": gap["gap_seconds"],
+                    "camera_id": previous.get("camera_id", ""),
+                    "end_zone": previous.get("end_zone", "unknown"),
+                    "end_reason": previous.get("end_reason", "unknown"),
+                    "corrected": False,
+                    "original_duration_seconds": None,
+                })
+            elif classification in {"tracking_loss", "unknown"}:
+                suspicious += 1
+
+        used_minutes = sum(item["duration_seconds"] for item in entries) / 60.0
+        remaining = max(0.0, break_policy.daily_allowance_minutes - used_minutes)
+        status = (
+            "exceeded"
+            if used_minutes > break_policy.daily_allowance_minutes
+            else "warning"
+            if remaining <= break_policy.warning_remaining_minutes
+            else "ok"
+        )
+        data.append({
+            "person_id": person_id,
+            "date": target_date,
+            "allowance_minutes": break_policy.daily_allowance_minutes,
+            "used_minutes": round(used_minutes, 2),
+            "remaining_minutes": round(remaining, 2),
+            "break_count": len(entries),
+            "breaks": entries,
+            "suspicious_gap_count": suspicious,
+            "status": status,
+        })
+
+    return {"status": "success", "data": data}
 
 
 @router.get("/events")

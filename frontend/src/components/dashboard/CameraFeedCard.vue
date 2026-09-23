@@ -3,7 +3,10 @@ import { ref, reactive, watch, onMounted, onBeforeUnmount, computed } from 'vue'
 import Hls from 'hls.js';
 import { Circle, ScanSearch, TriangleAlert, Video, Wifi } from '@lucide/vue';
 import DetectionBox from './DetectionBox.vue';
-import { resolveDetectionsAt } from '@/composables/useDetectionStream.ts';
+import {
+  resolveDetectionsAt,
+  resolveDetectionsAtPts,
+} from '@/composables/useDetectionStream.ts';
 
 const props = defineProps({
   camera: { type: Object, required: true },
@@ -13,14 +16,16 @@ const props = defineProps({
 const videoEl = ref(null);
 const streamError = ref(false);
 const streamMode = ref(''); // 'webrtc' | 'hls' | 'direct' | ''
+const directSyncWaiting = ref(false);
 
 let pc = null; // RTCPeerConnection for WebRTC
 let hls = null; // Hls instance for HLS
+let directLagStartedAtMs = null;
 
 const maxDwellTime = computed(() => {
-  if (!props.camera.detections || props.camera.detections.length === 0)
+  if (!displayDetections.value || displayDetections.value.length === 0)
     return 'Inactive';
-  const extras = props.camera.detections.map((d) => d.extra).filter(Boolean);
+  const extras = displayDetections.value.map((d) => d.extra).filter(Boolean);
   return extras.length > 0 ? extras[0] : 'Active';
 });
 
@@ -62,6 +67,46 @@ let resizeObserver = null;
 const displayDetections = ref([]);
 let rafId = null;
 
+function formatLiveDuration(seconds) {
+  const whole = Math.max(0, Math.floor(seconds));
+  if (whole < 60) return `${whole}s`;
+  const minutes = Math.floor(whole / 60);
+  const remaining = whole % 60;
+  if (minutes < 60) return `${minutes}m ${remaining}s`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m ${remaining}s`;
+}
+
+function withLiveTimers(detections, freeze = false) {
+  const now = Date.now();
+  return (detections || []).map((detection) => {
+    if (detection.elapsedSeconds == null || detection.elapsedObservedAtMs == null) {
+      return detection;
+    }
+    const delta = freeze
+      ? 0
+      : Math.max(0, now - detection.elapsedObservedAtMs) / 1000;
+    const elapsed = detection.elapsedSeconds + delta;
+    let extra = `${formatLiveDuration(elapsed)}${detection.durationSuffix || ''}`;
+    if (detection.timerMode === 'qualifying') {
+      const remaining = Math.max(0, (detection.qualificationRemainingSeconds || 0) - delta);
+      extra = `Passing: ${Math.ceil(remaining)}s`;
+    } else if (detection.timerMode === 'paused') {
+      extra = 'Istirahat 12:00–13:00 · timer dijeda';
+    } else if (detection.timerMode === 'counting' || detection.timerMode === 'limit') {
+      const used = (detection.dailyUsedSeconds || 0) + delta;
+      const allowance = detection.allowanceSeconds || 1800;
+      extra = detection.timerMode === 'limit'
+        ? `BATAS TERCAPAI · ${formatLiveDuration(used)} / ${formatLiveDuration(allowance)}`
+        : `Jatah terpakai ${formatLiveDuration(used)} / ${formatLiveDuration(allowance)}`;
+    }
+    return {
+      ...detection,
+      extra,
+    };
+  });
+}
+
 function getHlsCurrentPDT() {
   if (streamMode.value !== 'hls' || !hls || !videoEl.value) return null;
 
@@ -94,13 +139,15 @@ function computeTargetMs() {
 }
 
 function tick() {
-  // File MP4/direct tidak memiliki wall-clock/PDT yang sama dengan engine.
-  // Untuk mode ini tampilkan hasil deteksi terbaru. Sinkronisasi timestamp
-  // hanya dapat dilakukan untuk stream HLS (PDT) atau WebRTC live.
-  displayDetections.value =
+  synchronizeDirectPlayback();
+  const resolved =
     streamMode.value === 'direct'
-      ? props.camera.detections || []
+      ? resolveDetectionsAtPts(props.camera, videoEl.value?.currentTime ?? 0)
       : resolveDetectionsAt(props.camera, computeTargetMs());
+  displayDetections.value = withLiveTimers(
+    resolved,
+    streamMode.value === 'direct',
+  );
   rafId = requestAnimationFrame(tick);
 }
 
@@ -113,7 +160,52 @@ function isHlsUrl(url) {
   return url && url.includes('.m3u8');
 }
 
-const WEBRTC_PLAYOUT_DELAY = 0.8; 
+const WEBRTC_PLAYOUT_DELAY = 0.8;
+const DIRECT_LAG_TOLERANCE_SECONDS = 1.0;
+const DIRECT_LAG_GRACE_MS = 1500;
+const DIRECT_RESUME_LEAD_SECONDS = 2.0;
+
+function synchronizeDirectPlayback() {
+  const video = videoEl.value;
+  const buffer = props.camera.ptsFrameBuffer || [];
+  if (!video || streamMode.value !== 'direct') return;
+
+  const latest = buffer.length ? buffer[buffer.length - 1].pts : Number.NaN;
+  const duration = Number.isFinite(video.duration) ? video.duration : Number.NaN;
+  const analysisComplete = Number.isFinite(latest)
+    && Number.isFinite(duration)
+    && latest >= duration - 0.5;
+  const lead = Number.isFinite(latest) ? latest - video.currentTime : -Infinity;
+
+  // With no analyzed frame at all, hold the first video frame immediately so
+  // the beginning cannot be lost while the model warms up.
+  if (!Number.isFinite(latest)) {
+    if (!video.paused) video.pause();
+    directSyncWaiting.value = true;
+    return;
+  }
+
+  const lagging = !analysisComplete && lead < -DIRECT_LAG_TOLERANCE_SECONDS;
+  if (lagging) {
+    if (directLagStartedAtMs == null) directLagStartedAtMs = performance.now();
+    if (performance.now() - directLagStartedAtMs >= DIRECT_LAG_GRACE_MS) {
+      if (!video.paused) video.pause();
+      directSyncWaiting.value = true;
+    }
+    return;
+  }
+  directLagStartedAtMs = null;
+
+  if (
+    directSyncWaiting.value
+    && (analysisComplete || lead >= DIRECT_RESUME_LEAD_SECONDS)
+  ) {
+    directSyncWaiting.value = false;
+    video.play().catch((error) => {
+      console.debug('[Direct sync] Playback resume deferred:', error);
+    });
+  }
+}
 
 async function startWhep(url) {
   teardown();
@@ -226,6 +318,8 @@ function startDirect(url) {
   teardown();
   streamError.value = false;
   streamMode.value = 'direct';
+  directSyncWaiting.value = true;
+  directLagStartedAtMs = null;
   if (videoEl.value) {
     videoEl.value.src = url;
     videoEl.value.load();
@@ -412,6 +506,13 @@ function handleWarning() {
             ? `${displayDetections.length} DETECTED`
             : 'IDLE'
         }}
+      </div>
+
+      <div
+        v-if="streamMode === 'direct' && directSyncWaiting"
+        class="absolute left-1/2 top-2 sm:top-3 z-30 -translate-x-1/2 rounded bg-amber-500/90 px-2 py-1 text-[9px] sm:text-[10px] font-semibold text-white pointer-events-none"
+      >
+        SYNCING AI…
       </div>
 
       <!-- Bounding Box Overlay (always on top) -->

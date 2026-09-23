@@ -125,7 +125,7 @@ asked for.
 |---|---|---|
 | Skipped frames feed the tracker stale detections | `pipeline/engine.py` §2 | step 5 |
 | `target_fps: 30` wastes ~3× the detection budget | `config/default_config.yaml` | step 10 |
-| Tracker adapter still wraps Ultralytics (AGPL-3.0) and drags in torch | `perception/bytetrack_tracker.py` | step 11 |
+| Tracker adapter uses LibreYOLO ByteTrack | `perception/bytetrack_tracker.py` | step 11 |
 | ~~`cv2.VideoCapture` throws away PTS~~ | `ingest/cv_stream.py` | **done in B4** — PyAV backend, `ingest.backend: pyav` |
 | bbox on the wire is still pixel-space | everywhere | step 8 wires `NormalizedBox` in |
 
@@ -163,11 +163,11 @@ and the logs stay clean while the data goes wrong.
 
 The port surfaced a second instance of it, in B's own territory:
 `ByteTrackTracker._init_tracker` caught `Exception` and fell back to
-`IoUTracker` with a log line at INFO. On a machine without Ultralytics, a
+`IoUTracker` with a log line at INFO. On a machine without LibreYOLO, a
 benchmark run would have measured a completely different tracker and still
 produced a tidy report with plausible numbers. Under `strict_mode: true` that
 is now a startup failure naming the backend. The shipped configuration now
-explicitly selects `tracker.backend: iou`, so Ultralytics is not required for
+explicitly selects `tracker.backend: iou`, so LibreYOLO is not required for
 the default D-FINE path. Selecting `tracker.backend: bytetrack` remains an
 optional choice and fails at startup if its backend is unavailable.
 
@@ -186,7 +186,7 @@ A benchmark that can lie in a flattering direction is worse than no benchmark.
   the forbidden names into `engine/` is itself the thing §16 tells you to grep
   for. CI runs `contracts/tools/policy_grep.py`.
 - **No import of `backend/`.** Enforced by a ten-line test.
-- **The mock path needs neither torch nor Ultralytics.** Enforced by a test
+- **The mock path needs neither torch nor LibreYOLO.** Enforced by a test
   that imports the pipeline in a subprocess and checks `sys.modules`. This is
   what lets B1's benchmark run in CI.
 

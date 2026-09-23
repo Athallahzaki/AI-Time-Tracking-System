@@ -6,7 +6,7 @@ backend menyimpan event mentah dan menurunkan sesi/gap.
 
 ## Persyaratan dan instalasi
 
-- Python 3.11/3.12, Node.js 20+, npm
+- Python 3.11/3.12, Node.js 20+, npm, dan Docker untuk CCTV live
 
 ```bash
 python -m venv .venv
@@ -20,7 +20,10 @@ cd frontend && npm ci && cd ..
 
 ## Menjalankan
 
-Buka tiga terminal dari root proyek.
+Buka empat terminal dari root proyek. Untuk CCTV live, siapkan MediaMTX dahulu
+sesuai `deploy/README.md`, kemudian jalankan `./deploy/start-mediamtx.ps1` pada
+Windows atau `sh deploy/start-mediamtx.sh` pada Linux/macOS. Setelah sehat,
+jalankan tiga proses aplikasi:
 
 ```bash
 # Terminal 1: engine
@@ -83,8 +86,9 @@ Endpoint utama: `/api/system/status`, `/api/cameras`,
 `/api/attendance/derived`, `/api/attendance/corrections`, `/api/enrollments`, dan
 `/api/detections/stream`.
 
-Proyek belum siap produksi penuh: model nyata, benchmark rekaman representatif,
-kebijakan HRD, MediaMTX, autentikasi, dan deployment masih perlu diselesaikan.
+Proyek belum siap produksi penuh: benchmark rekaman representatif, kebijakan HRD,
+autentikasi, TLS, dan hardening deployment masih perlu diselesaikan. Setup MediaMTX
+lokal/lapangan dasar tersedia di `deploy/`.
 Lihat `WORKPLAN_STATUS.md`.
 
 Detector nyata menggunakan D-FINE resmi melalui Hugging Face Transformers,
@@ -96,19 +100,30 @@ Untuk CI atau demo mock tanpa model, cukup pasang `engine/requirements.txt`;
 dependency PyTorch/D-FINE hanya dipasang pada mesin engine nyata melalui
 `engine/requirements-dfine.txt`.
 
-## Mode demo satu perintah
+## Mode runtime satu perintah
 
 ```bash
-python scripts/run_demo.py
+python scripts/run_demo.py --mode mock --frontend
+python scripts/run_demo.py --mode direct --frontend
+python scripts/run_demo.py --mode mediamtx --frontend
 ```
 
-Tambahkan `--frontend` untuk ikut menjalankan Vite. Mode ini memakai
-`backend/configs/cameras.demo.yaml`, otomatis reconnect ke engine, lalu mengirim
-`set_cameras` dan `set_roster` setiap koneksi baru.
+`mock` tidak memerlukan video atau model nyata. `direct` membuka
+`frontend/public/videos/video2.mp4` pada engine dan browser lalu menyelaraskan
+bbox melalui PTS. `mediamtx` memakai RTSP untuk engine dan HLS untuk frontend;
+launcher melakukan preflight API dan path `cam01` sebelum memulai aplikasi.
+Ketiga mode otomatis memilih profil kamera dan memakai D-FINE Medium secara
+eksplisit. Opsi `--frontend` ikut menjalankan Vite.
+
+Pada Windows launcher otomatis memakai `npm.cmd` dan menghentikan seluruh proses
+dengan process group Windows. Jika muncul `npm tidak ditemukan`, instal Node.js,
+buka terminal baru, lalu jalankan `cd frontend; npm ci` sebelum mengulang demo.
 
 ## Konfigurasi
 
-- Kamera: `backend/configs/cameras.yaml`, atau set `CAMERAS_CONFIG` ke YAML lain.
+- Kamera default: `backend/configs/cameras.yaml`.
+- Profil runtime: `cameras.demo.yaml`, `cameras.direct.yaml`, dan
+  `cameras.mediamtx.yaml`; launcher mengatur `CAMERAS_CONFIG` otomatis.
 - Kebijakan: `backend/configs/policy.yaml`, atau set `POLICY_CONFIG`.
 - Engine: `ENGINE_HOST`, `ENGINE_PORT`, dan `ENGINE_RECONNECT_SECONDS`.
 - Pemakaian istirahat: `GET /api/attendance/break-usage?person_id=4471&date=2026-09-20`.

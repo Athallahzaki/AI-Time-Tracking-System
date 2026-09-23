@@ -1,10 +1,10 @@
 """
 What is visible: detection, tracking, cropping. No notion of identity.
 
-Imports are lazy on purpose. `dfine_detector` pulls in Transformers and torch;
-`bytetrack_tracker` pulls in torch and, when selected, Ultralytics. Importing
-those eagerly would make the mock path — the one that lets the pipeline and the
-benchmark run in CI without a GPU or model weights — impossible.
+Imports are lazy on purpose. `dfine_detector` and `bytetrack_tracker` pull in LibreYOLO only when selected.
+Importing them eagerly would make the mock path — the one that lets the
+pipeline and the benchmark run in CI without a GPU or model weights —
+impossible.
 """
 
 from __future__ import annotations
