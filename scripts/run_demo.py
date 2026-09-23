@@ -152,7 +152,7 @@ def main() -> int:
             sys.executable, "-m", "engine.runtime",
             "--config", str(engine_config),
             "--tcp", "127.0.0.1:8765",
-        ],
+        ] + (["--loop-files"] if args.mode == "direct" else []),
         [sys.executable, "-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1",
          "--port", str(args.backend_port)],
     ]

@@ -65,7 +65,7 @@ interface BackendBbox {
 interface BackendPerson {
   track_id: string | number;
   bbox: BackendBbox;
-  confidence: number;
+  confidence: number | null;
   state?: string;
   dwell_time?: number;
   presence_status?: string;
@@ -201,7 +201,8 @@ function protocolBoxesToPeople(
     return {
       track_id: box.track_id ?? box.track_uuid ?? index + 1,
       identity: box.person_id ?? null,
-      confidence: box.confidence ?? box.similarity ?? 0.95,
+      // Detector score from the engine. No fake default: missing stays missing.
+      confidence: box.confidence ?? null,
       presence_status:
         box.presence_status ?? (box.person_id ? 'CONFIRMED' : 'TRACKED'),
       session_elapsed: box.session_elapsed ?? box.dwell_time ?? 0,
@@ -302,8 +303,10 @@ export function useDetectionStream() {
         const y1 = Math.max(0, Math.min(frameHeight, finiteNumber(bbox.y1)));
         const x2 = Math.max(x1, Math.min(frameWidth, finiteNumber(bbox.x2)));
         const y2 = Math.max(y1, Math.min(frameHeight, finiteNumber(bbox.y2)));
-        const rawConfidence = finiteNumber(person.confidence, 0.95);
-        const confidence = rawConfidence <= 1 ? rawConfidence * 100 : rawConfidence;
+        const rawConfidence = person.confidence == null ? Number.NaN : Number(person.confidence);
+        const confidence = Number.isFinite(rawConfidence)
+          ? (rawConfidence <= 1 ? rawConfidence * 100 : rawConfidence)
+          : null;
         const elapsed = person.session_elapsed ?? person.dwell_time ?? 0;
 
         let color: DetectionItem['color'] = 'cyan';
@@ -355,7 +358,7 @@ export function useDetectionStream() {
             ? `Emp #${person.identity}`
             : `ID #${person.track_id}`,
           sub: person.presence_status || person.state || 'TRACKED',
-          conf: `${Math.round(confidence)}%`,
+          conf: confidence == null ? '' : `${Math.round(confidence)}%`,
           extra: timerText,
           elapsedSeconds: finiteNumber(elapsed),
           elapsedObservedAtMs: Date.now(),

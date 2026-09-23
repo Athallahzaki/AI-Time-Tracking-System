@@ -111,6 +111,7 @@ class CameraStats:
     state: str = "starting"
     error: Optional[str] = None
     attempts: int = 0
+    loops: int = 0
     attempts_by_uuid: Dict[str, int] = field(default_factory=dict)
     evidence_by_uuid: Dict[str, int] = field(default_factory=dict)
 
@@ -131,8 +132,14 @@ class CameraSupervisor:
         heartbeat_seconds: float = HEARTBEAT_INTERVAL_SECONDS,
         unidentified_after_seconds: float = UNIDENTIFIED_AFTER_SECONDS,
         max_frames: Optional[int] = None,
+        loop_files: bool = False,
     ) -> None:
         self.spec = spec
+        # Local video files restart from the beginning when they end. For
+        # demos/testing only: every lap is a new run (new ids, open presences
+        # closed), exactly like a camera that went away and came back.
+        self._loop_files = loop_files
+        self._detector: Any = None
         self._config = config
         self._emit_event = emit_event
         self._emit_view = emit_view
@@ -210,6 +217,12 @@ class CameraSupervisor:
             if outcome == "stopped" or self._stop.is_set():
                 break
             if outcome == "finished":
+                if self._loop_files and self._max_frames is None:
+                    self.stats.loops += 1
+                    logger.info("[%s] video selesai, mengulang dari awal (putaran %d)",
+                                camera_id, self.stats.loops + 1)
+                    delay = RETRY_INITIAL_SECONDS
+                    continue
                 # A local file reached its end (or max_frames): nothing to reopen.
                 break
             self.stats.attempts += 1
@@ -354,7 +367,9 @@ class CameraSupervisor:
             source_id=camera_id,
             max_frames=self._max_frames,
             wrap_source=wrap_source,
+            detector=self._detector,
         )
+        self._detector = engine._detector
         engine._zoner = self._zoner
         engine._recognition_queue = self._queue
         engine.add_listener(self._binding)
@@ -545,6 +560,11 @@ class CameraSupervisor:
             source = getattr(identity, "identity_source", None)
             if source:
                 box["identity_source"] = source
+            # Detector score of the detection this track was last matched to.
+            # Display only -- identity similarity is a different number.
+            score = getattr(track, "confidence", None)
+            if isinstance(score, (int, float)) and 0.0 <= float(score) <= 1.0:
+                box["confidence"] = round(float(score), 3)
             boxes.append(box)
 
         # Empty frames are significant: without them the browser would keep the

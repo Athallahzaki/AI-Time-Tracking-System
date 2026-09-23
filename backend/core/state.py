@@ -196,7 +196,9 @@ class SystemState:
                 camera_id=camera_id,
                 track_id=track_id,
                 identity=str(person_id) if person_id is not None else None,
-                similarity=float(box.get("similarity") or box.get("confidence") or 0.0),
+                # Face similarity only. The detector score ("confidence") is a
+                # different quantity and must not inflate identity similarity.
+                similarity=float(box.get("similarity") or 0.0),
                 presence_status="CONFIRMED" if person_id else "TRACKED",
                 dwell_time=float(box.get("dwell_time") or 0.0),
                 session_elapsed=(

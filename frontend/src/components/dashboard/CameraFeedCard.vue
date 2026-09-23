@@ -213,9 +213,42 @@ function isHlsUrl(url) {
 }
 
 const WEBRTC_PLAYOUT_DELAY = 0.8;
-const DIRECT_LAG_TOLERANCE_SECONDS = 1.0;
+// Direct-mode sync (seamless). The engine analyses the file at its own speed;
+// if that is below real time the old code paused the video, waited for a
+// 2 s lead, played again, caught up, paused again ... a visible stutter every
+// few seconds. Now the video's playbackRate follows the engine's measured
+// throughput so it slows down smoothly instead. Pausing stays only as a last
+// resort when the engine stalls completely.
+const DIRECT_TARGET_LEAD_SECONDS = 1.5;   // how far analysis should run ahead
+const DIRECT_HARD_LAG_SECONDS = 1.0;      // video ahead of analysis by this -> pause
 const DIRECT_LAG_GRACE_MS = 1500;
-const DIRECT_RESUME_LEAD_SECONDS = 2.0;
+const DIRECT_MIN_RATE = 0.25;
+const DIRECT_RATE_GAIN = 0.4;             // per second of lead error
+const DIRECT_RATE_STEP = 0.03;            // ignore tiny changes (no thrash)
+const directRate = { lastPts: Number.NaN, lastMs: 0, engineRate: 1 };
+
+function measureEngineRate(latest) {
+  const nowMs = performance.now();
+  if (Number.isFinite(directRate.lastPts) && latest > directRate.lastPts) {
+    const dt = (nowMs - directRate.lastMs) / 1000;
+    if (dt >= 0.25) {
+      const sample = (latest - directRate.lastPts) / dt;
+      directRate.engineRate = 0.8 * directRate.engineRate + 0.2 * sample;
+      directRate.lastPts = latest;
+      directRate.lastMs = nowMs;
+    }
+  } else if (!Number.isFinite(directRate.lastPts) || latest < directRate.lastPts) {
+    directRate.lastPts = latest;
+    directRate.lastMs = nowMs;
+  }
+}
+
+function setPlaybackRate(video, rate) {
+  const clamped = Math.min(1, Math.max(DIRECT_MIN_RATE, rate));
+  if (Math.abs(video.playbackRate - clamped) >= DIRECT_RATE_STEP || clamped === 1) {
+    if (video.playbackRate !== clamped) video.playbackRate = clamped;
+  }
+}
 
 function synchronizeDirectPlayback() {
   const video = videoEl.value;
@@ -227,7 +260,6 @@ function synchronizeDirectPlayback() {
   const analysisComplete = Number.isFinite(latest)
     && Number.isFinite(duration)
     && latest >= duration - 0.5;
-  const lead = Number.isFinite(latest) ? latest - video.currentTime : -Infinity;
 
   // With no analyzed frame at all, hold the first video frame immediately so
   // the beginning cannot be lost while the model warms up.
@@ -237,8 +269,23 @@ function synchronizeDirectPlayback() {
     return;
   }
 
-  const lagging = !analysisComplete && lead < -DIRECT_LAG_TOLERANCE_SECONDS;
-  if (lagging) {
+  if (analysisComplete) {
+    directLagStartedAtMs = null;
+    setPlaybackRate(video, 1);
+    if (directSyncWaiting.value) {
+      directSyncWaiting.value = false;
+      video.play().catch((error) => {
+        console.debug('[Direct sync] Playback resume deferred:', error);
+      });
+    }
+    return;
+  }
+
+  measureEngineRate(latest);
+  const lead = latest - video.currentTime;
+
+  // Last resort: the engine has stalled and the video overtook it.
+  if (lead < -DIRECT_HARD_LAG_SECONDS) {
     if (directLagStartedAtMs == null) directLagStartedAtMs = performance.now();
     if (performance.now() - directLagStartedAtMs >= DIRECT_LAG_GRACE_MS) {
       if (!video.paused) video.pause();
@@ -248,10 +295,12 @@ function synchronizeDirectPlayback() {
   }
   directLagStartedAtMs = null;
 
-  if (
-    directSyncWaiting.value
-    && (analysisComplete || lead >= DIRECT_RESUME_LEAD_SECONDS)
-  ) {
+  // Follow the engine: its throughput, corrected toward the target lead.
+  const rate = directRate.engineRate
+    + DIRECT_RATE_GAIN * (lead - DIRECT_TARGET_LEAD_SECONDS);
+  setPlaybackRate(video, rate);
+
+  if (directSyncWaiting.value && lead >= DIRECT_TARGET_LEAD_SECONDS) {
     directSyncWaiting.value = false;
     video.play().catch((error) => {
       console.debug('[Direct sync] Playback resume deferred:', error);
@@ -372,6 +421,8 @@ function startDirect(url) {
   streamMode.value = 'direct';
   directSyncWaiting.value = true;
   directLagStartedAtMs = null;
+  directRate.lastPts = Number.NaN;
+  directRate.engineRate = 1;
   if (videoEl.value) {
     videoEl.value.src = url;
     videoEl.value.load();
