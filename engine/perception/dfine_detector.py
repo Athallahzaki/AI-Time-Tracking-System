@@ -151,6 +151,12 @@ class DFINEDetector:
             # guess inside a model wrapper.
             "color_format": "bgr",
         }
+        # Filter kelas DI MODEL, bukan hanya di detect(). ByteTrack memakan
+        # Results mentah (last_result); tanpa ini ia ikut melacak kursi, meja,
+        # TV, dst. Set kosong tidak dikirim: `classes=[]` ambigu dan nama kelas
+        # yang gagal di-resolve harus terlihat, bukan diam-diam membuang semua.
+        if self._target_class_ids:
+            kwargs["classes"] = sorted(self._target_class_ids)
         if self._half:
             kwargs["half"] = True
         return self._model(image, **kwargs)

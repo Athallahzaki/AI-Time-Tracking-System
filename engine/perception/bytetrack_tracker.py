@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Dict, List, Optional
+import math
 
 from ..ports.detection import Detection
 from ..ports.frame import Frame
@@ -47,21 +48,32 @@ class ByteTrackTracker:
         try:
             from libreyolo import ByteTracker, TrackConfig
 
+            # LibreYOLO menghitung max_time_lost = int(track_buffer * frame_rate / 30),
+            # yaitu menganggap track_buffer dalam "frame pada 30 fps". self._track_buffer
+            # sudah dalam frame pada fps efektif (factory.build_tracker), jadi tanpa
+            # konversi balik ini tenggangnya terskala dua kali: 12 frame @12fps -> 4 frame.
+            library_buffer = int(math.ceil(
+                self._track_buffer * 30.0 / max(1, self._frame_rate)
+            ))
             config = TrackConfig(
                 track_high_thresh=self._track_thresh,
                 track_low_thresh=min(0.1, self._track_thresh),
                 new_track_thresh=self._track_thresh,
                 match_thresh=self._match_thresh,
-                track_buffer=self._track_buffer,
+                track_buffer=library_buffer,
                 frame_rate=self._frame_rate,
                 fuse_score=True,
                 minimum_consecutive_frames=1,
             )
             self._tracker = ByteTracker(config=config)
+            effective_lost = int(library_buffer * self._frame_rate / 30)
             logger.info(
-                "Initialized LibreYOLO ByteTrack (buffer=%d frames, fps=%d).",
+                "Initialized LibreYOLO ByteTrack (buffer=%d frames @ %d fps -> "
+                "library track_buffer=%d, max_time_lost=%d frames).",
                 self._track_buffer,
                 self._frame_rate,
+                library_buffer,
+                effective_lost,
             )
         except Exception as exc:
             if self._strict:
