@@ -4,7 +4,7 @@ services:
     container_name: ai-time-mediamtx
     restart: unless-stopped
     environment:
-      MTX_PATHS_CAM01_SOURCE: "${CAM01_SOURCE:?Isi CAM01_SOURCE di deploy/.env.mediamtx}"
+      MTX_PATHS_CAM01_SOURCE: "${CAM01_SOURCE:?Isi CAM01_SOURCE di deploy/mediamtx/.env.mediamtx}"
       # Daftar dipisahkan koma. Isi IP LAN server jika dashboard dibuka dari PC lain.
       MTX_WEBRTCADDITIONALHOSTS: "${MEDIAMTX_WEBRTC_ADDITIONAL_HOSTS:-127.0.0.1}"
     volumes:

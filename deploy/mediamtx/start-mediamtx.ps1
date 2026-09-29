@@ -8,7 +8,7 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
 }
 if (-not (Test-Path $EnvFile)) {
     Copy-Item (Join-Path $DeployDir ".env.mediamtx.example") $EnvFile
-    throw "deploy/.env.mediamtx telah dibuat. Isi CAM01_SOURCE, lalu jalankan script ini lagi."
+    throw "deploy/mediamtx/.env.mediamtx telah dibuat. Isi CAM01_SOURCE, lalu jalankan script ini lagi."
 }
 
 docker compose --env-file $EnvFile -f $ComposeFile config --quiet
@@ -18,5 +18,5 @@ if ($LASTEXITCODE -ne 0) { throw "MediaMTX gagal dijalankan." }
 
 Write-Host "MediaMTX dijalankan. Memeriksa status..."
 Start-Sleep -Seconds 3
-python (Join-Path $DeployDir "..\scripts\check_mediamtx.py")
+python (Join-Path $DeployDir "..\..\scripts\check_mediamtx.py")
 

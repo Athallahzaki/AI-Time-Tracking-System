@@ -204,11 +204,20 @@ class LocalTrackStream:
         decode failure, and the old code logged both as "Reached end of video".
         A benchmark computed over 6% of a file and reported as a full run is
         exactly the kind of flattering lie strict_mode exists to stop.
+
+        Frames dropped on purpose by core.target_fps were still READ from the
+        source, so they count as consumed. Comparing only the frames that left
+        the engine made every decimated run look truncated.
         """
         if self._max_frames is not None:
             return
         expected = int(getattr(self._source, "total_frames", 0) or 0)
-        if not expected or self._frames_read >= expected:
+        if not expected:
+            return
+
+        decimated = int(getattr(self._engine, "decimated_frames", 0) or 0)
+        consumed = self._frames_read + decimated
+        if consumed >= expected:
             return
 
         # Tolerance, because since B4 `total_frames` may be an estimate:
@@ -217,22 +226,21 @@ class LocalTrackStream:
         # this check exists to catch is a run that covered 6% of a file; half a
         # percent of slack does not weaken that, and without it every estimated
         # count would raise on a perfectly complete run.
-        shortfall = expected - self._frames_read
+        shortfall = expected - consumed
         if shortfall <= max(2, int(expected * 0.005)):
             logger.info(
-                "[%s] read %d of an expected %d frames; within the tolerance "
-                "for an estimated frame count.",
-                self._camera_id,
-                self._frames_read,
-                expected,
+                "[%s] consumed %d of an expected %d frames (%d analysed, %d "
+                "decimated); within the tolerance for an estimated frame count.",
+                self._camera_id, consumed, expected, self._frames_read, decimated,
             )
             return
 
         message = (
-            f"[{self._camera_id}] source ended after {self._frames_read} of "
-            f"{expected} frames ({self._frames_read / expected:.1%}). This is a "
-            f"decode failure or a truncated file, not a finished run — any "
-            f"number derived from it describes a fraction of the source."
+            f"[{self._camera_id}] source ended after {consumed} of {expected} "
+            f"frames ({consumed / expected:.1%}; {self._frames_read} analysed, "
+            f"{decimated} decimated). This is a decode failure or a truncated "
+            f"file, not a finished run — any number derived from it describes "
+            f"a fraction of the source."
         )
         if self._config.strict_mode:
             raise TruncatedSourceError(message)

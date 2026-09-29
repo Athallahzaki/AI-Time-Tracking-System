@@ -1,0 +1,7 @@
+*
+!engine/__init__.py
+!engine/api/
+!engine/tools/__init__.py
+!engine/tools/fake_engine/
+**/__pycache__
+**/*.py[cod]

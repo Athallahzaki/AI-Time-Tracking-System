@@ -33,8 +33,8 @@ def check_mediamtx() -> None:
             payload = json.load(response)
     except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
         raise RuntimeError(
-            "MediaMTX belum berjalan. Jalankan `./deploy/start-mediamtx.ps1` "
-            "(Windows) atau `sh deploy/start-mediamtx.sh` terlebih dahulu."
+            "MediaMTX belum berjalan. Jalankan `./deploy/mediamtx/start-mediamtx.ps1` "
+            "(Windows) atau `sh deploy/mediamtx/start-mediamtx.sh` terlebih dahulu."
         ) from exc
     cam = next(
         (item for item in payload.get("items", []) if item.get("name") == "cam01"),

@@ -11,6 +11,7 @@ from backend.core.security import require_api_key
 from backend.core.state import system_state
 from backend.services.camera_state import effective_cameras, set_cameras_message, source_allowed
 from backend.services.engine_client import EngineConnectionError, engine_client
+from backend.core.state import system_state
 
 router = APIRouter(prefix="/api/cameras", tags=["Cameras"])
 
