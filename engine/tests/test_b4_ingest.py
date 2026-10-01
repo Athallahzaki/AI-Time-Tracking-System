@@ -902,9 +902,12 @@ def test_the_reformatter_path_reuses_one_context_for_the_whole_file():
     source = _source(av, colour_conversion="reformatter")
     source.start()
     frames = [source.read() for _ in range(5)]
+    # Pixels are produced on first access (LazyFrame), so touch them.
+    images = [frame.image for frame in frames]
     source.stop()
 
     assert all(frame is not None for frame in frames)
+    assert all(image is not None for image in images)
     assert reformatter.calls == 5
     assert source.describe()["colour_conversion"] == "reformatter"
 

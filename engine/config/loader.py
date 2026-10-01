@@ -167,6 +167,7 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
             decoder_thread_type=str(ing.get("decoder_thread_type", "AUTO")),
             decoder_threads=int(ing.get("decoder_threads", 0)),
             colour_conversion=str(ing.get("colour_conversion", "to_ndarray")),
+            live_buffer=str(ing.get("live_buffer", "none")),
         ),
         detector=DetectorConfig(
             model_path=str(det.get("model_path", "LibreDFINEn.pt")),
@@ -175,6 +176,7 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
             image_size=int(det.get("image_size", 640)),
             device=det.get("device", "auto"),
             half=bool(det.get("half", False)),
+            pre_resize=bool(det.get("pre_resize", False)),
         ),
         tracker=TrackerConfig(
             backend=str(trk.get("backend", "bytetrack")),
@@ -206,6 +208,7 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
                 tuple(str(p) for p in rec["onnx_providers"]) if rec.get("onnx_providers") else None
             ),
             face_detection_threshold=float(rec.get("face_detection_threshold", 0.5)),
+            face_detector_input_size=int(rec.get("face_detector_input_size", 640)),
             min_face_px=float(rec.get("min_face_px", 40.0)),
             match_threshold=_optional_float(rec.get("match_threshold")),
             match_margin=_optional_float(rec.get("match_margin")),

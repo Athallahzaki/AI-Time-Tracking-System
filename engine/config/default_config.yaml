@@ -29,6 +29,11 @@ ingest:
                                     # context instead of building one per frame.
                                     # probe_ingest times both — switch only with
                                     # that number in the commit message.
+  live_buffer: "latest"             # network streams only (files ignore it). A
+                                    # reader thread drains RTSP at camera rate and
+                                    # keeps the newest frame, so a slow pipeline
+                                    # skips whole frames instead of making MediaMTX
+                                    # discard packets ("reader is too slow").
 
 core:
   source_uri: "samples/room.mp4"   # "0" for webcam, "rtsp://..." for a camera, or a file path
@@ -82,11 +87,12 @@ recognition:
   #
   #   recognizer: "onnx_face"                       # "none" | "onnx_face"
   #   face_detector_model: "models/scrfd_10g_bnkps.onnx"
-  #   face_embedder_model: "models/auraface_v1.onnx"
+  #   face_embedder_model: "models/glintr100.onnx"
   #   embedding_version: "auraface-v1"
   #   reference_db_path: "engine/data/references.sqlite3"
   #   onnx_providers: ["CUDAExecutionProvider", "CPUExecutionProvider"]
   #   face_detection_threshold: 0.5
+  #   face_detector_input_size: 640          # multiple of 32; 320 = candidate for 5 cameras
   #   min_face_px: 40
 
 
@@ -96,7 +102,8 @@ detector:
   iou_threshold: 0.45
   image_size: 640
   device: "auto"
-  half: false                    # FP16 is a trap on Pascal (GTX 1060). ARCHITECTURE.md §8
+  half: false                    # FP16 (torch.autocast). Trap on Pascal (GTX 1060). ARCHITECTURE.md §8
+  pre_resize: false              # baseline keeps LibreYOLO's own preprocessing (§16)
 
 tracker:
   backend: "bytetrack"

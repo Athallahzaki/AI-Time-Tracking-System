@@ -26,8 +26,9 @@ Windows atau `sh deploy/mediamtx/start-mediamtx.sh` pada Linux/macOS. Setelah se
 jalankan tiga proses aplikasi:
 
 ```bash
-# Terminal 1: engine
-python -m engine.runtime --config engine/config/default_config.yaml --tcp 127.0.0.1:8765
+# Terminal 1: engine (profil runtime; default_config.yaml = baseline bench 30 fps,
+# terlalu berat untuk stream live)
+python -m engine.runtime --config engine/config/dfine-m.yaml --tcp 127.0.0.1:8765
 
 # Terminal 2: backend
 ENGINE_HOST=127.0.0.1 ENGINE_PORT=8765 python -m uvicorn backend.main:app --reload --port 8000
@@ -48,7 +49,7 @@ Buka tiga PowerShell pada root proyek setelah instalasi di atas:
 ```powershell
 # Terminal 1
 .venv\Scripts\Activate.ps1
-python -m engine.runtime --config engine/config/default_config.yaml --tcp 127.0.0.1:8765
+python -m engine.runtime --config engine/config/dfine-m.yaml --tcp 127.0.0.1:8765
 
 # Terminal 2
 .venv\Scripts\Activate.ps1
@@ -116,7 +117,7 @@ recognition:
   enabled: true
   recognizer: "onnx_face"
   face_detector_model: "models/scrfd_10g_bnkps.onnx"
-  face_embedder_model: "models/auraface_v1.onnx"
+  face_embedder_model: "models/glintr100.onnx"
 ```
 
 lalu `pip install -r engine/requirements-face.txt`. Model tidak dibundel. Kalau

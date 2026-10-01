@@ -17,6 +17,10 @@ from .pipeline.instrument import Recorder
 
 logger = logging.getLogger("engine.factory")
 
+# ByteTrack's low-score floor. Must match track_low_thresh in
+# perception/bytetrack_tracker.py, which is min(0.1, track_threshold).
+BYTETRACK_LOW_THRESHOLD = 0.1
+
 # Applied to the source after its fps is known, before the engine is built.
 # The benchmark uses it to insert realtime pacing; nothing else should.
 SourceWrapper = Callable[[Any, float], Any]
@@ -60,6 +64,7 @@ def build_source(
             decoder_thread_type=config.ingest.decoder_thread_type,
             decoder_threads=config.ingest.decoder_threads,
             colour_conversion=config.ingest.colour_conversion,
+            live_buffer=config.ingest.live_buffer,
         )
     elif config.source_type == "video_file":
         # realtime_pacing=False always. Pacing is a benchmark mode decision
@@ -93,6 +98,20 @@ def build_detector(config: EngineConfig) -> Any:
     if config.source_type == "mock":
         return perception.MockDetector()
 
+    # ByteTrack's second association stage feeds on boxes BELOW the detection
+    # threshold (track_low_thresh, 0.1). The detector used to ask the model for
+    # conf >= 0.50 only, so the Results ByteTrack consumes never held a single
+    # low-score box and ByteTrack degenerated into IoU + Kalman. The model is
+    # now asked for the tracker's floor; `detect()` still returns only boxes at
+    # or above confidence_threshold, so nothing else sees the extra boxes.
+    raw_confidence = None
+    if config.tracker.backend == "bytetrack":
+        raw_confidence = min(
+            config.detector.confidence_threshold,
+            BYTETRACK_LOW_THRESHOLD,
+            config.tracker.track_threshold,
+        )
+
     return perception.DFINEDetector(
         model_path=config.detector.model_path,
         confidence_threshold=config.detector.confidence_threshold,
@@ -100,6 +119,8 @@ def build_detector(config: EngineConfig) -> Any:
         image_size=config.detector.image_size,
         device=config.detector.device,
         half=config.detector.half,
+        pre_resize=config.detector.pre_resize,
+        raw_confidence=raw_confidence,
     )
 
 

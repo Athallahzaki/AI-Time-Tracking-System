@@ -129,7 +129,26 @@ class IngestConfig:
     # the probe says it is worth something (§16).
     colour_conversion: str = "to_ndarray"   # "to_ndarray" | "reformatter"
 
+    # How a NETWORK stream is read. Files ignore this: a file is a pull source
+    # and the pipeline sets its pace.
+    #
+    # "none"   - the pipeline thread pulls packets itself. Correct only while
+    #            the pipeline keeps up with the camera; the moment it falls
+    #            behind, the server's send queue fills and MediaMTX starts
+    #            discarding packets mid-GOP ("reader is too slow"), which hands
+    #            the decoder a broken bitstream.
+    # "latest" - a reader thread drains and decodes the stream at camera rate
+    #            and keeps only the newest decoded frame. A slow pipeline then
+    #            skips whole, intact frames instead of corrupting the stream,
+    #            and the skip is counted (describe()["live_reader"]).
+    live_buffer: str = "none"          # "none" | "latest"
+
     def __post_init__(self) -> None:
+        if self.live_buffer not in ("none", "latest"):
+            raise ValueError(
+                f"Unknown ingest.live_buffer '{self.live_buffer}'. "
+                f"Expected 'none' or 'latest'."
+            )
         if self.colour_conversion not in ("to_ndarray", "reformatter"):
             raise ValueError(
                 f"Unknown ingest.colour_conversion '{self.colour_conversion}'. "
@@ -235,6 +254,10 @@ class RecognitionConfig:
     reference_db_path: str = "engine/data/references.sqlite3"
     onnx_providers: Optional[Tuple[str, ...]] = None
     face_detection_threshold: float = 0.5
+    # SCRFD input canvas (pixels, multiple of 32). Runtime crops are head
+    # regions of ~60-150 px, so 640 mostly upscales; 320 is the candidate for
+    # 5 cameras (P7) once similarity on real footage is compared at both.
+    face_detector_input_size: int = 640
     min_face_px: float = 40.0
     match_threshold: Optional[float] = None
     match_margin: Optional[float] = None
@@ -253,6 +276,12 @@ class RecognitionConfig:
             )
         if self.max_requests_per_frame < 0:
             raise ValueError("recognition.max_requests_per_frame must be >= 0.")
+        if (self.face_detector_input_size < 64 or self.face_detector_input_size > 1280
+                or self.face_detector_input_size % 32):
+            raise ValueError(
+                "recognition.face_detector_input_size must be a multiple of 32 in 64..1280 "
+                "(SCRFD strides 8/16/32)."
+            )
         for name in ("max_age_seconds", "retry_interval_seconds",
                      "reverify_interval_seconds"):
             value = getattr(self, name)
@@ -281,7 +310,18 @@ class DetectorConfig:
     iou_threshold: float = 0.45
     image_size: int = 640
     device: Union[str, int] = "auto"
+    # FP16 through torch.autocast. LibreYOLO's own `half=` predict option is a
+    # no-op and its quantize(recipe="fp16") does not cover the D-FINE family,
+    # so the flag used to change nothing. Slower on Pascal (GTX 1060).
     half: bool = False
+    # Resize the frame to image_size x image_size in the engine (OpenCV,
+    # INTER_AREA) before handing it to LibreYOLO, and map boxes back. D-FINE
+    # resizes to a square without letterbox anyway; what this removes is
+    # LibreYOLO's CPU path through PIL, which copies a full 1080p frame four
+    # to five times per inference. Only applied when the frame is at least
+    # image_size on both sides. Pixels differ slightly from PIL's resize, so
+    # accuracy is to be compared, not assumed (ARCHITECTURE.md §16).
+    pre_resize: bool = False
 
 
 @dataclass(frozen=True)

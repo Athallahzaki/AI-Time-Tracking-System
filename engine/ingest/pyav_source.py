@@ -30,6 +30,27 @@ the GPU, but `to_ndarray` copies the frame straight back to host memory, so the
 PCIe round trip §5.5 actually cares about survives until the ONNX IO-binding
 refactor. Two variables in one step, and the wrong one first.
 
+## Pixels are converted only for frames somebody looks at
+
+`read()` returns a frame whose BGR array is produced on first access of
+`frame.image`. The engine decimates to `core.target_fps` by PTS, so at 30 fps in
+and 12 fps analysed, more than half of all frames used to be decoded, converted
+YUV->BGR at full resolution (6 MB at 1080p), copied, and thrown away. Decode
+cannot be skipped (H.264 references); the conversion can. Timeline stamping
+still happens for every decoded frame, so PTS checks and fidelity counts are
+unchanged.
+
+## Live streams: a reader thread and a one-frame slot (`live_buffer: latest`)
+
+A network source is push: the camera sends at its rate whether or not the
+pipeline is ready. When the pipeline thread is also the thread that pulls
+packets, every slow inference stalls the socket, MediaMTX's write queue fills,
+and it discards packets in the middle of a GOP. The decoder then gets a broken
+bitstream: smeared frames, PTS that jumps backwards, boxes that stutter. With
+`live_buffer: latest` a dedicated thread drains and decodes at camera rate and
+keeps only the newest frame; the pipeline takes whatever is newest when it is
+ready. Skipped frames are whole and counted, never corrupt.
+
 **No frame reordering games.** `container.decode()` yields frames in
 presentation order, which is what PTS means. If PTS still goes backwards,
 `timeline.py` counts it and the bench reports the count.
@@ -44,9 +65,10 @@ timeout, so a dead camera does not hang a thread forever.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, Iterator, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, Optional, Tuple
 
 from .base import BaseFrameSource
 from .timeline import PTS_CONTAINER, StreamTimeline, TimelineFidelity
@@ -55,6 +77,39 @@ from ..ports.frame import Frame, FrameMetadata
 logger = logging.getLogger(__name__)
 
 NETWORK_SCHEMES = ("rtsp://", "rtsps://", "rtmp://", "http://", "https://", "udp://")
+LIVE_BUFFER_MODES = ("none", "latest")
+
+
+class LazyFrame(Frame):
+    """A `Frame` whose pixels are converted on first access of `image`.
+
+    Everything that only needs the timeline (decimation, pacing wrappers, the
+    realtime bench proxy) reads `metadata` and never pays for the conversion.
+    The decoded `av.VideoFrame` is held until then; it is reference counted by
+    libav, so the decoder carrying on in another thread does not touch it.
+    """
+
+    def __init__(self, metadata: FrameMetadata, convert: Callable[[], Any]) -> None:
+        # Deliberately not calling Frame.__init__: `image` is a property here.
+        self.metadata = metadata
+        self._convert: Optional[Callable[[], Any]] = convert
+        self._image: Any = None
+
+    @property
+    def image(self) -> Any:  # type: ignore[override]
+        if self._image is None and self._convert is not None:
+            self._image = self._convert()
+            self._convert = None
+        return self._image
+
+    @image.setter
+    def image(self, value: Any) -> None:
+        self._image = value
+        self._convert = None
+
+    @property
+    def is_converted(self) -> bool:
+        return self._image is not None
 
 
 class PyAVSource(BaseFrameSource):
@@ -73,8 +128,14 @@ class PyAVSource(BaseFrameSource):
         decoder_thread_type: str = "AUTO",
         decoder_threads: int = 0,
         colour_conversion: str = "to_ndarray",
+        live_buffer: str = "none",
         av_module: Any = None,
     ) -> None:
+        if live_buffer not in LIVE_BUFFER_MODES:
+            raise ValueError(
+                f"Unknown live_buffer {live_buffer!r}. Expected one of "
+                f"{', '.join(LIVE_BUFFER_MODES)}."
+            )
         if colour_conversion not in ("to_ndarray", "reformatter"):
             raise ValueError(
                 f"Unknown colour_conversion {colour_conversion!r}. Expected "
@@ -93,6 +154,16 @@ class PyAVSource(BaseFrameSource):
         self._colour_conversion = colour_conversion
         self._reformatter: Any = None
         self._av = av_module
+        self._live_buffer = live_buffer
+
+        # Reader-thread state (live_buffer == "latest" on a network stream).
+        self._reader: Optional[threading.Thread] = None
+        self._reader_stop = threading.Event()
+        self._slot_lock = threading.Condition()
+        self._slot: Optional[Frame] = None
+        self._reader_done = False
+        self._frames_taken = 0
+        self._frames_overwritten = 0
 
         self._container: Any = None
         self._stream: Any = None
@@ -114,6 +185,11 @@ class PyAVSource(BaseFrameSource):
     @property
     def is_network_stream(self) -> bool:
         return self._uri.lower().startswith(NETWORK_SCHEMES)
+
+    @property
+    def uses_reader_thread(self) -> bool:
+        """Only network streams: a file is a pull source and keeps its pace."""
+        return self._live_buffer == "latest" and self.is_network_stream
 
     def _import_av(self) -> Any:
         if self._av is not None:
@@ -261,16 +337,57 @@ class PyAVSource(BaseFrameSource):
     def start(self) -> None:
         if self._is_running:
             return
+        # Opened on the caller's thread so a bad URL still raises where the
+        # camera supervisor can report it (camera.failed), threaded or not.
         self._open_container()
         self._frame_count = 0
         self._is_running = True
+        if self.uses_reader_thread:
+            self._reader_stop.clear()
+            with self._slot_lock:
+                self._slot = None
+                self._reader_done = False
+            self._frames_taken = 0
+            self._frames_overwritten = 0
+            self._reader = threading.Thread(
+                target=self._reader_loop,
+                name=f"ingest-{self._source_id}",
+                daemon=True,
+            )
+            self._reader.start()
 
     def stop(self) -> None:
         if not self._is_running:
             return
         self._is_running = False
-        self._close_container()
-        logger.info("[%s] stopped after %d frames.", self._source_id, self._frame_count)
+        if self._reader is not None:
+            self._reader_stop.set()
+            with self._slot_lock:
+                self._slot_lock.notify_all()
+            # The reader owns the container while it runs and closes it on its
+            # way out. A blocked read returns within the socket timeout.
+            self._reader.join(timeout=self._timeout_seconds + 2.0)
+            if self._reader.is_alive():
+                logger.warning(
+                    "[%s] reader thread did not exit within %.0fs; leaving the "
+                    "container to it rather than closing it under a live decode.",
+                    self._source_id,
+                    self._timeout_seconds + 2.0,
+                )
+            self._reader = None
+        else:
+            self._close_container()
+        if self.uses_reader_thread:
+            logger.info(
+                "[%s] stopped after %d frames decoded, %d handed to the pipeline, "
+                "%d replaced by a newer frame before being taken.",
+                self._source_id,
+                self._frame_count,
+                self._frames_taken,
+                self._frames_overwritten,
+            )
+        else:
+            logger.info("[%s] stopped after %d frames.", self._source_id, self._frame_count)
 
     def _close_container(self) -> None:
         self._frames = None
@@ -284,10 +401,19 @@ class PyAVSource(BaseFrameSource):
     # -- reading ----------------------------------------------------------
 
     def read(self) -> Optional[Frame]:
-        if not self._is_running or self._frames is None:
+        if not self._is_running:
             return None
+        if self._reader is not None:
+            return self._take_latest()
+        if self._frames is None:
+            return None
+        return self._decode_next()
 
+    def _decode_next(self) -> Optional[Frame]:
+        """Next decoded frame, reconnecting a network stream when it ends."""
         while True:
+            if self._frames is None:
+                return None
             try:
                 av_frame = next(self._frames)
             except StopIteration:
@@ -299,12 +425,46 @@ class PyAVSource(BaseFrameSource):
                 # a file it is the end of what can be trusted, and the caller's
                 # truncation check (streams/local.py) turns a short read into an
                 # error rather than a finished run.
+                if self._reader_stop.is_set():
+                    return None
                 logger.warning("[%s] decode error: %s", self._source_id, exc)
                 if self._reconnect():
                     continue
                 return None
 
             return self._to_frame(av_frame)
+
+    # -- reader thread (live_buffer: latest) ------------------------------
+
+    def _reader_loop(self) -> None:
+        try:
+            while not self._reader_stop.is_set():
+                frame = self._decode_next()
+                if frame is None:
+                    break
+                with self._slot_lock:
+                    if self._slot is not None:
+                        self._frames_overwritten += 1
+                    self._slot = frame
+                    self._slot_lock.notify()
+        except Exception:  # pragma: no cover - reported, then treated as end
+            logger.exception("[%s] reader thread failed", self._source_id)
+        finally:
+            self._close_container()
+            with self._slot_lock:
+                self._reader_done = True
+                self._slot_lock.notify_all()
+
+    def _take_latest(self) -> Optional[Frame]:
+        """Newest decoded frame; blocks until one arrives or the stream ends."""
+        with self._slot_lock:
+            while self._slot is None and not self._reader_done and self._is_running:
+                self._slot_lock.wait(timeout=0.5)
+            frame = self._slot
+            self._slot = None
+        if frame is not None:
+            self._frames_taken += 1
+        return frame
 
     def _to_frame(self, av_frame: Any) -> Frame:
         self._frame_count += 1
@@ -324,12 +484,14 @@ class PyAVSource(BaseFrameSource):
             # that starts at zero would report the base itself as deviation.
             self.fidelity.observe(self._frame_count, stamp.pts, self._fps)
 
-        image = self._to_bgr(av_frame)
         if not self._width or not self._height:
-            self._height, self._width = image.shape[:2]
+            self._width = int(getattr(av_frame, "width", 0) or 0)
+            self._height = int(getattr(av_frame, "height", 0) or 0)
 
-        return Frame(
-            image=image,
+        # Pixels on demand: a frame the engine decimates away is never
+        # converted (see the module docstring).
+        return LazyFrame(
+            convert=lambda: self._to_bgr(av_frame),
             metadata=FrameMetadata(
                 frame_id=self._frame_count,
                 timestamp=time.time(),
@@ -402,7 +564,8 @@ class PyAVSource(BaseFrameSource):
                 self._reconnect_attempts,
                 backoff,
             )
-            time.sleep(backoff)
+            if self._reader_stop.wait(backoff):
+                return False
             self._close_container()
             try:
                 self._open_container()
@@ -468,8 +631,15 @@ class PyAVSource(BaseFrameSource):
             "duration_seconds": round(self._duration_seconds, 4),
             "decoder_threading": self._threading,
             "colour_conversion": self._colour_conversion,
+            "live_buffer": self._live_buffer,
             "timeline": self.timeline.as_dict(),
         }
+        if self.uses_reader_thread:
+            out["live_reader"] = {
+                "frames_decoded": self._frame_count,
+                "frames_taken": self._frames_taken,
+                "frames_replaced_before_taken": self._frames_overwritten,
+            }
         if self.fidelity is not None:
             out["timeline_fidelity"] = self.fidelity.as_dict()
         return out
