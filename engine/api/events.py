@@ -286,6 +286,8 @@ def engine_health(
     drop_rate: float, cameras: Dict[str, str],
     degraded_components: Optional[Iterable[str]] = None,
     gpu_util: Optional[float] = None, vram_mb: Optional[float] = None,
+    outbox_depth: Optional[int] = None, disk_free_mb: Optional[float] = None,
+    camera_metrics: Optional[Dict[str, Dict[str, float]]] = None,
 ) -> Dict[str, Any]:
     """`models_loaded=False` berarti engine hidup tapi tidak mengenali siapa pun.
 
@@ -303,6 +305,13 @@ def engine_health(
         message["gpu_util"] = gpu_util
     if vram_mb is not None:
         message["vram_mb"] = vram_mb
+    # Fase 1: semuanya opsional, dikirim hanya bila sudah diukur.
+    if outbox_depth is not None:
+        message["outbox_depth"] = int(outbox_depth)
+    if disk_free_mb is not None:
+        message["disk_free_mb"] = float(disk_free_mb)
+    if camera_metrics:
+        message["camera_metrics"] = {k: dict(v) for k, v in camera_metrics.items()}
     return message
 
 

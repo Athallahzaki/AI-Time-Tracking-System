@@ -22,9 +22,13 @@ import logging
 import os
 import queue
 import socket
+import struct
+import sys
 import threading
 import time
 from typing import Any, Callable, Dict, Optional, Tuple
+
+from contracts import handshake_auth
 
 from .outbox import Outbox, SqliteOutbox, _OutboxBase
 
@@ -39,6 +43,21 @@ ControlHandler = Callable[[Dict[str, Any]], Optional[Dict[str, Any]]]
 VIEW_QUEUE_MAX = 120
 EVENT_QUEUE_MAX = 10_000
 
+# Klien yang tersambung wajib mengirim `hello` dalam batas ini. Tanpa batas,
+# satu koneksi TCP yang diam (port scanner, laptop yang nyangkut) menahan
+# handshake selamanya.
+HANDSHAKE_TIMEOUT_SECONDS = 5.0
+# `sendall` ke backend yang berhenti membaca (mati tanpa FIN, jaringan putus)
+# akan menunggu selamanya sambil memegang kunci tulis. Lewat batas ini koneksi
+# diputus; event tetap aman di outbox dan diputar ulang saat backend kembali.
+SEND_TIMEOUT_SECONDS = 15.0
+# Keepalive TCP: peer yang hilang terdeteksi setelah +-IDLE + INTERVAL*COUNT.
+KEEPALIVE_IDLE_SECONDS = 30
+KEEPALIVE_INTERVAL_SECONDS = 10
+KEEPALIVE_COUNT = 3
+# `hello` itu kecil. Baris pertama yang lebih panjang dari ini bukan backend.
+MAX_HELLO_CHARS = 64 * 1024
+
 
 class EngineApi:
     def __init__(
@@ -47,8 +66,22 @@ class EngineApi:
         engine_version: str = "0.1.0",
         models: Optional[Dict[str, str]] = None,
         protocol_version: int = 1,
+        handshake_timeout: float = HANDSHAKE_TIMEOUT_SECONDS,
+        send_timeout: Optional[float] = SEND_TIMEOUT_SECONDS,
+        keepalive: bool = True,
+        auth_key: Optional[str] = None,
     ) -> None:
         self._outbox = outbox if outbox is not None else Outbox()
+        self._handshake_timeout = float(handshake_timeout)
+        self._send_timeout = send_timeout
+        self._keepalive = keepalive
+        # Kunci bersama (P3). None = autentikasi mati, urutan handshake lama.
+        # Kunci yang terlalu pendek ditolak SEKARANG, bukan saat backend pertama
+        # tersambung: engine yang salah konfigurasi wajib gagal start.
+        if auth_key is not None:
+            handshake_auth._key_bytes(auth_key)
+        self._auth_key = auth_key
+        self._auth_failures = 0
         self._engine_version = engine_version
         self._models = models or {
             "detector": "unset", "embedder": "unset", "embedding_version": "unset",
@@ -118,6 +151,7 @@ class EngineApi:
             "dropped_views": float(self._dropped_views),
             "sent_events": float(self._sent_events),
             "connected": 1.0 if self._connection is not None else 0.0,
+            "auth_failures": float(self._auth_failures),
             "latest_seq": float(self._outbox.latest_seq),
         }
 
@@ -151,7 +185,7 @@ class EngineApi:
             server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             server.bind(tcp)
 
-        server.listen(1)
+        server.listen(8)
         self._server = server
         self._socket_path = socket_path
 
@@ -168,12 +202,26 @@ class EngineApi:
             except OSError:
                 break
 
-            logger.info("backend tersambung")
-            try:
-                self._handshake(connection)
-            except (BrokenPipeError, ConnectionResetError, OSError) as error:
-                logger.info("jabat tangan gagal: %s", error)
-                self._close_connection(connection)
+            logger.info("klien tersambung")
+            # Handshake TIDAK dikerjakan di thread accept: klien yang lambat
+            # atau diam tidak boleh menahan klien berikutnya.
+            threading.Thread(
+                target=self._handshake_guarded, args=(connection,),
+                daemon=True, name="engine-api-handshake",
+            ).start()
+
+    def _handshake_guarded(self, connection: socket.socket) -> None:
+        try:
+            self._handshake(connection)
+        except socket.timeout:
+            logger.info("klien tidak mengirim hello dalam %.1f dtk; diputus", self._handshake_timeout)
+            self._close_connection(connection)
+        except OSError as error:
+            logger.info("jabat tangan gagal: %s", error)
+            self._close_connection(connection)
+        except Exception:  # noqa: BLE001 -- baris pertama liar tidak boleh mematikan engine
+            logger.warning("jabat tangan ditolak: pesan pertama tidak valid", exc_info=True)
+            self._close_connection(connection)
 
     def close(self) -> None:
         self._stop.set()
@@ -190,13 +238,27 @@ class EngineApi:
     # ---------------- internal ----------------
 
     def _handshake(self, connection: socket.socket) -> None:
+        connection.settimeout(self._handshake_timeout)
+        server_nonce = None
+        if self._auth_key is not None:
+            # Tantangan dikirim SEBELUM membaca apa pun: klien yang tidak
+            # memegang kunci tidak pernah sampai ke kunci tulis atau kursor.
+            server_nonce = handshake_auth.new_nonce()
+            self._write(connection, {
+                "type": "auth_challenge", "v": 1, "ts": _now(), "channel": "control",
+                "nonce": server_nonce, "algorithm": handshake_auth.ALGORITHM,
+            })
         reader = connection.makefile("r", encoding="utf-8")
-        first = reader.readline()
-        if not first:
+        first = reader.readline(MAX_HELLO_CHARS)
+        if not first or not first.endswith("\n"):
+            # Kosong = klien menutup; tanpa newline = baris terlalu panjang.
             self._close_connection(connection)
             return
 
         hello = json.loads(first)
+        if not isinstance(hello, dict):
+            self._close_connection(connection)
+            return
         if hello.get("type") != "hello":
             # Backend yang lupa hello juga lupa mengirim `last_event_seq`, dan
             # akan kehilangan event tanpa sadar. Menolak di sini lebih baik
@@ -211,6 +273,38 @@ class EngineApi:
 
         last_event_seq = int(hello.get("last_event_seq", 0))
 
+        client_nonce = None
+        if server_nonce is not None:
+            client_nonce = self._verify_hello(hello, server_nonce, last_event_seq)
+            if client_nonce is None:
+                # Diputus SEBELUM koneksi lama disentuh: klien liar tidak boleh
+                # bisa menendang backend sah (E3).
+                self._auth_failures += 1
+                self._write(connection, {
+                    "type": "ack", "v": 1, "ts": _now(), "channel": "control",
+                    "in_reply_to": "hello", "accepted": False, "reason": "auth_failed",
+                })
+                logger.warning("handshake ditolak: autentikasi gagal (%s)", _peer(connection))
+                self._close_connection(connection)
+                return
+
+        # Sejak sini koneksi dianggap backend: baca tanpa batas waktu (backend
+        # boleh diam lama), tapi kirim berbatas dan peer yang hilang terdeteksi.
+        connection.settimeout(None)
+        self._configure_live_socket(connection)
+
+        # Putus koneksi lama SEBELUM mengambil kunci tulis. Thread kirim bisa
+        # sedang tertahan di `sendall` ke koneksi lama sambil memegang kunci
+        # itu; shutdown membangunkannya. Urutan sebaliknya (kunci dulu, putus
+        # kemudian) membuat backend baru menunggu koneksi lama yang mati.
+        with self._connection_lock:
+            stale = self._connection
+            self._connection = None
+            self._generation += 1
+        if stale is not None and stale is not connection:
+            logger.info("koneksi backend lama diputus untuk handshake baru")
+            self._close_connection(stale)
+
         hello_ack = {
             "type": "hello_ack", "v": 1, "ts": _now(), "channel": "control",
             "protocol_version": self._protocol_version,
@@ -224,6 +318,10 @@ class EngineApi:
             # `seq` dimulai ulang (berkas outbox dihapus / engine in-memory
             # restart) alih-alih membuang event baru sebagai "sudah dilihat".
             hello_ack["outbox_id"] = outbox_id
+        if server_nonce is not None and client_nonce is not None:
+            hello_ack["auth"] = {
+                "mac": handshake_auth.hello_ack_mac(self._auth_key, server_nonce, client_nonce),
+            }
 
         with self._write_lock:
             self._write(connection, hello_ack)
@@ -376,6 +474,62 @@ class EngineApi:
         with self._write_lock:
             self._write(connection, message, channel)
 
+    def _verify_hello(self, hello: Dict[str, Any], server_nonce: str, last_event_seq: int) -> Optional[str]:
+        """Kembalikan client_nonce bila hello membuktikan kunci; None bila tidak."""
+        auth = hello.get("auth")
+        if not isinstance(auth, dict):
+            return None
+        client_nonce, mac = auth.get("client_nonce"), auth.get("mac")
+        try:
+            expected = handshake_auth.hello_mac(
+                self._auth_key, server_nonce, client_nonce,
+                str(hello.get("client", "")), last_event_seq,
+            )
+        except (TypeError, ValueError):
+            return None
+        if not handshake_auth.verify(expected, mac):
+            return None
+        return client_nonce
+
+    def _configure_live_socket(self, connection: socket.socket) -> None:
+        """Keepalive + batas waktu kirim. Gagal memasang = dicatat, bukan fatal."""
+        is_tcp = connection.family in (socket.AF_INET, getattr(socket, "AF_INET6", -1))
+        if self._keepalive and is_tcp:
+            try:
+                connection.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                if hasattr(socket, "SIO_KEEPALIVE_VALS"):  # Windows
+                    connection.ioctl(socket.SIO_KEEPALIVE_VALS, (
+                        1, KEEPALIVE_IDLE_SECONDS * 1000, KEEPALIVE_INTERVAL_SECONDS * 1000,
+                    ))
+                else:
+                    for name, value in (
+                        ("TCP_KEEPIDLE", KEEPALIVE_IDLE_SECONDS),
+                        ("TCP_KEEPINTVL", KEEPALIVE_INTERVAL_SECONDS),
+                        ("TCP_KEEPCNT", KEEPALIVE_COUNT),
+                    ):
+                        option = getattr(socket, name, None)
+                        if option is not None:
+                            connection.setsockopt(socket.IPPROTO_TCP, option, value)
+            except OSError:
+                logger.warning("keepalive TCP tidak bisa dipasang", exc_info=True)
+
+        if self._send_timeout:
+            # SO_SNDTIMEO hanya membatasi KIRIM. `settimeout()` tidak dipakai
+            # karena ikut membatasi baca, padahal backend boleh diam lama, dan
+            # reader makefile tidak bisa dipakai lagi setelah sekali timeout.
+            try:
+                if sys.platform == "win32":
+                    value = int(self._send_timeout * 1000)  # DWORD milidetik
+                    connection.setsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO, value)
+                else:
+                    seconds = int(self._send_timeout)
+                    micros = int((self._send_timeout - seconds) * 1_000_000)
+                    connection.setsockopt(
+                        socket.SOL_SOCKET, socket.SO_SNDTIMEO, struct.pack("ll", seconds, micros)
+                    )
+            except OSError:
+                logger.warning("batas waktu kirim tidak bisa dipasang", exc_info=True)
+
     @staticmethod
     def _write(connection: socket.socket, message: Dict[str, Any], channel: Optional[str] = None) -> None:
         payload = dict(message)
@@ -390,6 +544,13 @@ class EngineApi:
         except OSError:
             pass
         connection.close()
+
+
+def _peer(connection: socket.socket) -> str:
+    try:
+        return str(connection.getpeername())
+    except OSError:
+        return "?"
 
 
 def _now() -> str:

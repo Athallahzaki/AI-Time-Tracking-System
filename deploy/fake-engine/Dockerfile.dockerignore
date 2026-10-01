@@ -3,5 +3,7 @@
 !engine/api/
 !engine/tools/__init__.py
 !engine/tools/fake_engine/
+!contracts/__init__.py
+!contracts/handshake_auth.py
 **/__pycache__
 **/*.py[cod]

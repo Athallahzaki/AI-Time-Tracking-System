@@ -72,6 +72,20 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _shared_key(tcp) -> Optional[str]:
+    """Kunci handshake dari env ENGINE_SHARED_KEY (P3). Sengaja bukan argumen
+    CLI: argumen proses bisa dibaca siapa saja lewat `ps`."""
+    key = os.environ.get("ENGINE_SHARED_KEY") or None
+    log = logging.getLogger("engine.runtime")
+    if key is None and tcp is not None and tcp[0] not in ("127.0.0.1", "localhost", "::1"):
+        log.warning(
+            "engine mendengarkan di %s TANPA autentikasi handshake. Host mana pun di "
+            "jaringan bisa membaca event dan menendang backend (P3). Isi ENGINE_SHARED_KEY.",
+            tcp[0],
+        )
+    return key
+
+
 def main(argv: Optional[list] = None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(
@@ -97,6 +111,7 @@ def main(argv: Optional[list] = None) -> int:
             outbox_path=args.outbox,
             target_fps=args.target_fps,
             loop_files=args.loop_files,
+            auth_key=_shared_key(tcp),
         )
     )
 

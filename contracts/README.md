@@ -166,3 +166,10 @@ antara jam 12 dan 13. Backend tidak akan punya data apa pun di jam itu, dan
 lubangnya tidak bisa direkonstruksi belakangan karena tidak pernah ada
 observasinya. Untuk sistem yang mengukur ketidakhadiran, lubang harian yang
 dibuat sendiri adalah hal terakhir yang kalian inginkan.
+
+## Autentikasi handshake (fase 1)
+
+`contracts/handshake_auth.py` adalah satu-satunya tempat pesan kanonik HMAC
+disusun. Engine dan backend mengimpornya; jangan menulis ulang formatnya di sisi
+mana pun. Vektor uji di `tests/test_protocol_phase1.py` berlaku untuk
+implementasi di bahasa lain. Rincian alur ada di `docs/ENGINE_PROTOCOL.md` §8.

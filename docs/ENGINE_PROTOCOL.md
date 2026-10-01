@@ -478,3 +478,66 @@ Engine sungguhan dianggap memenuhi kontrak kalau:
 
 Backend dianggap memenuhi kontrak kalau keempat belas skenario di §6.3 menghasilkan
 `.expected.json` yang benar.
+
+## 8. Perubahan fase 1 (dibekukan 1 Oktober 2026)
+
+Pemilik skema: Engine A. Semua perubahan **tambahan**; `protocol_version` tetap 1
+dan pesan v1 lama tetap lolos (dijaga `contracts/tests/test_protocol_phase1.py`).
+Skema JSON tetap sumber kebenaran; bagian ini merangkum maksudnya.
+
+| Perubahan | Pesan | Masalah |
+|---|---|---|
+| Autentikasi handshake HMAC-SHA256, opsional per konfigurasi | `auth_challenge` (baru), `hello.auth`, `hello_ack.auth` | P3, E3 |
+| ACK event dari backend akhirnya tercantum; boleh bertumpuk | `ack` dua bentuk: balasan (`in_reply_to`, `accepted`) atau `through_seq` | P12 |
+| Metrik per kamera | `engine.health.camera_metrics`, `outbox_depth`, `disk_free_mb` | P17, P18, E10, E11 |
+| Rentang kualitas observasi turun | `camera.degraded.kind`/`since_at`/`lag_seconds`, `camera.recovered` (baru) | E4, E5, E15 |
+| Enrollment dari rekaman CCTV | `enroll_from_track` (baru) → `enroll_result` (alasan baru `track_unavailable`) | dokumen 02 §5 |
+| Penghapusan data wajah | `forget_person` (baru) → `forget_result` (baru) | P14, E13 |
+
+**Handshake beraut.** Bila engine dikonfigurasi dengan kunci bersama, urutannya
+menjadi: engine mengirim `auth_challenge` segera setelah koneksi diterima,
+backend membalas `hello` yang membawa `auth.client_nonce` dan `auth.mac`, engine
+membalas `hello_ack` yang membawa `auth.mac` sebagai bukti balik. MAC yang salah
+dijawab `ack {accepted: false, reason: "auth_failed"}` lalu koneksi ditutup.
+Pesan kanonik HMAC **hanya** disusun di `contracts/handshake_auth.py`; kedua sisi
+mengimpornya dan tidak menulis ulang formatnya. Vektor uji di tes kontrak adalah
+kontrak lintas bahasa. Tanpa kunci, `auth_challenge` tidak dikirim dan urutan
+lama berlaku, jadi engine dan backend bisa diperbarui bergantian.
+
+Batasnya: HMAC hanya membuktikan siapa yang berjabat tangan. Kerahasiaan dan
+integritas aliran setelah itu butuh jaringan privat (VLAN/WireGuard) atau TLS.
+
+**ACK dari backend.** Bentuk `{type: "ack", through_seq}` sudah dipakai backend
+sejak awal tetapi tidak pernah ada di skema, dan dikirim tanpa `ts`. Mulai fase 1
+`ts` wajib. Engine tidak memvalidasi pesan masuk, jadi ini tidak memutus apa pun
+saat runtime; backend tinggal menambahkan `ts` saat mengerjakan ACK bertumpuk.
+
+**`engine.health.cameras` tidak diubah bentuknya.** Peta `camera_id → online |
+degraded | failed` dibekukan. Mengubah nilainya menjadi objek akan mematahkan
+backend lama; angka per kamera masuk ke `camera_metrics` di sebelahnya.
+
+**Rentang degraded.** `camera.degraded` membuka rentang per (`camera_id`, `kind`),
+`camera.recovered` dengan `kind` sama menutupnya; `camera.recovered` tanpa `kind`
+atau `camera.online` baru menutup semuanya. `kind` adalah string bebas seperti
+alasan tolak gambar: yang dikenal `lag`, `frozen_frame`, `scene_change`,
+`low_fps`, `decode_errors`. Engine hanya melaporkan; dampak ke penagihan
+diputuskan backend.
+
+**`forget_person` dijawab bukti, bukan ack**, karena backend wajib bisa
+menunjukkan bahwa penghapusan data wajah selesai. `removed_references: 0` bukan
+galat: penghapusan idempoten.
+
+### 8.1 Status implementasi
+
+| Bagian | Engine asli | Fake engine | Backend |
+|---|---|---|---|
+| Handshake HMAC (`ENGINE_SHARED_KEY`) | Ada | Ada | Belum |
+| `forget_person` → `forget_result` | Ada (store memakai `secure_delete` + checkpoint WAL) | Ada (selalu 0) | Belum |
+| `enroll_from_track` | Belum (butuh cache crop wajah per track) | Ada (`expired` di track_uuid = `track_unavailable`) | Belum |
+| `engine.health.outbox_depth`, `disk_free_mb` | Ada | — | Belum dibaca |
+| `engine.health.camera_metrics`, `camera.degraded.kind`, `camera.recovered` | Belum (ingest, Engine B) | — | Belum |
+| ACK bertumpuk dengan `ts` | Diterima apa adanya | Diabaikan (tidak lagi dibalas "tidak dikenal") | Belum |
+
+Kunci dibaca dari environment, tidak pernah dari argumen CLI (argumen proses
+terlihat lewat `ps`). Engine kini mengimpor `contracts/`, jadi image/deploy
+engine wajib menyertakan folder itu.

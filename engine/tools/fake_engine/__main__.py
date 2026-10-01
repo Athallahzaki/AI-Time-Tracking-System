@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -170,6 +171,8 @@ def main(argv=None) -> int:
             loop=args.loop,
             seed=args.seed,
             chaos=_parse_chaos(args.chaos),
+            # Kunci handshake dari env, sama dengan engine asli (bukan argumen CLI).
+            auth_key=os.environ.get("ENGINE_SHARED_KEY") or None,
         )
         try:
             server.serve_forever()
