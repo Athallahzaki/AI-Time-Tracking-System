@@ -28,6 +28,8 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from contracts import handshake_auth
+
 logger = logging.getLogger("fake_engine.server")
 
 Message = Tuple[str, Dict[str, Any]]
@@ -68,6 +70,7 @@ class FakeEngineServer:
         seed: int = 42,
         chaos: Optional[Dict[str, float]] = None,
         engine_version: str = "fake-0.1.0",
+        auth_key: Optional[str] = None,
     ) -> None:
         if not socket_path and not tcp:
             raise ValueError("butuh --socket atau --tcp")
@@ -79,6 +82,10 @@ class FakeEngineServer:
         self._chaos = chaos or {}
         self._random = random.Random(seed)
         self._engine_version = engine_version
+        # Sama dengan engine asli (P3): backend menguji klien auth-nya di sini.
+        if auth_key is not None:
+            handshake_auth._key_bytes(auth_key)
+        self._auth_key = auth_key
 
         self._outbox = Outbox()
         self._server: Optional[socket.socket] = None
@@ -141,12 +148,22 @@ class FakeEngineServer:
         if self._server is not None:
             self._server.close()
             self._server = None
-        if self._socket_path and os.path.exists(self._socket_path):
-            os.unlink(self._socket_path)
+        if self._socket_path:
+            try:
+                os.unlink(self._socket_path)
+            except FileNotFoundError:
+                pass  # close() dipanggil dua kali (tes + finally serve_forever)
 
     # ---------------- sesi ----------------
 
     def _serve_one(self, connection: socket.socket) -> None:
+        server_nonce = None
+        if self._auth_key is not None:
+            server_nonce = handshake_auth.new_nonce()
+            self._send(connection, "control", {
+                "type": "auth_challenge", "v": 1, "ts": _now(),
+                "nonce": server_nonce, "algorithm": handshake_auth.ALGORITHM,
+            })
         reader = connection.makefile("r", encoding="utf-8")
 
         first = reader.readline()
@@ -173,7 +190,26 @@ class FakeEngineServer:
         last_event_seq = int(hello.get("last_event_seq", 0))
         oldest = self._outbox.oldest_available_seq
 
-        self._send(connection, "control", {
+        auth_reply = None
+        if server_nonce is not None:
+            auth = hello.get("auth") if isinstance(hello.get("auth"), dict) else {}
+            try:
+                expected = handshake_auth.hello_mac(
+                    self._auth_key, server_nonce, auth.get("client_nonce"),
+                    str(hello.get("client", "")), last_event_seq,
+                )
+                valid = handshake_auth.verify(expected, auth.get("mac"))
+            except (TypeError, ValueError):
+                valid = False
+            if not valid:
+                self._send(connection, "control", {"type": "ack", "v": 1, "ts": _now(),
+                                                   "in_reply_to": "hello", "accepted": False,
+                                                   "reason": "auth_failed"})
+                return
+            auth_reply = {"mac": handshake_auth.hello_ack_mac(
+                self._auth_key, server_nonce, auth["client_nonce"])}
+
+        hello_ack = {
             "type": "hello_ack", "v": 1, "ts": _now(),
             "protocol_version": 1,
             "engine_version": self._engine_version,
@@ -184,7 +220,10 @@ class FakeEngineServer:
                 "tracker": "fake-tracker",
             },
             "oldest_available_seq": oldest,
-        })
+        }
+        if auth_reply is not None:
+            hello_ack["auth"] = auth_reply
+        self._send(connection, "control", hello_ack)
 
         if last_event_seq > 0:
             if last_event_seq < oldest - 1 and self._cursor > 0:
@@ -219,6 +258,11 @@ class FakeEngineServer:
     def _handle_control(self, message: Dict[str, Any]) -> List[Dict[str, Any]]:
         message_type = message.get("type")
 
+        if message_type == "ack":
+            # ACK event dari backend (through_seq). Bukan perintah, jadi tidak
+            # dibalas. Sebelumnya dijawab "tidak dikenal" untuk SETIAP event.
+            return []
+
         if message_type in {"set_cameras", "set_roster"}:
             # Di-ack segera; hasilnya menyusul sebagai event. Membuka RTSP bisa
             # makan lima detik dan bisa gagal -- RPC yang menunggu sampai semua
@@ -228,6 +272,26 @@ class FakeEngineServer:
 
         if message_type == "enroll":
             return [self._enroll_result(message)]
+
+        if message_type == "forget_person":
+            # Deterministik: engine palsu tidak menyimpan referensi, jadi 0.
+            return [{"type": "forget_result", "v": 1, "ts": _now(),
+                     "request_id": str(message.get("request_id") or "unknown"),
+                     "person_id": str(message.get("person_id") or ""),
+                     "removed_references": 0}]
+
+        if message_type == "enroll_from_track":
+            # track_uuid yang memuat `expired` = cache crop sudah lewat; lainnya
+            # diterima dengan satu referensi. Cukup untuk menguji kedua jalur UI.
+            track = str(message.get("track_uuid") or "")
+            expired = "expired" in track
+            return [{"type": "enroll_result", "v": 1, "ts": _now(),
+                     "request_id": str(message.get("request_id") or "unknown"),
+                     "accepted": not expired,
+                     "reason": "track_unavailable" if expired else "ok",
+                     "embedding_version": "fake-v1",
+                     "images": [] if expired else [{"id": f"track:{track}", "accepted": True,
+                                                    "quality": 0.8}]}]
 
         return [{"type": "ack", "v": 1, "ts": _now(),
                  "in_reply_to": message_type or "?", "accepted": False,

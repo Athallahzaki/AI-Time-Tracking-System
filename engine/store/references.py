@@ -108,6 +108,10 @@ class SqliteReferenceStore:
         self._db = sqlite3.connect(str(self._path), check_same_thread=False)
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA foreign_keys=ON")
+        # Foto wajah adalah data pribadi spesifik (UU 27/2022). DELETE biasa
+        # hanya menandai halaman bebas; isinya tetap bisa dipulihkan dari berkas.
+        # secure_delete menimpa konten yang dihapus dengan nol (P14, E13).
+        self._db.execute("PRAGMA secure_delete=ON")
         self._db.executescript(
             """
             CREATE TABLE IF NOT EXISTS persons (
@@ -231,6 +235,8 @@ class SqliteReferenceStore:
             removed = cursor.rowcount
             self._db.execute("DELETE FROM persons WHERE person_id = ?", (person_id,))
             self._db.commit()
+            # Salinan lama halaman masih tinggal di berkas -wal sampai checkpoint.
+            self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             return removed
 
     def set_roster(self, persons: Dict[str, int]) -> RosterDiff:

@@ -19,6 +19,10 @@ COPY engine/__init__.py        /app/engine/__init__.py
 COPY engine/api/               /app/engine/api/
 COPY engine/tools/__init__.py  /app/engine/tools/__init__.py
 COPY engine/tools/fake_engine/ /app/engine/tools/fake_engine/
+# Handshake HMAC fase 1: satu-satunya penyusun pesan kanonik ada di contracts/.
+# Hanya dua berkas stdlib ini; validator (jsonschema) tidak ikut.
+COPY contracts/__init__.py       /app/contracts/__init__.py
+COPY contracts/handshake_auth.py /app/contracts/handshake_auth.py
 
 RUN useradd --system --uid 10002 --home-dir /app --shell /usr/sbin/nologin engine
 USER engine

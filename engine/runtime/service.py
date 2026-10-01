@@ -53,6 +53,7 @@ its most expensive form, so the ack says no and says why.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass
@@ -114,6 +115,9 @@ class RuntimeOptions:
     target_fps: Optional[float] = None
     # Ulang video file lokal dari awal saat habis (demo/testing).
     loop_files: bool = False
+    # Kunci bersama handshake (P3). None = autentikasi mati. Diisi dari env
+    # ENGINE_SHARED_KEY oleh __main__, tidak pernah dari argumen CLI.
+    auth_key: Optional[str] = None
 
 
 class EngineRuntime:
@@ -148,6 +152,7 @@ class EngineRuntime:
             outbox=outbox,
             engine_version=self.options.engine_version,
             models=_model_names(self.config, recognize is not None),
+            auth_key=self.options.auth_key,
         )
         self._matcher = matcher
         self._recognize = recognize
@@ -165,6 +170,7 @@ class EngineRuntime:
         self.api.on_control("set_cameras", self._on_set_cameras)
         self.api.on_control("set_roster", self._on_set_roster)
         self.api.on_control("enroll", self._on_enroll)
+        self.api.on_control("forget_person", self._on_forget_person)
 
     # -- emission ---------------------------------------------------------
 
@@ -337,6 +343,30 @@ class EngineRuntime:
                 self._matcher.rebuild()
         return result.to_message(request_id, self.config.recognition.embedding_version, ts)
 
+    def _on_forget_person(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        """Hapus semua referensi + foto orang ini; jawab dengan bukti (P14, E13).
+
+        Dijawab `forget_result`, bukan ack: backend wajib bisa menunjukkan bahwa
+        penghapusan selesai. Idempoten -- orang tanpa referensi menghasilkan 0.
+        Track yang sedang hidup dengan identitas ini kehilangan identitasnya
+        paling lambat saat verifikasi ulang berikutnya (matriks sudah dibangun
+        ulang tanpa orang itu).
+        """
+        request_id = str(message.get("request_id") or "unknown")
+        person_id = str(message.get("person_id") or "")
+        removed = 0
+        if self._store is not None and person_id:
+            with self._emit_lock:
+                removed = int(self._store.delete_person(person_id))
+                if self._matcher is not None:
+                    self._matcher.rebuild()
+        logger.info("forget_person %s: %d referensi dihapus", person_id, removed)
+        return {
+            "type": "forget_result", "v": 1, "ts": events.rfc3339(time.time()),
+            "request_id": request_id, "person_id": person_id,
+            "removed_references": removed,
+        }
+
     # -- periodic ---------------------------------------------------------
 
     def _tick_loop(self) -> None:
@@ -396,8 +426,21 @@ class EngineRuntime:
                 drop_rate=drop_rate,
                 cameras=states,
                 degraded_components=sorted(set(degraded)) or None,
+                outbox_depth=int(api_metrics.get("outbox_depth", 0)),
+                disk_free_mb=self._disk_free_mb(),
             )
         )
+
+    def _disk_free_mb(self) -> Optional[float]:
+        """Ruang kosong di disk outbox (E10). None bila outbox di memori."""
+        if not self.options.outbox_path:
+            return None
+        import shutil
+        try:
+            folder = os.path.dirname(os.path.abspath(self.options.outbox_path))
+            return round(shutil.disk_usage(folder).free / (1024 * 1024), 1)
+        except OSError:
+            return None
 
     # -- inspection -------------------------------------------------------
 

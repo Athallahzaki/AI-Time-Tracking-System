@@ -28,6 +28,8 @@ import threading
 import time
 from typing import Any, Callable, Dict, Optional, Tuple
 
+from contracts import handshake_auth
+
 from .outbox import Outbox, SqliteOutbox, _OutboxBase
 
 logger = logging.getLogger("engine.api")
@@ -67,11 +69,19 @@ class EngineApi:
         handshake_timeout: float = HANDSHAKE_TIMEOUT_SECONDS,
         send_timeout: Optional[float] = SEND_TIMEOUT_SECONDS,
         keepalive: bool = True,
+        auth_key: Optional[str] = None,
     ) -> None:
         self._outbox = outbox if outbox is not None else Outbox()
         self._handshake_timeout = float(handshake_timeout)
         self._send_timeout = send_timeout
         self._keepalive = keepalive
+        # Kunci bersama (P3). None = autentikasi mati, urutan handshake lama.
+        # Kunci yang terlalu pendek ditolak SEKARANG, bukan saat backend pertama
+        # tersambung: engine yang salah konfigurasi wajib gagal start.
+        if auth_key is not None:
+            handshake_auth._key_bytes(auth_key)
+        self._auth_key = auth_key
+        self._auth_failures = 0
         self._engine_version = engine_version
         self._models = models or {
             "detector": "unset", "embedder": "unset", "embedding_version": "unset",
@@ -141,6 +151,7 @@ class EngineApi:
             "dropped_views": float(self._dropped_views),
             "sent_events": float(self._sent_events),
             "connected": 1.0 if self._connection is not None else 0.0,
+            "auth_failures": float(self._auth_failures),
             "latest_seq": float(self._outbox.latest_seq),
         }
 
@@ -228,6 +239,15 @@ class EngineApi:
 
     def _handshake(self, connection: socket.socket) -> None:
         connection.settimeout(self._handshake_timeout)
+        server_nonce = None
+        if self._auth_key is not None:
+            # Tantangan dikirim SEBELUM membaca apa pun: klien yang tidak
+            # memegang kunci tidak pernah sampai ke kunci tulis atau kursor.
+            server_nonce = handshake_auth.new_nonce()
+            self._write(connection, {
+                "type": "auth_challenge", "v": 1, "ts": _now(), "channel": "control",
+                "nonce": server_nonce, "algorithm": handshake_auth.ALGORITHM,
+            })
         reader = connection.makefile("r", encoding="utf-8")
         first = reader.readline(MAX_HELLO_CHARS)
         if not first or not first.endswith("\n"):
@@ -252,6 +272,21 @@ class EngineApi:
             return
 
         last_event_seq = int(hello.get("last_event_seq", 0))
+
+        client_nonce = None
+        if server_nonce is not None:
+            client_nonce = self._verify_hello(hello, server_nonce, last_event_seq)
+            if client_nonce is None:
+                # Diputus SEBELUM koneksi lama disentuh: klien liar tidak boleh
+                # bisa menendang backend sah (E3).
+                self._auth_failures += 1
+                self._write(connection, {
+                    "type": "ack", "v": 1, "ts": _now(), "channel": "control",
+                    "in_reply_to": "hello", "accepted": False, "reason": "auth_failed",
+                })
+                logger.warning("handshake ditolak: autentikasi gagal (%s)", _peer(connection))
+                self._close_connection(connection)
+                return
 
         # Sejak sini koneksi dianggap backend: baca tanpa batas waktu (backend
         # boleh diam lama), tapi kirim berbatas dan peer yang hilang terdeteksi.
@@ -283,6 +318,10 @@ class EngineApi:
             # `seq` dimulai ulang (berkas outbox dihapus / engine in-memory
             # restart) alih-alih membuang event baru sebagai "sudah dilihat".
             hello_ack["outbox_id"] = outbox_id
+        if server_nonce is not None and client_nonce is not None:
+            hello_ack["auth"] = {
+                "mac": handshake_auth.hello_ack_mac(self._auth_key, server_nonce, client_nonce),
+            }
 
         with self._write_lock:
             self._write(connection, hello_ack)
@@ -435,6 +474,23 @@ class EngineApi:
         with self._write_lock:
             self._write(connection, message, channel)
 
+    def _verify_hello(self, hello: Dict[str, Any], server_nonce: str, last_event_seq: int) -> Optional[str]:
+        """Kembalikan client_nonce bila hello membuktikan kunci; None bila tidak."""
+        auth = hello.get("auth")
+        if not isinstance(auth, dict):
+            return None
+        client_nonce, mac = auth.get("client_nonce"), auth.get("mac")
+        try:
+            expected = handshake_auth.hello_mac(
+                self._auth_key, server_nonce, client_nonce,
+                str(hello.get("client", "")), last_event_seq,
+            )
+        except (TypeError, ValueError):
+            return None
+        if not handshake_auth.verify(expected, mac):
+            return None
+        return client_nonce
+
     def _configure_live_socket(self, connection: socket.socket) -> None:
         """Keepalive + batas waktu kirim. Gagal memasang = dicatat, bukan fatal."""
         is_tcp = connection.family in (socket.AF_INET, getattr(socket, "AF_INET6", -1))
@@ -488,6 +544,13 @@ class EngineApi:
         except OSError:
             pass
         connection.close()
+
+
+def _peer(connection: socket.socket) -> str:
+    try:
+        return str(connection.getpeername())
+    except OSError:
+        return "?"
 
 
 def _now() -> str:

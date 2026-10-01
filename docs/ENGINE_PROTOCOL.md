@@ -526,3 +526,18 @@ diputuskan backend.
 **`forget_person` dijawab bukti, bukan ack**, karena backend wajib bisa
 menunjukkan bahwa penghapusan data wajah selesai. `removed_references: 0` bukan
 galat: penghapusan idempoten.
+
+### 8.1 Status implementasi
+
+| Bagian | Engine asli | Fake engine | Backend |
+|---|---|---|---|
+| Handshake HMAC (`ENGINE_SHARED_KEY`) | Ada | Ada | Belum |
+| `forget_person` → `forget_result` | Ada (store memakai `secure_delete` + checkpoint WAL) | Ada (selalu 0) | Belum |
+| `enroll_from_track` | Belum (butuh cache crop wajah per track) | Ada (`expired` di track_uuid = `track_unavailable`) | Belum |
+| `engine.health.outbox_depth`, `disk_free_mb` | Ada | — | Belum dibaca |
+| `engine.health.camera_metrics`, `camera.degraded.kind`, `camera.recovered` | Belum (ingest, Engine B) | — | Belum |
+| ACK bertumpuk dengan `ts` | Diterima apa adanya | Diabaikan (tidak lagi dibalas "tidak dikenal") | Belum |
+
+Kunci dibaca dari environment, tidak pernah dari argumen CLI (argumen proses
+terlihat lewat `ps`). Engine kini mengimpor `contracts/`, jadi image/deploy
+engine wajib menyertakan folder itu.
