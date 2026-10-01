@@ -155,3 +155,22 @@ def test_local_file_loops_when_enabled(tmp_path):
 
     assert make(False) == (1, 0)          # default: file end means finished
     assert make(True) == (4, 3)           # looping: reopened right away, no backoff
+
+
+def test_face_detector_input_size_is_read_from_config(tmp_path):
+    """Crop kepala 60-150 px tidak perlu kanvas 640; ukuran SCRFD wajib bisa
+    diatur dari config (P7), bukan terkunci di konstruktor."""
+    source = open("engine/config/default_config.yaml", encoding="utf-8").read()
+    source = source.replace(
+        "recognition:\n", "recognition:\n  face_detector_input_size: 320\n", 1
+    )
+    path = tmp_path / "config.yaml"
+    path.write_text(source, encoding="utf-8")
+    assert load_config(path).recognition.face_detector_input_size == 320
+    assert load_config("engine/config/default_config.yaml").recognition.face_detector_input_size == 640
+
+
+@pytest.mark.parametrize("size", [0, 300, 2048])
+def test_face_detector_input_size_must_fit_scrfd_strides(size):
+    with pytest.raises(ValueError, match="multiple of 32"):
+        RecognitionConfig(face_detector_input_size=size)

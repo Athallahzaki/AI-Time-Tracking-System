@@ -13,6 +13,10 @@
     { "$ref": "#/$defs/set_roster" },
     { "$ref": "#/$defs/enroll" },
     { "$ref": "#/$defs/enroll_result" },
+    { "$ref": "#/$defs/auth_challenge" },
+    { "$ref": "#/$defs/enroll_from_track" },
+    { "$ref": "#/$defs/forget_person" },
+    { "$ref": "#/$defs/forget_result" },
 
     { "$ref": "#/$defs/presence_interval" },
     { "$ref": "#/$defs/track_started" },
@@ -25,6 +29,7 @@
     { "$ref": "#/$defs/camera_online" },
     { "$ref": "#/$defs/camera_failed" },
     { "$ref": "#/$defs/camera_degraded" },
+    { "$ref": "#/$defs/camera_recovered" },
     { "$ref": "#/$defs/camera_coverage" },
     { "$ref": "#/$defs/engine_health" },
     { "$ref": "#/$defs/snapshot" },
@@ -37,6 +42,12 @@
 
     "_scalars": {
       "description": "Tidak dipakai langsung; hanya wadah dokumentasi tipe dasar."
+    },
+
+    "hex256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "32 byte dalam heksadesimal huruf kecil: nonce atau HMAC-SHA256. Fase 1."
     },
 
     "v": {
@@ -200,6 +211,18 @@
           "type": "integer",
           "minimum": 0,
           "description": "0 berarti backend baru dan tidak meminta replay."
+        },
+        "auth": {
+          "type": "object",
+          "required": ["client_nonce", "mac"],
+          "properties": {
+            "client_nonce": { "$ref": "#/$defs/hex256" },
+            "mac": {
+              "$ref": "#/$defs/hex256",
+              "description": "HMAC-SHA256(kunci bersama, pesan kanonik). Cara menyusun pesan kanonik HANYA di contracts/handshake_auth.py; jangan ditulis ulang di sisi mana pun."
+            }
+          },
+          "description": "Fase 1, wajib bila engine mengirim auth_challenge. Bukti bahwa klien memegang kunci bersama (P3, E3)."
         }
       }
     },
@@ -232,23 +255,41 @@
           "type": "string",
           "minLength": 1,
           "description": "Identitas outbox engine. Berubah = penomoran seq dimulai ulang; backend wajib memulai kursor baru, bukan membuang seq kecil sebagai duplikat."
+        },
+        "auth": {
+          "type": "object",
+          "required": ["mac"],
+          "properties": { "mac": { "$ref": "#/$defs/hex256" } },
+          "description": "Fase 1. Bukti balik bahwa engine juga memegang kunci: backend menolak engine palsu yang menyuntikkan event."
         }
       }
     },
 
     "ack": {
       "x-channel": "control",
-      "x-direction": "engine->backend",
+      "x-direction": "both",
       "allOf": [{ "$ref": "#/$defs/_envelope_control" }],
       "type": "object",
-      "required": ["type", "v", "ts", "in_reply_to", "accepted"],
+      "required": ["type", "v", "ts"],
       "properties": {
         "type": { "const": "ack" },
         "in_reply_to": { "type": "string", "minLength": 1 },
         "accepted": { "type": "boolean" },
-        "reason": { "type": "string" }
+        "reason": { "type": "string" },
+        "through_seq": { "$ref": "#/$defs/seq" }
       },
-      "description": "Ack hanya berarti perintah diterima, bukan selesai. Hasil sebenarnya menyusul sebagai event."
+      "oneOf": [
+        {
+          "required": ["in_reply_to", "accepted"],
+          "not": { "required": ["through_seq"] },
+          "description": "engine->backend: balasan perintah kontrol. Ack hanya berarti perintah diterima, bukan selesai; hasil sebenarnya menyusul sebagai event."
+        },
+        {
+          "required": ["through_seq"],
+          "not": { "anyOf": [{ "required": ["in_reply_to"] }, { "required": ["accepted"] }] },
+          "description": "backend->engine: semua event sampai through_seq sudah tersimpan durabel di backend; engine boleh memangkas outbox. Boleh bertumpuk (tiap N event atau 200 ms, P12). Sebelum fase 1 bentuk ini tidak tercantum di skema dan dikirim tanpa ts."
+        }
+      ]
     },
 
     "replay_gap": {
@@ -354,7 +395,10 @@
         "type": { "const": "enroll_result" },
         "request_id": { "type": "string", "minLength": 1 },
         "accepted": { "type": "boolean" },
-        "reason": { "enum": ["ok", "collision", "insufficient_references", "recognizer_disabled"] },
+        "reason": {
+          "enum": ["ok", "collision", "insufficient_references", "recognizer_disabled", "track_unavailable"],
+          "description": "track_unavailable (fase 1): jawaban enroll_from_track saat crop wajah track itu sudah tidak ada di cache engine."
+        },
         "collides_with": { "$ref": "#/$defs/person_id" },
         "collision_similarity": { "$ref": "#/$defs/similarity" },
         "embedding_version": { "type": "string" },
@@ -587,8 +631,34 @@
         "type": { "const": "camera.degraded" },
         "camera_id": { "$ref": "#/$defs/camera_id" },
         "reason": { "type": "string", "minLength": 1 },
-        "fps": { "type": "number", "minimum": 0 }
-      }
+        "fps": { "type": "number", "minimum": 0 },
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Fase 1. Jenis penurunan kualitas, string bebas seperti image_reject_reason. Yang dikenal: lag, frozen_frame, scene_change, low_fps, decode_errors. Backend memutuskan dampaknya (misal frozen_frame = jangan percaya kehadiran di rentang ini); engine hanya melaporkan."
+        },
+        "since_at": {
+          "$ref": "#/$defs/at",
+          "description": "Fase 1. Awal rentang terdegradasi menurut jam engine. Bisa lebih awal dari ts karena deteksi butuh beberapa detik bukti."
+        },
+        "lag_seconds": { "type": "number", "minimum": 0 }
+      },
+      "description": "Satu camera.degraded membuka rentang per (camera_id, kind); camera.recovered dengan kind yang sama menutupnya."
+    },
+
+    "camera_recovered": {
+      "x-channel": "events",
+      "allOf": [{ "$ref": "#/$defs/_envelope_event" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "seq", "camera_id", "until_at"],
+      "properties": {
+        "type": { "const": "camera.recovered" },
+        "camera_id": { "$ref": "#/$defs/camera_id" },
+        "kind": { "type": "string", "minLength": 1 },
+        "since_at": { "$ref": "#/$defs/at" },
+        "until_at": { "$ref": "#/$defs/at" }
+      },
+      "description": "Fase 1. Menutup rentang camera.degraded. Tanpa kind = semua rentang terbuka kamera itu ditutup. Reconnect (camera.online baru) juga menutup semuanya."
     },
 
     "camera_coverage": {
@@ -627,7 +697,85 @@
         "drop_rate": { "$ref": "#/$defs/confidence01" },
         "cameras": {
           "type": "object",
-          "additionalProperties": { "enum": ["online", "degraded", "failed"] }
+          "additionalProperties": { "enum": ["online", "degraded", "failed"] },
+          "description": "Bentuknya DIBEKUKAN sebagai map status. Angka per kamera ada di camera_metrics; mengubah nilai map ini jadi objek akan mematahkan backend lama."
+        },
+        "camera_metrics": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "lag_seconds": { "type": "number", "minimum": 0, "description": "PTS terbaru yang ter-decode dikurangi PTS yang sedang dianalisis." },
+              "effective_fps": { "type": "number", "minimum": 0 },
+              "frames_dropped_stale": { "type": "integer", "minimum": 0, "description": "Kumulatif sejak stream_epoch berjalan." },
+              "clock_drift_seconds": { "type": "number", "description": "Selisih waktu tiba terhadap offset + pts (minimum jendela). Positif = jam kamera tertinggal." }
+            }
+          },
+          "description": "Fase 1 (P17, P18). Kunci = camera_id. Semua field opsional: engine mengirim yang sudah diukurnya."
+        },
+        "outbox_depth": { "type": "integer", "minimum": 0, "description": "Fase 1 (E11). Event yang belum di-ack." },
+        "disk_free_mb": { "type": "number", "minimum": 0, "description": "Fase 1 (E10). Ruang kosong di disk tempat outbox." }
+      }
+    },
+
+    "auth_challenge": {
+      "x-channel": "control",
+      "x-direction": "engine->backend",
+      "allOf": [{ "$ref": "#/$defs/_envelope_control" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "nonce", "algorithm"],
+      "properties": {
+        "type": { "const": "auth_challenge" },
+        "nonce": { "$ref": "#/$defs/hex256" },
+        "algorithm": { "const": "hmac-sha256" }
+      },
+      "description": "Fase 1 (P3). Bila autentikasi aktif, engine mengirim ini SEBELUM membaca hello; hello wajib membawa auth. Bila tidak aktif, pesan ini tidak pernah dikirim dan urutan lama berlaku."
+    },
+
+    "enroll_from_track": {
+      "x-channel": "control",
+      "x-direction": "backend->engine",
+      "allOf": [{ "$ref": "#/$defs/_envelope_control" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "request_id", "person_id", "enrollment_version", "track_uuid"],
+      "properties": {
+        "type": { "const": "enroll_from_track" },
+        "request_id": { "type": "string", "minLength": 1 },
+        "person_id": { "$ref": "#/$defs/person_id" },
+        "enrollment_version": { "type": "integer", "minimum": 1 },
+        "track_uuid": { "$ref": "#/$defs/track_uuid" },
+        "camera_id": { "$ref": "#/$defs/camera_id" }
+      },
+      "description": "Fase 1. HR menetapkan track tak dikenal sebagai karyawan X (konfirmasi manusia, tidak pernah otomatis). Engine memakai crop wajah terbaik yang di-cache untuk track itu dan menjawab dengan enroll_result ber-request_id sama; track_unavailable bila cache sudah lewat."
+    },
+
+    "forget_person": {
+      "x-channel": "control",
+      "x-direction": "backend->engine",
+      "allOf": [{ "$ref": "#/$defs/_envelope_control" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "request_id", "person_id"],
+      "properties": {
+        "type": { "const": "forget_person" },
+        "request_id": { "type": "string", "minLength": 1 },
+        "person_id": { "$ref": "#/$defs/person_id" }
+      },
+      "description": "Fase 1 (P14, E13). Hapus SEMUA referensi wajah dan foto enrollment orang ini di engine. Dijawab forget_result, bukan ack, karena backend wajib bisa membuktikan penghapusannya selesai."
+    },
+
+    "forget_result": {
+      "x-channel": "control",
+      "x-direction": "engine->backend",
+      "allOf": [{ "$ref": "#/$defs/_envelope_control" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "request_id", "person_id", "removed_references"],
+      "properties": {
+        "type": { "const": "forget_result" },
+        "request_id": { "type": "string", "minLength": 1 },
+        "person_id": { "$ref": "#/$defs/person_id" },
+        "removed_references": {
+          "type": "integer", "minimum": 0,
+          "description": "0 bukan galat: orang itu memang tidak punya referensi. Penghapusan bersifat idempoten."
         }
       }
     },

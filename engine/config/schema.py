@@ -235,6 +235,10 @@ class RecognitionConfig:
     reference_db_path: str = "engine/data/references.sqlite3"
     onnx_providers: Optional[Tuple[str, ...]] = None
     face_detection_threshold: float = 0.5
+    # SCRFD input canvas (pixels, multiple of 32). Runtime crops are head
+    # regions of ~60-150 px, so 640 mostly upscales; 320 is the candidate for
+    # 5 cameras (P7) once similarity on real footage is compared at both.
+    face_detector_input_size: int = 640
     min_face_px: float = 40.0
     match_threshold: Optional[float] = None
     match_margin: Optional[float] = None
@@ -253,6 +257,12 @@ class RecognitionConfig:
             )
         if self.max_requests_per_frame < 0:
             raise ValueError("recognition.max_requests_per_frame must be >= 0.")
+        if (self.face_detector_input_size < 64 or self.face_detector_input_size > 1280
+                or self.face_detector_input_size % 32):
+            raise ValueError(
+                "recognition.face_detector_input_size must be a multiple of 32 in 64..1280 "
+                "(SCRFD strides 8/16/32)."
+            )
         for name in ("max_age_seconds", "retry_interval_seconds",
                      "reverify_interval_seconds"):
             value = getattr(self, name)

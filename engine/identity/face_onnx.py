@@ -8,7 +8,7 @@ Model TIDAK dibundel. Yang dibutuhkan (letakkan di mesin engine):
 
 - detektor: SCRFD ONNX (mis. `det_10g.onnx` / `scrfd_2.5g_bnkps.onnx`), keluaran
   score/bbox/kps per stride 8-16-32 (format insightface).
-- embedder: AuraFace-v1 ONNX (fal/AuraFace-v1, Apache-2.0), input 112x112.
+- embedder: AuraFace-v1 ONNX `glintr100.onnx` (fal/AuraFace-v1, Apache-2.0), input 112x112.
 
 Kontrak ke sisa engine sama dengan yang sudah diuji di `presence/binding.py`:
 `recognizer(track, frame) -> Optional[Evidence]`. Untuk enrollment,
@@ -305,6 +305,7 @@ def build_recognizer(recognition_config: Any) -> Optional[OnnxFaceRecognizer]:
     providers = recognition_config.onnx_providers
     detector = ScrfdDetector(
         detector_path, providers,
+        input_size=getattr(recognition_config, "face_detector_input_size", 640),
         threshold=recognition_config.face_detection_threshold,
     )
     embedder = OnnxFaceEmbedder(embedder_path, providers)

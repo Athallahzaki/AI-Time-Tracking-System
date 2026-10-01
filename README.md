@@ -116,7 +116,7 @@ recognition:
   enabled: true
   recognizer: "onnx_face"
   face_detector_model: "models/scrfd_10g_bnkps.onnx"
-  face_embedder_model: "models/auraface_v1.onnx"
+  face_embedder_model: "models/glintr100.onnx"
 ```
 
 lalu `pip install -r engine/requirements-face.txt`. Model tidak dibundel. Kalau
