@@ -164,6 +164,10 @@ class PyAVSource(BaseFrameSource):
         self._reader_done = False
         self._frames_taken = 0
         self._frames_overwritten = 0
+        # Newest decoded position, written by whichever thread decodes. A pair
+        # (epoch, pts) assigned in one statement, so a reader never sees the pts
+        # of one epoch with the number of another.
+        self._latest_decoded: Optional[Tuple[int, float]] = None
 
         self._container: Any = None
         self._stream: Any = None
@@ -185,6 +189,21 @@ class PyAVSource(BaseFrameSource):
     @property
     def is_network_stream(self) -> bool:
         return self._uri.lower().startswith(NETWORK_SCHEMES)
+
+    @property
+    def latest_decoded(self) -> Optional[Tuple[int, float]]:
+        """(stream_epoch, pts) of the newest decoded frame, or None.
+
+        With the reader thread this runs ahead of what the pipeline is
+        analysing; the difference is the analysis lag (04 §6, P17). Without it,
+        both are the same frame and the lag hides in the socket buffer instead.
+        """
+        return self._latest_decoded
+
+    @property
+    def frames_replaced(self) -> int:
+        """Frames the reader decoded but replaced before the pipeline took them."""
+        return self._frames_overwritten
 
     @property
     def uses_reader_thread(self) -> bool:
@@ -477,6 +496,8 @@ class PyAVSource(BaseFrameSource):
             raw_pts = float(av_frame.time)
 
         stamp = self.timeline.stamp(raw_pts)
+        if stamp.pts is not None:
+            self._latest_decoded = (self.timeline.epoch, float(stamp.pts))
 
         if self.fidelity is not None and stamp.pts is not None and self._fps > 0:
             # The stream-relative value, which is what `(index - 1) / fps` also

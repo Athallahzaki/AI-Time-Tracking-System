@@ -255,11 +255,36 @@ def camera_failed(camera_id: str, now_wallclock: float, reason: str, retry_in_se
     return message
 
 
-def camera_degraded(camera_id: str, now_wallclock: float, reason: str, fps: Optional[float] = None) -> Dict[str, Any]:
+def camera_degraded(
+    camera_id: str, now_wallclock: float, reason: str, fps: Optional[float] = None,
+    kind: Optional[str] = None, since_wallclock: Optional[float] = None,
+    lag_seconds: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Membuka rentang observasi berkualitas turun per (camera_id, kind). Fase 1."""
     message = _envelope("camera.degraded", now_wallclock)
     message.update(camera_id=camera_id, reason=reason)
     if fps is not None:
         message["fps"] = fps
+    if kind is not None:
+        message["kind"] = kind
+    if since_wallclock is not None:
+        message["since_at"] = rfc3339(since_wallclock)
+    if lag_seconds is not None:
+        message["lag_seconds"] = round(float(lag_seconds), 3)
+    return message
+
+
+def camera_recovered(
+    camera_id: str, now_wallclock: float, kind: Optional[str] = None,
+    since_wallclock: Optional[float] = None, until_wallclock: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Menutup rentang camera.degraded dengan kind yang sama. Fase 1."""
+    message = _envelope("camera.recovered", now_wallclock)
+    message.update(camera_id=camera_id, until_at=rfc3339(until_wallclock or now_wallclock))
+    if kind is not None:
+        message["kind"] = kind
+    if since_wallclock is not None:
+        message["since_at"] = rfc3339(since_wallclock)
     return message
 
 

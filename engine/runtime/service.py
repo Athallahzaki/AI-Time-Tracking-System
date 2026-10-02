@@ -428,6 +428,11 @@ class EngineRuntime:
                 degraded_components=sorted(set(degraded)) or None,
                 outbox_depth=int(api_metrics.get("outbox_depth", 0)),
                 disk_free_mb=self._disk_free_mb(),
+                camera_metrics={
+                    camera.spec.camera_id: m
+                    for camera in cameras
+                    for m in [camera.metrics()] if m
+                } or None,
             )
         )
 
@@ -519,7 +524,7 @@ def _protocol_state(camera: CameraSupervisor) -> str:
     """The three words `engine.health` is allowed to use about a camera."""
     if camera.state == "failed":
         return "failed"
-    if camera.state == "online" and camera.alive:
+    if camera.state == "online" and camera.alive and not getattr(camera, "lag_degraded", False):
         return "online"
     return "degraded"
 

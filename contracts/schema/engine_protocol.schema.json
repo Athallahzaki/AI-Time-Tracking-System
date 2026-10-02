@@ -707,7 +707,7 @@
             "properties": {
               "lag_seconds": { "type": "number", "minimum": 0, "description": "PTS terbaru yang ter-decode dikurangi PTS yang sedang dianalisis." },
               "effective_fps": { "type": "number", "minimum": 0 },
-              "frames_dropped_stale": { "type": "integer", "minimum": 0, "description": "Kumulatif sejak stream_epoch berjalan." },
+              "frames_dropped_stale": { "type": "integer", "minimum": 0, "description": "Kumulatif sejak kamera dibuka oleh engine (tidak direset saat reconnect)." },
               "clock_drift_seconds": { "type": "number", "description": "Selisih waktu tiba terhadap offset + pts (minimum jendela). Positif = jam kamera tertinggal." }
             }
           },

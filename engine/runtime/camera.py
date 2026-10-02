@@ -58,6 +58,7 @@ from ..presence.zones import ZONE_INTERIOR
 from ..pipeline.zoning import TrackZoner, ZonePriorityQueue
 from ..ports.frame import Frame
 from ..ports.tracking import Track, TrackState
+from .lag import LagMonitor, lag_between
 
 logger = logging.getLogger("engine.runtime.camera")
 
@@ -163,6 +164,8 @@ class CameraSupervisor:
         self._assembler: Optional[PresenceAssembler] = None
 
         self._epoch: Optional[int] = None
+        # P17: analisis tertinggal dari kamera. Diisi per frame, dibaca health.
+        self._lag = LagMonitor()
         self._last_view_pts: float = -1e9
         self._last_heartbeat: Dict[str, float] = {}
         self._track_born_pts: Dict[str, float] = {}
@@ -416,6 +419,7 @@ class CameraSupervisor:
         elif epoch != self._epoch:
             self._on_reconnect(frame, epoch)
 
+        self._observe_lag(frame, pts)
         self._remember_live(frame, tracks, pts)
         self._heartbeats(pts)
         self._unidentified(pts)
@@ -441,6 +445,8 @@ class CameraSupervisor:
         self._track_born_pts.clear()
         self._unidentified_reported.clear()
         self._epoch = epoch
+        # camera.online menutup semua rentang degraded kamera ini (07 §1.4).
+        self._lag.reset()
         self._announce(
             self.stats.measured_fps,
             wallclock=frame.metadata.pts_wallclock_offset or time.time(),
@@ -645,6 +651,46 @@ class CameraSupervisor:
             return self._assembler.clock_for(self.spec.camera_id)
         except KeyError:
             return None
+
+    def _observe_lag(self, frame: Frame, pts: float) -> None:
+        latest = getattr(self._source, "latest_decoded", None)
+        lag = lag_between(latest, frame.metadata.stream_epoch, pts) if latest is not None else None
+        now = time.time()
+        change = self._lag.observe(now, lag)
+        if change is None:
+            return
+        camera_id = self.spec.camera_id
+        if change.kind == "entered":
+            logger.warning("[%s] analisis tertinggal %.1f dtk dari kamera", camera_id, change.lag_seconds)
+            self._emit_event(events.camera_degraded(
+                camera_id, now, reason=f"analisis tertinggal {change.lag_seconds:.1f} dtk",
+                fps=self._lag.effective_fps, kind="lag",
+                since_wallclock=change.since_wallclock, lag_seconds=change.lag_seconds,
+            ))
+        else:
+            logger.info("[%s] analisis kembali mengejar kamera", camera_id)
+            self._emit_event(events.camera_recovered(
+                camera_id, now, kind="lag",
+                since_wallclock=change.since_wallclock, until_wallclock=now,
+            ))
+
+    @property
+    def lag_degraded(self) -> bool:
+        """Rentang camera.degraded(kind=lag) sedang terbuka."""
+        return self._lag.degraded
+
+    def metrics(self) -> Dict[str, Any]:
+        """Isi engine.health.camera_metrics untuk kamera ini; hanya yang terukur."""
+        out: Dict[str, Any] = {}
+        if self._lag.lag_seconds is not None:
+            out["lag_seconds"] = round(self._lag.lag_seconds, 3)
+        fps = self._lag.effective_fps
+        if fps is not None:
+            out["effective_fps"] = round(fps, 2)
+        replaced = getattr(self._source, "frames_replaced", None)
+        if isinstance(replaced, int):
+            out["frames_dropped_stale"] = replaced
+        return out
 
     def health(self) -> Dict[str, Any]:
         binding = self._binding.health() if self._binding is not None else {}

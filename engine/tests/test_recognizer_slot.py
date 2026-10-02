@@ -160,7 +160,8 @@ def test_local_file_loops_when_enabled(tmp_path):
 def test_face_detector_input_size_is_read_from_config(tmp_path):
     """Crop kepala 60-150 px tidak perlu kanvas 640; ukuran SCRFD wajib bisa
     diatur dari config (P7), bukan terkunci di konstruktor."""
-    source = open("engine/config/default_config.yaml", encoding="utf-8").read()
+    from pathlib import Path
+    source = Path("engine/config/default_config.yaml").read_text(encoding="utf-8")
     source = source.replace(
         "recognition:\n", "recognition:\n  face_detector_input_size: 320\n", 1
     )

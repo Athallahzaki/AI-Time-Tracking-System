@@ -68,6 +68,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="ulang video file lokal dari awal saat habis (demo). Stream "
              "jaringan tidak terpengaruh.",
     )
+    parser.add_argument(
+        "--health-seconds", type=float, default=30.0,
+        help="interval engine.health (default 30). Turunkan ke 2-5 untuk uji lag.",
+    )
     parser.add_argument("--quiet", action="store_true")
     return parser
 
@@ -108,6 +112,7 @@ def main(argv: Optional[list] = None) -> int:
             socket_path=args.socket,
             view_fps=args.view_fps,
             snapshot_interval_seconds=args.snapshot_seconds,
+            health_interval_seconds=args.health_seconds,
             outbox_path=args.outbox,
             target_fps=args.target_fps,
             loop_files=args.loop_files,
