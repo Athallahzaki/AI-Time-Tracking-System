@@ -215,18 +215,29 @@ class DetectorHandle:
         self._shared.warmup()
 
     def detect(self, frame: Frame) -> List[Detection]:
-        image = frame.image
         t0 = time.perf_counter()
-        result = self._shared.infer(image)
+        image = self._input(frame)
         t1 = time.perf_counter()
+        result = self._shared.infer(image)
+        t2 = time.perf_counter()
         self._remember(frame, result)
         detections = self._shared.inner.postprocess(frame, result)
-        # Antre + pra-proses + inferensi di thread dispatcher, lalu pasca-proses di sini.
-        self.last_spans = [("detector_shared_infer", t0, t1), ("detector_post", t1, time.perf_counter())]
+        # Pra-proses di thread kamera, antre + inferensi di dispatcher, pasca-proses di sini.
+        self.last_spans = [("detector_prepare", t0, t1), ("detector_shared_infer", t1, t2),
+                           ("detector_post", t2, time.perf_counter())]
         return detections
 
+    def _input(self, frame: Frame) -> Any:
+        """`Prepared` dari detector dalam (swscale/pre_resize) bila tersedia, kalau tidak gambar BGR."""
+        frame_input = getattr(self._shared.inner, "frame_input", None)
+        return frame_input(frame) if frame_input is not None else frame.image
+
+    @property
+    def wants_lazy_frames(self) -> bool:
+        return bool(getattr(self._shared.inner, "wants_lazy_frames", False))
+
     def predict_raw(self, frame: Frame, confidence: Optional[float] = None) -> Any:
-        result = self._shared.infer(frame.image, confidence=confidence)
+        result = self._shared.infer(self._input(frame), confidence=confidence)
         self._remember(frame, result)
         return result
 

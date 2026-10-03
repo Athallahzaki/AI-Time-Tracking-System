@@ -68,16 +68,24 @@ import contextlib
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, NamedTuple, Optional, Set, Union
 
 import numpy as np
 
 from ..config import resolve_engine_path
 from ..ports.detection import Detection
-from ..ports.frame import Frame
+from ..ports.frame import Frame, frame_hw
 from ..ports.geometry import BoundingBox
 
 logger = logging.getLogger(__name__)
+
+
+class Prepared(NamedTuple):
+    """Input model yang sudah siap: (array, format warna, skala balik atau None)."""
+
+    model_input: Any
+    colour_format: str
+    scale: Optional[tuple]
 
 
 class DFINEDetector:
@@ -106,6 +114,7 @@ class DFINEDetector:
         batch_inference: bool = False,
         cuda_graph: Union[bool, str] = False,
         fast_preprocess: bool = False,
+        swscale_resize: bool = False,
     ) -> None:
         self._model_path = self._resolve_model_path(model_path)
         self._conf = confidence_threshold
@@ -130,6 +139,10 @@ class DFINEDetector:
         self._cuda_graph: Union[bool, str] = normalize_cuda_graph(cuda_graph) if self._device != "cpu" else False
         self._fast_preprocess = bool(fast_preprocess)
         self._fast_preprocess_hits = 0
+        # Frame PyAV diperkecil + dikonversi ke RGB oleh swscale dalam satu langkah
+        # dari YUV, tanpa konversi BGR 1080p. Lihat frame_input().
+        self._swscale_resize = bool(swscale_resize)
+        self._swscale_hits = 0
         # (nama, t0, t1) perf_counter dari panggilan detect terakhir; dibaca pipeline.
         self.last_spans: List[Any] = []
 
@@ -292,6 +305,31 @@ class DFINEDetector:
         small = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
         return small, "rgb", (width / size, height / size, height, width)
 
+    @property
+    def wants_lazy_frames(self) -> bool:
+        """Pipeline tidak perlu mengonversi frame lazy ke BGR sebelum detect()."""
+        return self._swscale_resize and self._pre_resize
+
+    def frame_input(self, frame: Frame) -> Prepared:
+        """Input model untuk sebuah frame.
+
+        Dengan `swscale_resize` dan frame PyAV yang belum dikonversi: swscale
+        langsung YUV -> RGB image_size x image_size (INTERPOLASI AREA), tanpa
+        BGR 1080p (±16 ms) dan tanpa cv2.resize + cvtColor (±5 ms). Selain itu
+        jalur lama `_prepare(frame.image)`.
+        """
+        if self.wants_lazy_frames and not getattr(frame, "is_converted", True):
+            scaled = getattr(frame, "scaled_rgb", None)
+            width = int(getattr(frame.metadata, "width", 0) or 0)
+            height = int(getattr(frame.metadata, "height", 0) or 0)
+            size = self._image_size
+            if scaled is not None and width >= size and height >= size:
+                small = scaled(size, size)
+                if small is not None:
+                    self._swscale_hits += 1
+                    return Prepared(small, "rgb", (width / size, height / size, height, width))
+        return Prepared(*self._prepare(frame.image))
+
     def _autocast(self):
         if not self._half:
             return contextlib.nullcontext()
@@ -353,12 +391,19 @@ class DFINEDetector:
             with self._inference():
                 return self._model(model_input, **kwargs)
 
-    def _predict(self, image: np.ndarray, confidence: Optional[float] = None) -> Any:
+    def _predict(self, image: Any, confidence: Optional[float] = None) -> Any:
+        """`image`: ndarray BGR, `Prepared`, atau Frame (lewat frame_input())."""
         if self._model is None:
             raise RuntimeError("LibreYOLO model not initialized.")
 
         t0 = time.perf_counter()
-        model_input, colour_format, scale = self._prepare(image)
+        if isinstance(image, Prepared):
+            prepared = image
+        elif hasattr(image, "metadata"):
+            prepared = self.frame_input(image)
+        else:
+            prepared = Prepared(*self._prepare(image))
+        model_input, colour_format, scale = prepared
         t1 = time.perf_counter()
         result = self._call(model_input, colour_format, confidence)
         if scale is not None:
@@ -375,7 +420,8 @@ class DFINEDetector:
             raise RuntimeError("LibreYOLO model not initialized.")
         if not images:
             return []
-        prepared = [self._prepare(image) for image in images]
+        prepared = [image if isinstance(image, Prepared) else Prepared(*self._prepare(image))
+                     for image in images]
         formats = {colour for _, colour, _ in prepared}
         results: Optional[List[Any]] = None
         if (self._batch_inference and len(images) > 1 and len(formats) == 1
@@ -418,7 +464,7 @@ class DFINEDetector:
         This is intentionally a small integration seam for LibreYOLO's public
         ByteTracker API.  Normal engine callers should use ``detect``.
         """
-        result = self._predict(frame.image, confidence=confidence)
+        result = self._predict(frame, confidence=confidence)
         self._remember_result(frame, result)
         self._refresh_class_names(result)
         return result
@@ -454,7 +500,7 @@ class DFINEDetector:
         logger.info("LibreYOLO D-FINE detector warmup completed.")
 
     def detect(self, frame: Frame) -> List[Detection]:
-        result = self._predict(frame.image)
+        result = self._predict(frame)
         t2 = time.perf_counter()
         self._remember_result(frame, result)
         self._refresh_class_names(result)
@@ -476,7 +522,7 @@ class DFINEDetector:
         confs = _to_numpy(boxes.conf, np.float32)
         class_ids = _to_numpy(boxes.cls, np.float32).astype(int)
 
-        height, width = frame.shape[:2]
+        height, width = frame_hw(frame)
         detections: List[Detection] = []
 
         for box, conf, cls_id_raw in zip(xyxy, confs, class_ids):

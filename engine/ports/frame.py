@@ -120,3 +120,17 @@ class Frame:
     @property
     def width(self) -> int:
         return self.image.shape[1]
+
+
+def frame_hw(frame: "Frame") -> tuple:
+    """(tinggi, lebar) tanpa memaksa konversi piksel bila metadata sudah tahu.
+
+    `frame.shape` membaca `frame.image`, dan untuk frame lazy (PyAV) itu berarti
+    konversi YUV -> BGR 1080p (±16 ms) hanya untuk tahu ukurannya.
+    """
+    meta = getattr(frame, "metadata", None)
+    width = int(getattr(meta, "width", 0) or 0)
+    height = int(getattr(meta, "height", 0) or 0)
+    if width > 0 and height > 0:
+        return height, width
+    return tuple(frame.image.shape[:2])

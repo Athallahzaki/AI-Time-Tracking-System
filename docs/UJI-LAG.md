@@ -247,6 +247,21 @@ Hasil 4060 20:13-20:17: FP32 17,6 ms, FP16 14,4 ms (graph + fast_preprocess). De
 python -m engine.tools.batch_check --source C:\video\uji-siap.mp4 --batch-sizes 1 --half --cuda-graph --fast-preprocess --reference-fp32
 ```
 
+### 3e. Konversi frame langsung ke 640 (`swscale_resize`)
+
+Bench realtime 1 kamera di 4060 (3 Okt 21:28 dan 21:41): span `detector` ±47 ms per frame, terdiri dari `frame_convert` ±16 ms (YUV -> BGR 1080p), `detector_prepare` ±5 ms (cv2.resize + cvtColor), `detector_infer` ±25-29 ms. Jadi ±21 ms CPU per frame dipakai hanya untuk membuat RGB 640x640. swscale bisa membuatnya langsung dari YUV dalam satu langkah, tanpa BGR 1080p.
+
+Pikselnya tidak identik dengan jalur OpenCV (implementasi filter AREA berbeda), jadi cek dulu deteksinya:
+
+```powershell
+python -m pytest engine/tests/test_swscale_resize.py -q
+python -m engine.tools.scaling_check --config engine/config/dfine-m.yaml --source C:\video\uji-siap.mp4 --json bench-out\scaling-4060.json
+```
+
+Alat ini memakai model, half, cuda_graph, fast_preprocess dari config, lalu menjalankan frame yang sama lewat dua jalur. "frame beda di ambang" wajib 0 (atau hanya kotak di tepi ambang, lihat "skor kotak tanpa pasangan maks"). Bila KESIMPULAN "layak dipakai": set `detector.swscale_resize: true` (butuh `pre_resize: true`), ulangi bench. Yang diharapkan: span `frame_convert` hilang, `detector_prepare` turun ke ±2-4 ms.
+
+Catatan: frame yang dipakai rekognisi wajah tetap dikonversi ke BGR penuh, tetapi hanya frame itu dan di thread rekognisi. Sumber non-PyAV (mock, OpenCV) otomatis memakai jalur lama.
+
 ### 4. Lima kamera sungguhan
 
 MediaMTX: jalankan dengan config bawaan exe-nya (`.\mediamtx.exe` tanpa argumen), karena config proyek hanya membuka path `cam01`. Lalu publish lima path dari video yang sama, tanpa encode ulang:

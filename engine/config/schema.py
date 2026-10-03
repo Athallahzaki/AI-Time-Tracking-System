@@ -359,6 +359,10 @@ class DetectorConfig:
     # Pra-proses frame RGB 640x640 (hasil pre_resize) langsung di GPU, bit-identik
     # dengan pra-proses PIL LibreYOLO. Cek: batch_check --fast-preprocess.
     fast_preprocess: bool = False
+    # Frame PyAV: swscale langsung YUV -> RGB 640x640 (AREA), tanpa konversi
+    # BGR 1080p + cv2.resize. Bench 4060: frame_convert ±16 ms + prepare ±5 ms.
+    # Piksel tidak identik dengan cv2 INTER_AREA: cek dengan tools.scaling_check.
+    swscale_resize: bool = False
     # Satu detector untuk semua kamera (engine/perception/shared_detector.py):
     # bobot dimuat sekali, inferensi lewat satu thread dispatcher.
     share_across_cameras: bool = True
