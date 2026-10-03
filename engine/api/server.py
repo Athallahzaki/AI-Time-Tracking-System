@@ -57,6 +57,7 @@ KEEPALIVE_INTERVAL_SECONDS = 10
 KEEPALIVE_COUNT = 3
 # `hello` itu kecil. Baris pertama yang lebih panjang dari ini bukan backend.
 MAX_HELLO_CHARS = 64 * 1024
+ACCEPT_POLL_SECONDS = 0.5   # seberapa cepat Ctrl+C / close() terasa saat menunggu klien
 
 
 class EngineApi:
@@ -196,11 +197,22 @@ class EngineApi:
         if self._server is None:
             raise RuntimeError("panggil listen() dulu")
 
+        # accept() TANPA batas waktu tidak bisa diinterupsi Ctrl+C di Windows:
+        # handler sinyal Python hanya jalan saat thread utama kembali ke bytecode,
+        # dan Winsock accept() tidak kembali sampai ada klien. Engine yang sedang
+        # menunggu backend tidak bisa dihentikan. Jadi tunggu dalam potongan pendek.
+        server = self._server
+        server.settimeout(ACCEPT_POLL_SECONDS)
         while not self._stop.is_set():
             try:
-                connection, _ = self._server.accept()
+                connection, _ = server.accept()
+            except socket.timeout:
+                continue
             except OSError:
                 break
+            # Soket hasil accept bisa mewarisi batas waktu soket pendengar;
+            # jabat tangan memasang batas waktunya sendiri.
+            connection.settimeout(None)
 
             logger.info("klien tersambung")
             # Handshake TIDAK dikerjakan di thread accept: klien yang lambat

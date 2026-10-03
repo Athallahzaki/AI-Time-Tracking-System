@@ -165,3 +165,26 @@ def test_engine_yang_lambat_mulai_tidak_membuat_ringkasan_crash(tmp_path, capsys
     assert lag_probe.main(["--summarize", str(path)]) == 0
     out = capsys.readouterr().out
     assert "SEGAR" in out and "fps analisis: median 7.5" in out and "-0.04" in out
+
+
+def test_median_segar_tapi_lonjakan_tidak_lulus():
+    """Uji 4060 (3 Okt): median 0,5 dtk, tetapi umur 6 dtk dan fps jatuh ke 2,3."""
+    import importlib.util
+    from pathlib import Path
+
+    spec = importlib.util.spec_from_file_location("lag_probe_w", Path("scripts/lag_probe.py"))
+    probe = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(probe)
+    rows = []
+    for i in range(120):
+        t = float(i)
+        age = 6.0 if 60 <= i < 66 else 0.5
+        rows.append({"elapsed_s": t, "camera_id": "cam01", "source": "view", "frame_age_s": age,
+                     "lag_s": "", "fps": "", "drift_s": "", "note": ""})
+        if i % 2 == 0:
+            rows.append({"elapsed_s": t, "camera_id": "cam01", "source": "health", "frame_age_s": "",
+                         "lag_s": 0.1, "fps": 2.5 if 40 <= i < 80 else 8.0,
+                         "drift_s": 1.8 if i == 64 else -0.05, "note": ""})
+    text = "\n".join(probe.summarize(rows, 120.0))
+    assert "TIDAK STABIL" in text
+    assert "terburuk 6.00" in text and "fps turun ke 2.5" in text and "POSITIF" in text

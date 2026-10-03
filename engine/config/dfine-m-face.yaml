@@ -92,11 +92,12 @@ recognition:
   execution: "async"
   worker_queue: 8
   recognizer: "onnx_face"
-  face_detector_model: "engine/models/recognition/scrfd_10g_bnkps.onnx"   # relatif ke folder tempat engine dijalankan
-  face_embedder_model: "engine/models/embedder/glintr100.onnx"
+  face_detector_model: "models/scrfd_10g_bnkps.onnx"   # relatif ke folder tempat engine dijalankan
+  face_embedder_model: "models/glintr100.onnx"
   embedding_version: "auraface-v1"
   reference_db_path: "engine/data/references.sqlite3"
   onnx_providers: ["CUDAExecutionProvider", "CPUExecutionProvider"]
+  onnx_gpu_mem_limit_mb: null     # batas VRAM ORT per sesi, mis. 1024 di 4060 8 GB dengan 5 kamera
   face_detection_threshold: 0.5
   face_detector_input_size: 640
   min_face_px: 40
@@ -111,6 +112,12 @@ detector:
                                  # worth trying on RTX 4060 — measure it. ARCHITECTURE.md §8
   pre_resize: true               # resize to image_size in OpenCV before LibreYOLO; skips
                                  # its full-resolution PIL copies. Compare accuracy once.
+  cudnn_benchmark: false         # true = cuDNN memilih algoritma tercepat (input tetap 640). Ukur di 4060.
+  share_across_cameras: true     # satu D-FINE untuk semua kamera (perception/shared_detector.py)
+  batch_inference: false         # true = frame beberapa kamera dalam satu panggilan; cek dulu dengan
+                                 # python -m engine.tools.batch_check
+  max_batch: 8
+  batch_wait_ms: 4.0             # tunggu kamera lain sebelum menjalankan batch (hanya bila >1 kamera)
 
 tracker:
   backend: "iou"

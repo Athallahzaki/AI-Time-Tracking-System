@@ -88,12 +88,14 @@ def _session(path: str, providers: Optional[Sequence[str]]):
     if not Path(path).is_file():
         raise RecognizerUnavailable(f"berkas model tidak ditemukan: {path}")
     available = ort.get_available_providers()
-    chosen = [p for p in (providers or available) if p in available] or available
-    if "CUDAExecutionProvider" in chosen:
+    # Entri boleh berupa nama atau (nama, opsi) -- opsi dipakai untuk batas VRAM.
+    chosen = [p for p in (providers or available) if _provider_name(p) in available] or available
+    names = [_provider_name(p) for p in chosen]
+    if "CUDAExecutionProvider" in names:
         _preload_cuda_dlls(ort)
     session = ort.InferenceSession(path, providers=chosen)
     active = list(session.get_providers())
-    if "CUDAExecutionProvider" in chosen and "CUDAExecutionProvider" not in active:
+    if "CUDAExecutionProvider" in names and "CUDAExecutionProvider" not in active:
         # onnxruntime TIDAK error saat DLL CUDA/cuDNN tidak cocok: ia menulis
         # peringatan lalu jalan di CPU. Rekognisi di CPU berarti setiap wajah
         # ratusan ms dan uji async/sync tidak bermakna -- jadi berhenti di sini.
@@ -108,6 +110,24 @@ def _session(path: str, providers: Optional[Sequence[str]]):
 
 
 _DLLS_PRELOADED = False
+
+
+def _provider_name(entry) -> str:
+    return entry[0] if isinstance(entry, (tuple, list)) else str(entry)
+
+
+def provider_list(names: Optional[Sequence[str]], gpu_mem_limit_mb: Optional[int]) -> Optional[list]:
+    """Nama provider dari config -> daftar untuk onnxruntime, dengan batas VRAM CUDA.
+
+    `kSameAsRequested`: arena tumbuh sebesar yang diminta, bukan berlipat dua;
+    bersama `gpu_mem_limit`, ORT tidak lagi memakan VRAM yang dibutuhkan D-FINE.
+    """
+    if not gpu_mem_limit_mb:
+        return list(names) if names else None
+    options = {"gpu_mem_limit": int(gpu_mem_limit_mb) * 1024 * 1024,
+               "arena_extend_strategy": "kSameAsRequested"}
+    base = list(names) if names else ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    return [(name, options) if name == "CUDAExecutionProvider" else name for name in base]
 
 
 def _preload_cuda_dlls(ort) -> None:
@@ -336,7 +356,8 @@ def build_recognizer(recognition_config: Any) -> Optional[OnnxFaceRecognizer]:
         raise RecognizerUnavailable(
             "recognition.face_detector_model dan recognition.face_embedder_model wajib diisi"
         )
-    providers = recognition_config.onnx_providers
+    providers = provider_list(recognition_config.onnx_providers,
+                              getattr(recognition_config, "onnx_gpu_mem_limit_mb", None))
     detector = ScrfdDetector(
         detector_path, providers,
         input_size=getattr(recognition_config, "face_detector_input_size", 640),

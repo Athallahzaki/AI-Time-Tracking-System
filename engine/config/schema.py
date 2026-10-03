@@ -264,6 +264,10 @@ class RecognitionConfig:
     embedding_version: str = "auraface-v1"
     reference_db_path: str = "engine/data/references.sqlite3"
     onnx_providers: Optional[Tuple[str, ...]] = None
+    # Batas VRAM arena onnxruntime per sesi (MB). None = tanpa batas (bawaan
+    # ORT: arena membesar dan tidak dikembalikan). Di GPU 8 GB yang dipakai
+    # bersama PyTorch untuk 5 kamera, batas ini mencegah ORT memakan VRAM.
+    onnx_gpu_mem_limit_mb: Optional[int] = None
     face_detection_threshold: float = 0.5
     # SCRFD input canvas (pixels, multiple of 32). Runtime crops are head
     # regions of ~60-150 px, so 640 mostly upscales; 320 is the candidate for
@@ -297,6 +301,8 @@ class RecognitionConfig:
             raise ValueError("recognition.execution must be 'async' or 'sync'.")
         if self.worker_queue < 1:
             raise ValueError("recognition.worker_queue must be >= 1.")
+        if self.onnx_gpu_mem_limit_mb is not None and self.onnx_gpu_mem_limit_mb < 64:
+            raise ValueError("recognition.onnx_gpu_mem_limit_mb must be >= 64 (or unset).")
         if (self.face_detector_input_size < 64 or self.face_detector_input_size > 1280
                 or self.face_detector_input_size % 32):
             raise ValueError(
@@ -343,6 +349,24 @@ class DetectorConfig:
     # image_size on both sides. Pixels differ slightly from PIL's resize, so
     # accuracy is to be compared, not assumed (ARCHITECTURE.md §16).
     pre_resize: bool = False
+    # cuDNN memilih algoritma konvolusi tercepat sekali untuk ukuran input
+    # tetap (640). Frame pertama lebih lambat, sisanya lebih cepat. Ukur dulu.
+    cudnn_benchmark: bool = False
+    # Satu detector untuk semua kamera (engine/perception/shared_detector.py):
+    # bobot dimuat sekali, inferensi lewat satu thread dispatcher.
+    share_across_cameras: bool = True
+    # Gabungkan frame beberapa kamera dalam satu panggilan model. Diperiksa
+    # pada batch pertama; bila LibreYOLO tidak mendukung, kembali per gambar.
+    # Cek kebenaran dan kecepatannya dengan `python -m engine.tools.batch_check`.
+    batch_inference: bool = False
+    max_batch: int = 8
+    batch_wait_ms: float = 4.0
+
+    def __post_init__(self) -> None:
+        if self.max_batch < 1:
+            raise ValueError("detector.max_batch must be >= 1.")
+        if not 0.0 <= self.batch_wait_ms <= 100.0:
+            raise ValueError("detector.batch_wait_ms must be within 0..100.")
 
 
 @dataclass(frozen=True)
