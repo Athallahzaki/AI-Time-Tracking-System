@@ -77,3 +77,24 @@ def test_compare_jumlah_kotak_beda_tidak_cocok():
     b = SimpleNamespace(boxes=Boxes(np.zeros((0, 4)), []))
     assert compare(a, b)[0] is False
     assert compare(a, a)[0] is True
+
+
+def test_vonis_saat_ukuran_1_tercepat_bukan_batch():
+    """Uji 4060 3 Okt 19:28 (LibreYOLO 1.6, cuda_graph): 29,5 / 34,3 / 53,4 ms untuk ukuran 1/2/5.
+    Vonis lama berbunyi "layak dinyalakan (batch_inference: true, max_batch: 1)"."""
+    from engine.tools.batch_check import Report, SizeResult
+
+    report = Report(images=60, reference_ms_per_image=206.8, batch_supported=True, cuda_graph=True,
+                    sizes=[SizeResult(1, 29.5, 7.01), SizeResult(2, 34.3, 6.03, True),
+                           SizeResult(5, 53.4, 3.87, True)])
+    assert "batch TIDAK membantu" in report.verdict and "batch_inference: false" in report.verdict
+    assert "cuda_graph: true" in report.verdict
+
+
+def test_vonis_batch_dibanding_ukuran_1_bukan_eager():
+    from engine.tools.batch_check import Report, SizeResult
+
+    report = Report(images=60, reference_ms_per_image=80.0, batch_supported=True,
+                    sizes=[SizeResult(1, 30.0, 2.67), SizeResult(5, 15.0, 5.33, True)])
+    assert "2.00x lebih cepat per gambar dibanding ukuran 1" in report.verdict
+    assert "max_batch: 5" in report.verdict

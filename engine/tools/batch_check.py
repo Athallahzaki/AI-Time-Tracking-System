@@ -47,6 +47,7 @@ class Report:
     reference_ms_per_image: float
     batch_supported: Optional[bool]
     sizes: List[SizeResult] = field(default_factory=list)
+    cuda_graph: Any = False
 
     @property
     def verdict(self) -> str:
@@ -56,10 +57,20 @@ class Report:
         if wrong:
             return "BATCH MENGUBAH HASIL: jangan nyalakan batch_inference"
         best = max(self.sizes, key=lambda s: s.speedup, default=None)
+        graph = " (cuda_graph aktif; pembanding eager)" if self.cuda_graph else ""
         if best is None or best.speedup < 1.1:
-            return "Batch benar tetapi tidak lebih cepat (<10%): tidak perlu dinyalakan"
-        return (f"Batch benar dan {best.speedup:.2f}x lebih cepat per gambar pada ukuran {best.batch_size}: "
-                f"layak dinyalakan (batch_inference: true, max_batch: {best.batch_size})")
+            return "Tidak lebih cepat (<10%) dari pembanding" + graph + ": tidak perlu dinyalakan"
+        single = next((s for s in self.sizes if s.batch_size == 1), None)
+        if best.batch_size == 1:
+            # Ukuran 1 bukan batch: percepatannya datang dari cuda_graph.
+            return (f"Tercepat pada ukuran 1 ({best.speedup:.2f}x){graph}: batch TIDAK membantu, "
+                    "biarkan batch_inference: false" + ("; cuda_graph: true layak dipakai" if self.cuda_graph else ""))
+        gain = (single.ms_per_image / best.ms_per_image) if single and best.ms_per_image else best.speedup
+        if single and gain < 1.1:
+            return (f"Batch {best.batch_size} hanya {gain:.2f}x dibanding ukuran 1{graph}: "
+                    "biarkan batch_inference: false")
+        return (f"Batch benar dan {gain:.2f}x lebih cepat per gambar dibanding ukuran 1, pada ukuran "
+                f"{best.batch_size}{graph}: layak dinyalakan (batch_inference: true, max_batch: {best.batch_size})")
 
 
 def _boxes(result: Any):
@@ -156,6 +167,7 @@ def run(detector: Any, images: Sequence[np.ndarray], batch_sizes: Sequence[int],
             entry.mismatched_images += 0 if ok else 1
         report.sizes.append(entry)
     report.batch_supported = getattr(detector, "_batch_supported", None)
+    report.cuda_graph = graph_mode
     detector._batch_inference = False
     return report
 

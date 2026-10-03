@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from contracts.validator import SchemaValidator
+from engine.tests import _transport
 from engine.api import (
     EngineApi,
     Outbox,
@@ -259,9 +260,7 @@ def test_view_yang_dibuang_adalah_yang_tertua():
 
 
 def _client(path, last_seq=0, expect=6, timeout=8.0):
-    connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    connection.settimeout(timeout)
-    connection.connect(path)
+    connection = _transport.connect(path, timeout)
     stream = connection.makefile("r", encoding="utf-8")
     connection.sendall((json.dumps({
         "type": "hello", "v": 1, "ts": "2026-09-19T00:00:00.000Z",
@@ -280,12 +279,11 @@ def _client(path, last_seq=0, expect=6, timeout=8.0):
 
 def test_jabat_tangan_replay_dan_lubang_lewat_socket():
     with tempfile.TemporaryDirectory() as tmp:
-        path = str(Path(tmp) / "engine.sock")
         api = EngineApi(outbox=Outbox())
         for index in range(5):
             api.emit_event(dummy_event(index))
 
-        api.listen(socket_path=path)
+        path = _transport.listen(api, tmp)
         threading.Thread(target=api.serve_forever, daemon=True).start()
         time.sleep(0.2)
 
@@ -302,16 +300,13 @@ def test_jabat_tangan_replay_dan_lubang_lewat_socket():
 
 def test_hello_wajib_pesan_pertama():
     with tempfile.TemporaryDirectory() as tmp:
-        path = str(Path(tmp) / "engine.sock")
         api = EngineApi(outbox=Outbox())
-        api.listen(socket_path=path)
+        path = _transport.listen(api, tmp)
         threading.Thread(target=api.serve_forever, daemon=True).start()
         time.sleep(0.2)
 
         try:
-            connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            connection.settimeout(8.0)
-            connection.connect(path)
+            connection = _transport.connect(path, 8.0)
             stream = connection.makefile("r", encoding="utf-8")
             connection.sendall(b'{"type":"set_cameras","v":1,"ts":"x","cameras":[]}\n')
 
@@ -326,12 +321,11 @@ def test_perintah_control_diteruskan_ke_penangan_dan_di_ack_segera():
     """Membuka RTSP bisa makan lima detik dan bisa gagal. Perintah di-ack saat
     diterima, hasilnya menyusul sebagai event."""
     with tempfile.TemporaryDirectory() as tmp:
-        path = str(Path(tmp) / "engine.sock")
         diterima = []
 
         api = EngineApi(outbox=Outbox())
         api.on_control("set_cameras", lambda message: diterima.append(message) or None)
-        api.listen(socket_path=path)
+        path = _transport.listen(api, tmp)
         threading.Thread(target=api.serve_forever, daemon=True).start()
         time.sleep(0.2)
 

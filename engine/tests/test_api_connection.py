@@ -21,6 +21,7 @@ import time
 from pathlib import Path
 
 from engine.api import EngineApi, Outbox
+from engine.tests import _transport
 
 HELLO = {
     "type": "hello", "v": 1, "ts": "2026-09-19T00:00:00.000Z",
@@ -36,19 +37,15 @@ def _event(index: int, pad: str = ""):
     return event
 
 
-def _start(api: EngineApi, tmp: str) -> str:
-    path = str(Path(tmp) / "engine.sock")
-    api.listen(socket_path=path)
+def _start(api: EngineApi, tmp: str):
+    path = _transport.listen(api, tmp)
     threading.Thread(target=api.serve_forever, daemon=True).start()
     time.sleep(0.1)
     return path
 
 
-def _connect(path: str, timeout: float = 3.0) -> socket.socket:
-    connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    connection.settimeout(timeout)
-    connection.connect(path)
-    return connection
+def _connect(path, timeout: float = 3.0) -> socket.socket:
+    return _transport.connect(path, timeout)
 
 
 def _hello(connection: socket.socket, last_seq: int = 0):

@@ -46,8 +46,8 @@ Setelah semua OK, simpan versi persisnya: `pip freeze > bench-out/freeze-<gpu>.t
 |---|---|---|---|
 | `detector.model_path` | LibreDFINEs.pt (S) | mulai S, naik ke M bila cukup | LibreDFINEm.pt (M) |
 | `detector.half` | false (FP16 Pascal lambat) | false sampai diukur | false (FP16 terukur lebih lambat) |
-| `detector.cuda_graph` | true, belum diukur | true | true (57 -> 12,6 ms) |
-| `detector.batch_inference` / `max_batch` | sesuai batch_check | sesuai batch_check | true / 5 bila batch_check setuju |
+| `detector.cuda_graph` | true, belum diukur | true | true (29,5 ms/gambar end-to-end, hasil identik) |
+| `detector.batch_inference` / `max_batch` | sesuai batch_check | sesuai batch_check | false (batch 2/5 lebih lambat per gambar) |
 | `recognition.onnx_gpu_mem_limit_mb` | 1024 | 1024 (VRAM 4-6 GB) | null |
 | `ingest.live_buffer` | latest | latest | latest |
 
