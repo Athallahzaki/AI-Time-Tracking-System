@@ -7,5 +7,5 @@
 # through LibreYOLO; no separate YOLO framework is required.
 # >= 1.6 untuk detector.cuda_graph dan batch sungguhan (predict(batch=N)).
 # 1.5 tetap jalan: cuda_graph mati sendiri dengan satu peringatan.
-libreyolo>=1.5,<2
+libreyolo>=1.6,<2
 Pillow>=10
