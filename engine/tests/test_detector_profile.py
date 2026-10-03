@@ -54,19 +54,53 @@ def test_sampler_dengan_runner_tiruan():
     assert "P8" in summary["pstates"] and summary["sm_max_mhz"] == 2370
 
 
-def test_vonis_cpu_bila_forward_kecil():
-    """Bentuk yang dicurigai di 4060: forward 15 ms dari 84 ms."""
-    p = Profile(param_device="cuda:0", prepare_ms=3, call_ms=81, call_cpu_ms=95,
-                forward_fp32_ms=18, forward_fp16_ms=12)
-    text = " ".join(p.verdicts())
-    assert "PENGHAMBAT DI CPU" in text and "1.50x" in text
+def _profil_4060(**extra):
+    """Angka asli uji RTX 4060, 3 Okt 18:02."""
+    values = dict(param_device="cuda:0", prepare_ms=2.8, call_ms=70.5, call_cpu_ms=69.9,
+                  forward_fp32_ms=56.6, forward_fp16_ms=63.5, gpu_busy_ms=29.7, launches_per_forward=992,
+                  gpu={"sm_mhz_median": 1485, "sm_max_mhz": 3105, "pstates": ["P0", "P4"], "util_pct_median": 23})
+    values.update(extra)
+    return Profile(**values)
+
+
+def test_4060_terikat_peluncuran_kernel_bukan_gpu():
+    text = " ".join(_profil_4060().verdicts())
+    assert "TERIKAT CPU" in text and "29.7 ms dari forward 56.6 ms" in text and "992 kernel" in text
+    assert "AKIBAT GPU menganggur" in text, "clock rendah di sini akibat, bukan sebab"
+    assert "PENGHAMBAT DI GPU" not in text and "GPU TIDAK NAIK CLOCK" not in text
+    assert "0.89x" in text and "op cast" in text
+
+
+def test_tanpa_profiler_pakai_utilisasi():
+    assert _profil_4060(gpu_busy_ms=None).launch_bound is True
+
+
+def test_batch_dan_cuda_graph_dilaporkan():
+    text = " ".join(_profil_4060(batch_forward_ms_per_image=14.0, cuda_graph_ms=18.0).verdicts())
+    assert "satu per satu" in text and "CUDA graph: 18.0 ms (3.14x" in text
+    text = " ".join(_profil_4060(cuda_graph_error="RuntimeError: x").verdicts())
+    assert "gagal direkam" in text
 
 
 def test_vonis_gpu_dan_clock_rendah():
     p = Profile(param_device="cuda:0", prepare_ms=3, call_ms=81, call_cpu_ms=10, forward_fp32_ms=75,
-                gpu={"sm_mhz_median": 600, "sm_max_mhz": 2370, "pstates": ["P5"]})
+                gpu_busy_ms=70, gpu={"sm_mhz_median": 600, "sm_max_mhz": 2370, "pstates": ["P5"],
+                                     "util_pct_median": 97})
     text = " ".join(p.verdicts())
     assert "PENGHAMBAT DI GPU" in text and "TIDAK NAIK CLOCK" in text
+
+
+def test_jumlah_kernel_dan_waktu_sibuk_dari_profiler():
+    from types import SimpleNamespace as E
+
+    from engine.tools.detector_profile import gpu_busy
+
+    events = [E(key="aten::cudnn_convolution", count=1120, self_device_time_total=147050.0),
+              E(key="aten::addmm", count=710, self_device_time_total=32073.0),
+              E(key="cudaLaunchKernel", count=9920, self_device_time_total=0.0),
+              E(key="cuLaunchKernel", count=740, self_cuda_time_total=0.0)]
+    busy, launches = gpu_busy(events, 10)
+    assert busy == 17.9123 and launches == 1066
 
 
 def test_model_di_cpu_langsung_ketahuan():

@@ -33,3 +33,23 @@ Langkah 2 memakai `--no-half`; langkah baru 3b (detector_profile).
 ## Tes
 
 test_detector_profile.py (7). Seluruh suite: 524 passed, 3 skipped; policy_grep bersih.
+
+## Revisi v4 (setelah profil pertama di 4060, 18:02)
+
+Vonis v3 "PENGHAMBAT DI GPU" SALAH. Forward "GPU murni" di PyTorch eager tetap
+dibayar CPU: setiap op diluncurkan satu per satu dari Python. Data 4060:
+
+- forward FP32 56,6 ms, tetapi kernel GPU hanya ±29,7 ms per gambar
+  (torch.profiler: Self CUDA 297 ms / 10 gambar),
+- ±1000 peluncuran kernel per gambar, cudaLaunchKernel 19 us masing-masing
+  (CPU 191 ms / 10 gambar hanya untuk meluncurkan),
+- utilisasi GPU 23-40%, daya 13-18 W, clock turun karena GPU menganggur,
+- FP16 lebih LAMBAT (63,5 ms): autocast menambah op cast = lebih banyak peluncuran.
+
+Alat sekarang juga mengukur: waktu sibuk GPU + jumlah peluncuran per forward,
+forward batch 5 langsung ke modul (apakah batch sungguhan menolong), dan forward
+yang direkam sebagai CUDA graph (perkiraan kecepatan tanpa overhead peluncuran).
+Vonis baru: "TERIKAT CPU (peluncuran kernel)"; clock rendah dilaporkan sebagai
+akibat bila GPU menganggur.
+
+Tes: test_detector_profile.py 10 (memakai angka asli 4060).

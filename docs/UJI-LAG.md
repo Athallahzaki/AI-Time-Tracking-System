@@ -211,7 +211,9 @@ Uji 3 Okt: D-FINE M di 4060 84 ms/gambar, sama dengan GTX 1060, dan FP16 / cudnn
 python -m engine.tools.detector_profile --source C:\video\uji-siap.mp4 --torch-profile bench-out\profil-4060.txt --json bench-out\profil-4060.json
 ```
 
-- "PENGHAMBAT DI CPU": forward GPU murni jauh lebih kecil dari panggilan LibreYOLO penuh. Pra/pasca-proses LibreYOLO yang perlu dibenahi (Engine B); FP16, batching dan TensorRT tidak akan menolong sebelum itu. Kirim `profil-4060.txt` (operasi terberat).
+Alat ini juga mengukur berapa ms GPU benar-benar mengerjakan kernel per forward (torch.profiler), forward batch 5 langsung ke modul, dan forward yang direkam sebagai CUDA graph (`--no-cuda-graph` untuk melewatinya).
+
+- "TERIKAT CPU (peluncuran kernel)": GPU menganggur sebagian besar waktu forward karena CPU meluncurkan ±1000 kernel satu per satu. Hasil 4060 3 Okt: GPU sibuk 29,7 ms dari forward 56,6 ms, utilisasi 23%, daya 13-18 W. Clock GPU rendah di sini akibat, bukan sebab. Jalan keluarnya: CUDA graph / TensorRT / ONNX Runtime / batch sungguhan (lihat baris CUDA graph dan batch 5).
 - "PENGHAMBAT DI GPU" + "GPU TIDAK NAIK CLOCK": masalah daya/mode laptop, bukan kode.
 - "MODEL DI CPU": cek `detector.device` dan `torch.cuda.is_available()`.
 

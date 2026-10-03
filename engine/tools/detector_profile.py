@@ -40,6 +40,9 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 MODULE_ATTRS = ("model", "net", "_model", "module", "detector", "backbone_model")
 OVERHEAD_SHARE = 0.5      # > 50% waktu di luar forward = penghambatnya di CPU
 LOW_CLOCK_SHARE = 0.6     # clock SM median < 60% clock maks = GPU tidak naik clock
+BUSY_SHARE = 0.6          # GPU sibuk < 60% waktu forward = terikat CPU (peluncuran kernel)
+BATCH_PROBE = 5
+LAUNCH_EVENTS = ("cudaLaunchKernel", "cuLaunchKernel", "cudaLaunchKernelExC", "cudaGraphLaunch")
 
 
 @dataclass
@@ -68,6 +71,15 @@ class Profile:
     forward_fp32_ms: Optional[float] = None
     forward_fp16_ms: Optional[float] = None
     forward_error: Optional[str] = None
+    # Berapa lama GPU benar-benar mengerjakan kernel dalam satu forward FP32
+    # (torch.profiler), dan berapa kernel yang diluncurkan untuk itu.
+    gpu_busy_ms: Optional[float] = None
+    launches_per_forward: Optional[float] = None
+    # Forward batch BATCH_PROBE sekaligus, dibagi jumlah gambar.
+    batch_forward_ms_per_image: Optional[float] = None
+    # Forward yang direkam sebagai CUDA graph: satu peluncuran untuk semua kernel.
+    cuda_graph_ms: Optional[float] = None
+    cuda_graph_error: Optional[str] = None
     gpu: Dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -75,37 +87,76 @@ class Profile:
         values = [v for v in (self.forward_fp32_ms, self.forward_fp16_ms) if v]
         return min(values) if values else None
 
+    @property
+    def launch_bound(self) -> Optional[bool]:
+        """GPU menganggur sebagian besar forward = CPU tidak sanggup memberi makan GPU."""
+        if self.gpu_busy_ms is not None and self.forward_fp32_ms:
+            return self.gpu_busy_ms < BUSY_SHARE * self.forward_fp32_ms
+        util = self.gpu.get("util_pct_median")
+        if util is not None:
+            return util < 100 * BUSY_SHARE
+        return None
+
     def verdicts(self) -> List[str]:
         out: List[str] = []
         if self.param_device and "cuda" not in self.param_device:
             out.append(f"MODEL DI {self.param_device.upper()}, BUKAN GPU. Itu sebabnya lambat; cek detector.device "
                        "dan torch.cuda.is_available().")
             return out
-        forward = self.forward_best_ms
+        forward = self.forward_fp32_ms or self.forward_best_ms
         total = self.call_ms + self.prepare_ms
         if forward is None:
             out.append("forward murni tidak terukur (" + (self.forward_error or "modul torch tidak ditemukan")
                        + "); hanya waktu total yang ada.")
-        else:
-            outside = max(0.0, total - forward)
-            share = outside / total if total else 0.0
-            if share > OVERHEAD_SHARE:
-                out.append(f"PENGHAMBAT DI CPU: {outside:.0f} ms dari {total:.0f} ms ({100 * share:.0f}%) terjadi di "
-                           f"luar forward GPU ({forward:.1f} ms). Itu pra/pasca-proses LibreYOLO di Python/CPU. "
-                           "FP16, cudnn.benchmark dan batching tidak akan menolong; TensorRT juga tidak, selama "
-                           "pra/pasca-proses itu tetap di CPU.")
-            else:
-                out.append(f"PENGHAMBAT DI GPU: forward {forward:.1f} ms dari {total:.0f} ms total.")
-            if self.forward_fp32_ms and self.forward_fp16_ms:
-                ratio = self.forward_fp32_ms / self.forward_fp16_ms
-                out.append(f"FP16 vs FP32 di forward murni: {ratio:.2f}x "
-                           + ("(FP16 layak)" if ratio > 1.15 else "(FP16 tidak berarti di sini)"))
+            return out
+
+        bound = self.launch_bound
+        if bound:
+            busy = (f"GPU hanya sibuk {self.gpu_busy_ms:.1f} ms dari forward {forward:.1f} ms "
+                    f"({100 * self.gpu_busy_ms / forward:.0f}%)" if self.gpu_busy_ms is not None
+                    else f"utilisasi GPU median {self.gpu.get('util_pct_median'):.0f}%")
+            launches = (f", ±{self.launches_per_forward:.0f} kernel per gambar"
+                        if self.launches_per_forward else "")
+            out.append(f"TERIKAT CPU (peluncuran kernel): {busy}{launches}. GPU menunggu CPU menyuapi kernel "
+                       "satu per satu (PyTorch eager; di Windows/WDDM tiap peluncuran mahal). Ganti GPU, FP16 "
+                       "dan cudnn.benchmark tidak menolong. Yang menolong: lebih sedikit peluncuran, yaitu "
+                       "CUDA graph, TensorRT/ONNX Runtime, atau batch sungguhan, plus CPU yang tidak dicekik.")
+        elif bound is False:
+            out.append(f"PENGHAMBAT DI GPU: GPU sibuk {self.gpu_busy_ms:.1f} ms dari forward {forward:.1f} ms.")
+
+        outside = max(0.0, total - forward)
+        if total:
+            out.append(f"di luar forward (pra/pasca-proses LibreYOLO + pre_resize): {outside:.0f} ms dari "
+                       f"{total:.0f} ms ({100 * outside / total:.0f}%).")
+        if self.forward_fp32_ms and self.forward_fp16_ms:
+            ratio = self.forward_fp32_ms / self.forward_fp16_ms
+            out.append(f"FP16 vs FP32 di forward murni: {ratio:.2f}x "
+                       + ("(FP16 layak)" if ratio > 1.15 else
+                          "(FP16 tidak berarti; autocast menambah op cast = lebih banyak peluncuran)"))
+        if self.batch_forward_ms_per_image and self.forward_fp32_ms:
+            gain = self.forward_fp32_ms / self.batch_forward_ms_per_image
+            out.append(f"forward batch {BATCH_PROBE} langsung ke modul: {self.batch_forward_ms_per_image:.1f} "
+                       f"ms/gambar ({gain:.2f}x). "
+                       + ("Batch sungguhan menolong; batch_check yang hanya 1,1x berarti LibreYOLO "
+                          "memproses daftar gambar satu per satu." if gain > 1.5 else
+                          "Batch juga tidak menolong di sini."))
+        if self.cuda_graph_ms and self.forward_fp32_ms:
+            out.append(f"CUDA graph: {self.cuda_graph_ms:.1f} ms ({self.forward_fp32_ms / self.cuda_graph_ms:.2f}x "
+                       "dari forward biasa). Ini perkiraan kecepatan setelah overhead peluncuran dihapus "
+                       "(TensorRT biasanya lebih cepat lagi).")
+        elif self.cuda_graph_error:
+            out.append(f"CUDA graph gagal direkam ({self.cuda_graph_error}); model punya operasi yang tidak "
+                       "bisa direkam (sinkronisasi/ukuran dinamis). Jalur yang tersisa: TensorRT/ONNX.")
         sm = self.gpu.get("sm_mhz_median")
         sm_max = self.gpu.get("sm_max_mhz")
         if sm and sm_max and sm < LOW_CLOCK_SHARE * sm_max:
-            out.append(f"GPU TIDAK NAIK CLOCK: SM median {sm:.0f} MHz dari maks {sm_max:.0f} MHz "
-                       f"(P-state {self.gpu.get('pstates')}). Cek mode daya Windows/Razer, charger, "
-                       "NVIDIA Control Panel 'Prefer maximum performance'.")
+            if bound:
+                out.append(f"clock GPU rendah (SM median {sm:.0f} / {sm_max:.0f} MHz) adalah AKIBAT GPU menganggur, "
+                           "bukan sebabnya: driver menurunkan clock karena beban kecil.")
+            else:
+                out.append(f"GPU TIDAK NAIK CLOCK: SM median {sm:.0f} MHz dari maks {sm_max:.0f} MHz "
+                           f"(P-state {self.gpu.get('pstates')}). Cek mode daya Windows/Razer, charger, "
+                           "NVIDIA Control Panel 'Prefer maximum performance'.")
         return out
 
 
@@ -246,6 +297,25 @@ def time_calls(detector: Any, images: Sequence[Any], torch: Any, repeat: int = 2
     return best  # type: ignore[return-value]
 
 
+def _time_batch(module: Any, torch: Any, x: Any, iters: int = 15) -> float:
+    with torch.no_grad():
+        for _ in range(3):
+            module(x)
+        _sync(torch)
+        start = time.perf_counter()
+        for _ in range(iters):
+            module(x)
+        _sync(torch)
+    return 1000 * (time.perf_counter() - start) / iters
+
+
+def _sync_quiet(torch: Any) -> None:
+    try:
+        _sync(torch)
+    except Exception:  # noqa: BLE001 -- setelah capture gagal, stream bisa dalam status error
+        pass
+
+
 def time_forward(module: Any, torch: Any, size: int, device: Any, half: bool, iters: int = 30) -> float:
     x = torch.zeros((1, 3, size, size), device=device)
     autocast = torch.autocast(device_type="cuda", dtype=torch.float16) if half else _Null()
@@ -256,6 +326,55 @@ def time_forward(module: Any, torch: Any, size: int, device: Any, half: bool, it
         start = time.perf_counter()
         for _ in range(iters):
             module(x)
+        _sync(torch)
+    return 1000 * (time.perf_counter() - start) / iters
+
+
+def _device_time_us(event: Any) -> float:
+    for name in ("self_device_time_total", "self_cuda_time_total"):
+        value = getattr(event, name, None)
+        if value:
+            return float(value)
+    return 0.0
+
+
+def gpu_busy(events: Sequence[Any], iters: int) -> Tuple[float, float]:
+    """(ms kernel GPU per forward, peluncuran per forward) dari key_averages()."""
+    busy_us = sum(_device_time_us(e) for e in events)
+    launches = sum(int(getattr(e, "count", 0)) for e in events if getattr(e, "key", "") in LAUNCH_EVENTS)
+    return busy_us / 1000.0 / iters, launches / iters
+
+
+def profile_forward(module: Any, torch: Any, x: Any, iters: int = 10) -> Tuple[float, float]:
+    from torch.profiler import ProfilerActivity, profile as torch_profile
+
+    with torch.no_grad():
+        module(x)
+        _sync(torch)
+        with torch_profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            for _ in range(iters):
+                module(x)
+            _sync(torch)
+    return gpu_busy(prof.key_averages(), iters)
+
+
+def time_cuda_graph(module: Any, torch: Any, x: Any, iters: int = 30) -> float:
+    with torch.no_grad():
+        side = torch.cuda.Stream()
+        side.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(side):
+            for _ in range(3):
+                module(x)
+        torch.cuda.current_stream().wait_stream(side)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            module(x)
+        for _ in range(3):
+            graph.replay()
+        _sync(torch)
+        start = time.perf_counter()
+        for _ in range(iters):
+            graph.replay()
         _sync(torch)
     return 1000 * (time.perf_counter() - start) / iters
 
@@ -279,6 +398,11 @@ def format_profile(p: Profile) -> str:
         f"  panggilan LibreYOLO penuh  {ms(p.call_ms)}   (waktu CPU proses {ms(p.call_cpu_ms)}, info saja)",
         f"  forward GPU murni FP32     {ms(p.forward_fp32_ms)}",
         f"  forward GPU murni FP16     {ms(p.forward_fp16_ms)}",
+        f"  GPU benar-benar sibuk      {ms(p.gpu_busy_ms)} per forward FP32"
+        + (f" (±{p.launches_per_forward:.0f} peluncuran kernel)" if p.launches_per_forward else ""),
+        f"  forward batch {BATCH_PROBE} langsung   {ms(p.batch_forward_ms_per_image)} per gambar",
+        f"  forward sebagai CUDA graph {ms(p.cuda_graph_ms)}"
+        + (f"   (gagal: {p.cuda_graph_error})" if p.cuda_graph_error else ""),
     ]
     if p.gpu:
         lines.append(f"  nvidia-smi: P-state {p.gpu.get('pstates')}, SM median {p.gpu.get('sm_mhz_median'):.0f} / "
@@ -292,6 +416,32 @@ def format_profile(p: Profile) -> str:
     return "\n".join(lines)
 
 
+def _measure_module(profile: Profile, module: Any, torch: Any, device: Any, cuda_graph: bool) -> None:
+    size = profile.image_size
+    try:
+        profile.forward_fp32_ms = time_forward(module, torch, size, device, half=False)
+        profile.forward_fp16_ms = time_forward(module, torch, size, device, half=True)
+    except Exception as exc:  # noqa: BLE001 -- forward langsung bisa butuh argumen lain
+        profile.forward_error = f"{type(exc).__name__}: {exc}"
+        return
+    x1 = torch.zeros((1, 3, size, size), device=device)
+    try:
+        profile.gpu_busy_ms, profile.launches_per_forward = profile_forward(module, torch, x1)
+    except Exception as exc:  # noqa: BLE001 -- profiler opsional
+        print(f"torch.profiler gagal: {type(exc).__name__}: {exc}")
+    try:
+        xb = torch.zeros((BATCH_PROBE, 3, size, size), device=device)
+        profile.batch_forward_ms_per_image = _time_batch(module, torch, xb) / BATCH_PROBE
+    except Exception as exc:  # noqa: BLE001 -- model bisa menolak batch > 1
+        print(f"forward batch {BATCH_PROBE} gagal: {type(exc).__name__}: {exc}")
+    if cuda_graph:
+        try:
+            profile.cuda_graph_ms = time_cuda_graph(module, torch, x1)
+        except Exception as exc:  # noqa: BLE001 -- banyak model tidak bisa direkam
+            profile.cuda_graph_error = f"{type(exc).__name__}: {str(exc)[:160]}"
+            _sync_quiet(torch)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default="engine/config/dfine-m.yaml")
@@ -300,6 +450,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--stride", type=int, default=5)
     parser.add_argument("--torch-profile", default=None,
                         help="tulis tabel torch.profiler (operasi terberat) ke berkas ini")
+    parser.add_argument("--no-cuda-graph", action="store_true",
+                        help="lewati percobaan CUDA graph (bila percobaannya membuat proses macet)")
     parser.add_argument("--json", default=None)
     args = parser.parse_args(argv)
 
@@ -334,10 +486,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             was_training = getattr(module, "training", False)
             module.eval()
             try:
-                profile.forward_fp32_ms = time_forward(module, torch, profile.image_size, param.device, half=False)
-                profile.forward_fp16_ms = time_forward(module, torch, profile.image_size, param.device, half=True)
-            except Exception as exc:  # noqa: BLE001 -- forward langsung bisa butuh argumen lain
-                profile.forward_error = f"{type(exc).__name__}: {exc}"
+                _measure_module(profile, module, torch, param.device, cuda_graph=not args.no_cuda_graph)
             finally:
                 module.train(was_training)
     profile.gpu = summarize_samples(sampler.samples)
