@@ -199,7 +199,7 @@ python -m engine.tools.batch_check --source C:\video\uji-siap.mp4 --batch-sizes 
 
 Baca baris KESIMPULAN:
 
-- "BATCH MENGUBAH HASIL": `batch_inference` tetap `false`, apa pun angkanya.
+- "HASIL BERUBAH": pengaturan yang diuji (batch / half / cuda_graph / fast_preprocess) jangan dipakai, apa pun angkanya. Yang dihitung adalah kotak di atas ambang deteksi; kolom `beda-semua` dan `skor-maks` menunjukkan kotak skor rendah (kandidat ByteTrack) yang ikut berbeda, sebagai informasi.
 - "tidak menerima batch": LibreYOLO versi ini tidak mendukung batch; tetap `false`.
 - "layak dinyalakan": set `batch_inference: true` dan `max_batch` sesuai saran.
 

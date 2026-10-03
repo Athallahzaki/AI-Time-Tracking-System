@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from engine.tools.batch_check import compare, format_report, run
 
@@ -56,13 +57,13 @@ def test_batch_yang_benar_lolos():
     report = run(_detector(Model()), _images(), [1, 3], repeat=1)
     assert report.batch_supported is True
     assert all(s.mismatched_images == 0 for s in report.sizes)
-    assert "BATCH MENGUBAH HASIL" not in report.verdict
+    assert "HASIL BERUBAH" not in report.verdict
 
 
 def test_batch_yang_menggeser_kotak_ditolak():
     report = run(_detector(Model(shift_in_batch=3.0)), _images(), [3], repeat=1)
     assert report.sizes[0].mismatched_images == 6
-    assert "BATCH MENGUBAH HASIL" in report.verdict
+    assert "HASIL BERUBAH" in report.verdict
     assert "KESIMPULAN" in format_report(report)
 
 
@@ -98,3 +99,33 @@ def test_vonis_batch_dibanding_ukuran_1_bukan_eager():
                     sizes=[SizeResult(1, 30.0, 2.67), SizeResult(5, 15.0, 5.33, True)])
     assert "2.00x lebih cepat per gambar dibanding ukuran 1" in report.verdict
     assert "max_batch: 5" in report.verdict
+
+
+def test_kotak_skor_rendah_yang_beda_tidak_menggagalkan_vonis():
+    """Uji 4060 20:24 (FP16 vs FP32): 2 gambar beda jumlah kotak. Yang menentukan
+    adalah kotak di atas ambang deteksi; kotak 0,1-an hanya kandidat ByteTrack."""
+    from engine.tools.batch_check import compare_detail
+
+    ref = SimpleNamespace(boxes=Boxes([[0, 0, 10, 10], [50, 50, 60, 60]], [0.9, 0.12]))
+    cand = SimpleNamespace(boxes=Boxes([[0, 0, 10, 10]], [0.9]))
+    ok, _, _, unmatched = compare_detail(ref, cand, 0.5)
+    assert ok and not unmatched
+    ok_all, _, _, unmatched_all = compare_detail(ref, cand, None)
+    assert not ok_all and unmatched_all == [pytest.approx(0.12)]
+
+
+def test_kotak_tepat_di_ambang_tidak_dihitung_hilang():
+    from engine.tools.batch_check import compare_detail
+
+    ref = SimpleNamespace(boxes=Boxes([[0, 0, 10, 10]], [0.505]))
+    cand = SimpleNamespace(boxes=Boxes([[0, 0, 10, 10]], [0.495]))
+    assert compare_detail(ref, cand, 0.5)[0] is True
+
+
+def test_kotak_di_atas_ambang_yang_hilang_tetap_gagal():
+    from engine.tools.batch_check import compare_detail
+
+    ref = SimpleNamespace(boxes=Boxes([[0, 0, 10, 10], [50, 50, 60, 60]], [0.9, 0.8]))
+    cand = SimpleNamespace(boxes=Boxes([[0, 0, 10, 10]], [0.9]))
+    ok, _, _, unmatched = compare_detail(ref, cand, 0.5)
+    assert not ok and unmatched == [pytest.approx(0.8)]
