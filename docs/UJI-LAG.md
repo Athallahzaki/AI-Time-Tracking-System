@@ -184,12 +184,12 @@ python -m engine.tools.ingest_ceiling --work-ms 110 --work torch --json bench-ou
 `batch_check` juga mengukur ms/gambar tanpa batch, sehingga bisa dipakai untuk kombinasi ini:
 
 ```powershell
-python -m engine.tools.batch_check --source C:\video\uji-siap.mp4 --batch-sizes 1
+python -m engine.tools.batch_check --source C:\video\uji-siap.mp4 --batch-sizes 1 --no-half
 python -m engine.tools.batch_check --source C:\video\uji-siap.mp4 --batch-sizes 1 --half
 python -m engine.tools.batch_check --source C:\video\uji-siap.mp4 --batch-sizes 1 --half --cudnn-benchmark
 ```
 
-Bandingkan baris "tanpa batch X ms/gambar". Pakai kombinasi tercepat di `dfine-m.yaml` (`half`, `cudnn_benchmark`). FP16 juga harus dicek secara visual: kotak tidak boleh hilang atau melompat.
+Bandingkan baris "tanpa batch X ms/gambar". Perhatikan baris `half ...` yang dicetak: tanpa `--half`/`--no-half`, nilainya diambil dari config (di uji 3 Okt config sudah `half: true`, jadi "FP32" yang dibandingkan sebenarnya FP16 juga). Pakai kombinasi tercepat di `dfine-m.yaml` (`half`, `cudnn_benchmark`). FP16 juga harus dicek secara visual: kotak tidak boleh hilang atau melompat.
 
 ### 3. Batching: benar dulu, baru cepat
 
@@ -202,6 +202,18 @@ Baca baris KESIMPULAN:
 - "BATCH MENGUBAH HASIL": `batch_inference` tetap `false`, apa pun angkanya.
 - "tidak menerima batch": LibreYOLO versi ini tidak mendukung batch; tetap `false`.
 - "layak dinyalakan": set `batch_inference: true` dan `max_batch` sesuai saran.
+
+### 3b. Ke mana waktu detector pergi (GPU atau CPU)?
+
+Uji 3 Okt: D-FINE M di 4060 84 ms/gambar, sama dengan GTX 1060, dan FP16 / cudnn / batch hampir tidak berpengaruh. Waktu yang tidak ikut turun saat GPU diganti bukan waktu GPU. Pisahkan:
+
+```powershell
+python -m engine.tools.detector_profile --source C:\video\uji-siap.mp4 --torch-profile bench-out\profil-4060.txt --json bench-out\profil-4060.json
+```
+
+- "PENGHAMBAT DI CPU": forward GPU murni jauh lebih kecil dari panggilan LibreYOLO penuh. Pra/pasca-proses LibreYOLO yang perlu dibenahi (Engine B); FP16, batching dan TensorRT tidak akan menolong sebelum itu. Kirim `profil-4060.txt` (operasi terberat).
+- "PENGHAMBAT DI GPU" + "GPU TIDAK NAIK CLOCK": masalah daya/mode laptop, bukan kode.
+- "MODEL DI CPU": cek `detector.device` dan `torch.cuda.is_available()`.
 
 ### 4. Lima kamera sungguhan
 

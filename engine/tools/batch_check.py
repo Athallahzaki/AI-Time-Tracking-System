@@ -191,7 +191,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--stride", type=int, default=5, help="ambil 1 dari tiap N frame supaya bervariasi")
     parser.add_argument("--batch-sizes", default="1,2,5")
     parser.add_argument("--repeat", type=int, default=2)
-    parser.add_argument("--half", action="store_true", help="paksa detector.half: true")
+    precision = parser.add_mutually_exclusive_group()
+    precision.add_argument("--half", action="store_true", help="paksa detector.half: true")
+    precision.add_argument("--no-half", action="store_true",
+                           help="paksa detector.half: false (FP32), apa pun isi config")
     parser.add_argument("--cudnn-benchmark", action="store_true", help="paksa detector.cudnn_benchmark: true")
     parser.add_argument("--json", default=None)
     args = parser.parse_args(argv)
@@ -203,6 +206,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     changes: Dict[str, Any] = {"batch_inference": True}
     if args.half:
         changes["half"] = True
+    if args.no_half:
+        changes["half"] = False
     if args.cudnn_benchmark:
         changes["cudnn_benchmark"] = True
     config = dataclasses.replace(config, source_type="video_file",
