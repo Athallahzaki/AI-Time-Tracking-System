@@ -4,8 +4,12 @@ import EnrolledPersonsList from './EnrolledPersonsList.vue';
 </script>
 
 <template>
-  <div class="grid gap-3 md:grid-cols-2">
-    <EnrollmentForm />
-    <EnrolledPersonsList />
+  <div class="grid gap-5 lg:grid-cols-12">
+    <div class="lg:col-span-5">
+      <EnrollmentForm />
+    </div>
+    <div class="lg:col-span-7">
+      <EnrolledPersonsList />
+    </div>
   </div>
 </template>

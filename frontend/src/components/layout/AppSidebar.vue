@@ -1,7 +1,9 @@
 <script setup>
-import { Bell, Building2, ChevronsUpDown, FileText, History, LayoutDashboard, Settings, ShieldCheck, Users, Video, X } from '@lucide/vue';
+import { computed } from 'vue';
+import { Bell, ChevronsUpDown, FileText, LayoutDashboard, ShieldCheck, UserCheck, Users, Video, X } from '@lucide/vue';
 import { RouterLink, useRoute } from 'vue-router';
 import { Badge } from '../ui/badge';
+import { useEnrollment } from '@/composables/useEnrollment';
 
 defineProps({
   isOpen: {
@@ -13,16 +15,26 @@ defineProps({
 defineEmits(['close']);
 
 const route = useRoute();
+const { enrolledPersons } = useEnrollment();
 
-const mainNav = [
+const mainNav = computed(() => [
   { label: 'Dashboard', icon: LayoutDashboard, to: '/' },
   { label: 'Live Monitoring', icon: Video, to: '/#' },
-  { label: 'Employees', icon: Users, to: '/#' },
+  {
+    label: 'Enrollment Karyawan',
+    icon: UserCheck,
+    to: '/enrollment',
+    badge: enrolledPersons.length > 0 ? `${enrolledPersons.length}` : undefined,
+  },
   { label: 'Reports', icon: FileText, to: '/#' },
   { label: 'Notifications', icon: Bell, to: '/#' },
-];
+]);
 
-const isActive = (path) => route.path === path;
+const isActive = (path) => {
+  if (path === '/') return route.path === '/';
+  if (path === '/enrollment') return route.path === '/enrollment' || route.path === '/employees';
+  return route.path === path;
+};
 </script>
 
 <template>
@@ -77,7 +89,7 @@ const isActive = (path) => route.path === path;
           <component :is="item.icon" class="h-4 w-4" />
           {{ item.label }}
         </span>
-        <Badge v-if="item.badge" variant="secondary" class="h-5 px-1.5 text-xs">
+        <Badge v-if="item.badge" variant="secondary" class="h-5 px-1.5 text-xs bg-indigo-100 text-indigo-700">
           {{ item.badge }}
         </Badge>
       </RouterLink>
