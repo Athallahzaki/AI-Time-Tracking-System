@@ -26,6 +26,7 @@ import struct
 import sys
 import threading
 import time
+import weakref
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from contracts import handshake_auth
@@ -101,10 +102,16 @@ class EngineApi:
 
         self._connection: Optional[socket.socket] = None
         self._connection_lock = threading.Lock()
-        # Satu kunci tulis untuk SEMUA penulisan ke socket: handshake (thread
-        # accept), thread kirim, dan balasan kontrol (thread baca). `sendall`
-        # dari beberapa thread tidak atomik dan bisa menyisipkan NDJSON.
-        self._write_lock = threading.Lock()
+        # Satu kunci tulis PER KONEKSI untuk semua penulisan ke socket itu:
+        # handshake (thread accept), thread kirim, dan balasan kontrol (thread
+        # baca). `sendall` dari beberapa thread tidak atomik dan bisa
+        # menyisipkan NDJSON. Per koneksi, bukan global: di Windows `shutdown`
+        # TIDAK membangunkan `sendall` yang tertahan di thread lain (Linux
+        # membangunkannya), jadi kunci global yang dipegang penulis ke backend
+        # lama yang macet menahan hello_ack backend baru sampai batas kirim
+        # habis (uji Windows 3 Okt, test_backend_lama_yang_macet...).
+        self._write_locks: "weakref.WeakKeyDictionary[socket.socket, threading.Lock]" = weakref.WeakKeyDictionary()
+        self._write_locks_guard = threading.Lock()
         self._server: Optional[socket.socket] = None
         self._sender: Optional[threading.Thread] = None
         self._stop = threading.Event()
@@ -190,8 +197,7 @@ class EngineApi:
         self._server = server
         self._socket_path = socket_path
 
-        self._sender = threading.Thread(target=self._send_loop, daemon=True, name="engine-api-send")
-        self._sender.start()
+        # Thread kirim dibuat per koneksi saat handshake selesai (lihat _handshake).
 
     def serve_forever(self) -> None:
         if self._server is None:
@@ -335,7 +341,7 @@ class EngineApi:
                 "mac": handshake_auth.hello_ack_mac(self._auth_key, server_nonce, client_nonce),
             }
 
-        with self._write_lock:
+        with self._lock_for(connection):
             self._write(connection, hello_ack)
             gap = self._outbox.gap_for(last_event_seq)
             if gap is not None:
@@ -353,9 +359,19 @@ class EngineApi:
                 self._connection = connection
                 self._cursor = max(0, last_event_seq)
                 self._generation += 1
+                generation = self._generation
 
         if previous is not None and previous is not connection:
             self._close_connection(previous)
+        # View lama (kotak dari sebelum backend ini tersambung) tidak berguna.
+        self._discard_views()
+        # Thread kirim sendiri untuk koneksi ini. Thread koneksi lama yang
+        # tertahan di `sendall` (Windows) hanya menahan dirinya sendiri sampai
+        # batas kirim, lalu berhenti karena generasinya sudah lewat.
+        self._sender = threading.Thread(
+            target=self._send_loop, args=(connection, generation), daemon=True, name="engine-api-send"
+        )
+        self._sender.start()
         self._wake.set()
 
         threading.Thread(
@@ -419,35 +435,30 @@ class EngineApi:
     SEND_BATCH = 500
     VIEWS_PER_ROUND = 8
 
-    def _send_loop(self) -> None:
-        """Satu penulis untuk event dan view. Event selalu didahulukan.
+    def _send_loop(self, connection: socket.socket, generation: int) -> None:
+        """Satu penulis event dan view untuk SATU koneksi. Event selalu didahulukan.
 
         Event dibaca dari outbox mulai kursor; kursor maju hanya setelah
         penulisan berhasil ke koneksi yang SAMA (dicek lewat `_generation`).
-        Kalau koneksi berganti di tengah batch, sisa batch ditinggalkan dan
-        handshake berikutnya sudah memasang kursor dari `last_event_seq`.
+        Begitu koneksi berganti, thread ini berhenti; handshake berikutnya
+        memasang kursor dari `last_event_seq` dan thread kirimnya sendiri.
         """
         while not self._stop.is_set():
             self._wake.wait(0.05)
             self._wake.clear()
 
             with self._connection_lock:
-                connection = self._connection
+                if self._generation != generation or self._connection is not connection:
+                    return
                 cursor = self._cursor
-                generation = self._generation
-
-            if connection is None:
-                # View memang boleh hilang; event tetap aman di outbox.
-                self._discard_views()
-                continue
 
             pending = self._outbox.since(cursor, self.SEND_BATCH) if self._outbox.latest_seq > cursor else []
             try:
                 for event in pending:
-                    with self._write_lock:
+                    with self._lock_for(connection):
                         with self._connection_lock:
                             if self._generation != generation:
-                                break
+                                return
                         self._write(connection, event, "events")
                         with self._connection_lock:
                             if self._generation == generation:
@@ -463,10 +474,10 @@ class EngineApi:
                         view = self._views.get_nowait()
                     except queue.Empty:
                         break
-                    with self._write_lock:
+                    with self._lock_for(connection):
                         with self._connection_lock:
                             if self._generation != generation:
-                                break
+                                return
                         self._write(connection, view, "view")
                 if not self._views.empty():
                     self._wake.set()
@@ -474,6 +485,7 @@ class EngineApi:
                 with self._connection_lock:
                     if self._connection is connection:
                         self._connection = None
+                return
 
     def _discard_views(self) -> None:
         while True:
@@ -482,8 +494,16 @@ class EngineApi:
             except queue.Empty:
                 return
 
+    def _lock_for(self, connection: socket.socket) -> threading.Lock:
+        with self._write_locks_guard:
+            lock = self._write_locks.get(connection)
+            if lock is None:
+                lock = threading.Lock()
+                self._write_locks[connection] = lock
+            return lock
+
     def _send(self, connection: socket.socket, message: Dict[str, Any], channel: Optional[str] = None) -> None:
-        with self._write_lock:
+        with self._lock_for(connection):
             self._write(connection, message, channel)
 
     def _verify_hello(self, hello: Dict[str, Any], server_nonce: str, last_event_seq: int) -> Optional[str]:
