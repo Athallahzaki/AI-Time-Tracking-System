@@ -100,7 +100,33 @@ def test_laju_koreksi_dibatasi():
     assert corrector.observe(1.0, -3.0) == pytest.approx(-0.1)
 
 
-@pytest.mark.parametrize("kwargs", [{"start": 0.1, "stop": 0.5}, {"max_rate": 1.0}])
+def test_bias_positif_adalah_delay_bukan_jam():
+    """Uji 4060: thread pembaca tertinggal -> bias +0,5. Itu tidak boleh disapu."""
+    corrector = OffsetCorrector()
+    corrector.observe(0.0, 0.51)
+    total = sum(corrector.observe(float(t), 0.51) for t in range(1, 11))
+    assert 0 < total <= 0.02 + 1e-9, "10 dtk antrean hanya boleh tergeser <= 0,02 dtk"
+
+
+def test_drift_kristal_positif_tetap_terkejar():
+    """Kristal kamera 100 ppm lebih lambat: bias tumbuh 0,36 dtk/jam, dan terkejar."""
+    corrector = OffsetCorrector(start=0.5, stop=0.05)
+    bias, now = 0.0, 0.0
+    for _ in range(3 * 3600):                       # 3 jam, satu observasi per detik
+        now += 1.0
+        bias += 100e-6
+        bias -= corrector.observe(now, bias)
+    assert bias < 0.6, "drift kristal tidak boleh menumpuk tanpa batas"
+
+
+def test_bias_negatif_tetap_cepat():
+    corrector = OffsetCorrector()
+    corrector.observe(0.0, -2.0)
+    assert corrector.observe(1.0, -2.0) == pytest.approx(-0.1)
+
+
+@pytest.mark.parametrize("kwargs", [{"start": 0.1, "stop": 0.5}, {"max_rate": 1.0},
+                                    {"max_rate_late": 0.5}, {"max_rate_late": -0.001}])
 def test_parameter_berbahaya_ditolak(kwargs):
     with pytest.raises(ValueError):
         OffsetCorrector(**kwargs)

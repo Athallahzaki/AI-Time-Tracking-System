@@ -122,6 +122,8 @@ def build_detector(config: EngineConfig) -> Any:
         half=config.detector.half,
         pre_resize=config.detector.pre_resize,
         raw_confidence=raw_confidence,
+        cudnn_benchmark=config.detector.cudnn_benchmark,
+        batch_inference=config.detector.batch_inference,
     )
 
 

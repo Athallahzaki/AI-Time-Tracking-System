@@ -146,6 +146,37 @@ def _fmt(value: Optional[float]) -> str:
     return "-" if value is None else f"{value:.2f}"
 
 
+SPIKE_AGE = 2.0          # umur kotak di atas ini = lonjakan, walau median baik
+FPS_DIP_RATIO = 0.6      # fps di bawah 60% median = ada fase lambat (throttle/power)
+LATE_BIAS = 0.3          # sisa bias positif = thread pembaca/jaringan tertinggal
+
+
+def _p95(values: List[float]) -> float:
+    ordered = sorted(values)
+    return ordered[min(len(ordered) - 1, int(round(0.95 * (len(ordered) - 1))))]
+
+
+def _warnings(ages, fps, drifts) -> List[str]:
+    """Median bisa bilang "segar" padahal ada lonjakan 6 dtk (uji 4060, 3 Okt)."""
+    out: List[str] = []
+    spikes = [(x, y) for x, y in ages if y > SPIKE_AGE]
+    if spikes:
+        worst = max(spikes, key=lambda p: p[1])
+        out.append(f"  PERINGATAN: {len(spikes)} sampel umur > {SPIKE_AGE:.0f} dtk "
+                   f"(terburuk {worst[1]:.2f} dtk pada detik {worst[0]:.0f}). Median menyembunyikannya.")
+    if len(fps) >= 5:
+        median = statistics.median(fps)
+        slow = [v for v in fps if v < FPS_DIP_RATIO * median]
+        if slow:
+            out.append(f"  PERINGATAN: fps turun ke {min(fps):.1f} (median {median:.1f}) di "
+                       f"{100.0 * len(slow) / len(fps):.0f}% sampel health. Fase lambat bertahap/mendadak "
+                       "= throttling CPU/GPU atau mode daya; rekam HWiNFO / nvidia-smi bersamaan.")
+    if drifts and max(drifts) > LATE_BIAS:
+        out.append(f"  PERINGATAN: sisa bias jam POSITIF sampai {max(drifts):+.2f} dtk: semua frame tiba "
+                   "terlambat, thread pembaca/jaringan tertinggal. Ini delay sungguhan, bukan salah jam.")
+    return out
+
+
 def summarize(rows: List[Dict[str, Any]], duration: float) -> List[str]:
     lines: List[str] = []
     cameras = sorted({r["camera_id"] for r in rows if r["camera_id"]})
@@ -178,6 +209,8 @@ def summarize(rows: List[Dict[str, Any]], duration: float) -> List[str]:
         lines.append(f"  view.frame pertama pada detik {start:.0f} probe; {len(ages)} sampel")
         lines.append(f"  umur kotak (median) awal {_fmt(first)} dtk -> akhir {_fmt(last)} dtk; "
                      f"kemiringan {slope if slope is not None else float('nan'):+.3f} dtk/dtk")
+        age_values = [y for _, y in ages]
+        lines.append(f"  umur kotak p95 {_p95(age_values):.2f} dtk, maks {max(age_values):.2f} dtk")
         if lags:
             lines.append(f"  lag decode->analisis: median {statistics.median(y for _, y in lags):.2f} dtk, "
                          f"maks {max(y for _, y in lags):.2f} dtk")
@@ -185,7 +218,7 @@ def summarize(rows: List[Dict[str, Any]], duration: float) -> List[str]:
             lines.append("  lag decode->analisis tidak terlapor (live_buffer bukan 'latest', "
                          "atau --health-seconds terlalu jarang untuk durasi uji).")
         if fps:
-            lines.append(f"  fps analisis: median {statistics.median(fps):.1f}")
+            lines.append(f"  fps analisis: median {statistics.median(fps):.1f}, min {min(fps):.1f}, maks {max(fps):.1f}")
         if drifts:
             lines.append(f"  sisa bias jam (P18): awal {drifts[0]:+.2f} dtk -> akhir {drifts[-1]:+.2f} dtk")
         if identified:
@@ -193,6 +226,8 @@ def summarize(rows: List[Dict[str, Any]], duration: float) -> List[str]:
             lines.append(f"  track.identified: {len(identified)} kali ({', '.join(people[:5])})")
         for note in events:
             lines.append(f"  event: {note}")
+        warnings = _warnings(ages, [float(v) for v in fps], drifts)
+        lines.extend(warnings)
 
         if last is not None and last < FUTURE_AGE:
             lines.append("  KESIMPULAN: DATA TIDAK VALID. Umur kotak negatif: `at` berada di masa depan. "
@@ -205,6 +240,9 @@ def summarize(rows: List[Dict[str, Any]], duration: float) -> List[str]:
             lines.append("  KESIMPULAN: delay BERTAMBAH -> engine lebih lambat dari kamera (P17). "
                          "Cek live_buffer: latest aktif, turunkan target_fps / pakai D-FINE s, "
                          "matikan rekognisi untuk membandingkan (P7).")
+        elif last is not None and last <= FRESH_AGE and warnings:
+            lines.append("  KESIMPULAN: median SEGAR tetapi TIDAK STABIL (lihat PERINGATAN). Belum boleh "
+                         "disebut lulus; ulangi dengan log suhu/clock untuk memastikan penyebab fase lambat.")
         elif last is not None and last <= FRESH_AGE:
             lines.append("  KESIMPULAN: engine SEGAR dan stabil. Kalau dashboard tetap terlihat telat, "
                          "penyebabnya di jalur backend->frontend atau sinkronisasi video "

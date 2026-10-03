@@ -62,3 +62,20 @@ def test_cpu_yang_diminta_sendiri_tidak_ditolak(monkeypatch, tmp_path):
     calls = _fake_ort(monkeypatch, active=["CPUExecutionProvider"])
     face_onnx._session(_model(tmp_path), ["CPUExecutionProvider"])
     assert calls["preload"] == 0
+
+
+def test_batas_vram_dipasang_hanya_pada_cuda():
+    providers = face_onnx.provider_list(["CUDAExecutionProvider", "CPUExecutionProvider"], 512)
+    name, options = providers[0]
+    assert name == "CUDAExecutionProvider"
+    assert options == {"gpu_mem_limit": 512 * 1024 * 1024, "arena_extend_strategy": "kSameAsRequested"}
+    assert providers[1] == "CPUExecutionProvider"
+    assert face_onnx.provider_list(["CPUExecutionProvider"], None) == ["CPUExecutionProvider"]
+    assert face_onnx.provider_list(None, None) is None
+
+
+def test_sesi_menerima_provider_beropsi(monkeypatch, tmp_path):
+    calls = _fake_ort(monkeypatch, active=["CUDAExecutionProvider", "CPUExecutionProvider"])
+    providers = face_onnx.provider_list(["CUDAExecutionProvider", "CPUExecutionProvider"], 256)
+    session = face_onnx._session(_model(tmp_path), providers)
+    assert session.requested[0][0] == "CUDAExecutionProvider" and calls["preload"] == 1

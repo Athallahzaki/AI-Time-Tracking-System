@@ -24,6 +24,17 @@ the forward pass under `torch.autocast(float16)`: weights stay FP32, matmuls
 and convolutions use tensor cores. On Pascal (GTX 1060) FP16 is crippled and
 this is slower; the adapter says so at load time.
 
+**No autograd (always) and `cudnn_benchmark`.** The forward pass runs
+under `torch.no_grad()`: no autograd graph is recorded whatever the wrapper
+does inside. `cudnn_benchmark` lets cuDNN time its convolution
+algorithms once for our fixed 640x640 input; the first frames are slower,
+the rest faster. Measure it before keeping it on.
+
+**Batches (`batch_inference`, `predict_images`).** One call for several
+cameras' frames. Whether LibreYOLO accepts a list and returns one Results per
+image is checked on the first batch; if not, the adapter says so once and runs
+the images one by one, so turning the flag on can never return wrong boxes.
+
 **Low-score boxes for ByteTrack (`raw_confidence`).** The model is asked for
 boxes down to `raw_confidence`, the native `Results` keeps all of them for
 ByteTrack's second association stage, and `detect()` still filters at
@@ -69,6 +80,8 @@ class DFINEDetector:
         pre_resize: bool = False,
         raw_confidence: Optional[float] = None,
         load_model: bool = True,
+        cudnn_benchmark: bool = False,
+        batch_inference: bool = False,
     ) -> None:
         self._model_path = self._resolve_model_path(model_path)
         self._conf = confidence_threshold
@@ -86,6 +99,10 @@ class DFINEDetector:
         self._half = bool(half and self._device != "cpu")
         self._verbose = verbose
         self._pre_resize = bool(pre_resize)
+        self._cudnn_benchmark = bool(cudnn_benchmark)
+        # None = belum dicoba; True/False = hasil percobaan batch pertama.
+        self._batch_inference = bool(batch_inference)
+        self._batch_supported: Optional[bool] = None
 
         self._model: Any = None
         self._class_names: Dict[int, str] = {}
@@ -151,6 +168,14 @@ class DFINEDetector:
             self._raw_conf,
         )
         self._model = LibreYOLO(self._model_path)
+        if self._cudnn_benchmark and self._device != "cpu":
+            try:
+                import torch
+
+                torch.backends.cudnn.benchmark = True
+                logger.info("cudnn.benchmark on: input size is fixed (%d)", self._image_size)
+            except Exception as exc:  # noqa: BLE001 -- optimasi, bukan syarat
+                logger.warning("cudnn.benchmark could not be enabled: %s", exc)
 
         if self._half:
             self._warn_if_fp16_is_slow()
@@ -233,11 +258,23 @@ class DFINEDetector:
 
         return torch.autocast(device_type="cuda", dtype=torch.float16)
 
-    def _predict(self, image: np.ndarray, confidence: Optional[float] = None) -> Any:
-        if self._model is None:
-            raise RuntimeError("LibreYOLO model not initialized.")
+    def _inference(self):
+        """no_grad + autocast. Without torch (unit tests) a no-op.
 
-        model_input, colour_format, scale = self._prepare(image)
+        no_grad, not inference_mode: inference tensors cannot be modified in
+        place outside inference mode, and the Results tensors live on into
+        rescale_result and LibreYOLO's ByteTrack.
+        """
+        stack = contextlib.ExitStack()
+        try:
+            import torch
+        except ImportError:
+            return stack
+        stack.enter_context(torch.no_grad())
+        stack.enter_context(self._autocast())
+        return stack
+
+    def _kwargs(self, colour_format: str, confidence: Optional[float]) -> Dict[str, Any]:
         kwargs: Dict[str, Any] = {
             "conf": self._raw_conf if confidence is None else confidence,
             "iou": self._iou,
@@ -255,11 +292,62 @@ class DFINEDetector:
             kwargs["classes"] = sorted(self._target_class_ids)
         # `half` and `verbose` are deliberately NOT passed: LibreYOLO accepts
         # both and does nothing with them (it says so in a warning).
-        with self._autocast():
+        return kwargs
+
+    def _predict(self, image: np.ndarray, confidence: Optional[float] = None) -> Any:
+        if self._model is None:
+            raise RuntimeError("LibreYOLO model not initialized.")
+
+        model_input, colour_format, scale = self._prepare(image)
+        kwargs = self._kwargs(colour_format, confidence)
+        with self._inference():
             result = self._model(model_input, **kwargs)
         if scale is not None:
             rescale_result(result, *scale)
         return result
+
+    def predict_images(self, images: List[np.ndarray], confidence: Optional[float] = None) -> List[Any]:
+        """One Results per image, in order. Batched when allowed and possible."""
+        if self._model is None:
+            raise RuntimeError("LibreYOLO model not initialized.")
+        if not images:
+            return []
+        prepared = [self._prepare(image) for image in images]
+        formats = {colour for _, colour, _ in prepared}
+        results: Optional[List[Any]] = None
+        if (self._batch_inference and len(images) > 1 and len(formats) == 1
+                and self._batch_supported is not False):
+            results = self._try_batch([inp for inp, _, _ in prepared], formats.pop(), confidence)
+        if results is None:
+            results = []
+            for model_input, colour_format, _ in prepared:
+                with self._inference():
+                    results.append(self._model(model_input, **self._kwargs(colour_format, confidence)))
+        for result, (_, _, scale) in zip(results, prepared):
+            if scale is not None:
+                rescale_result(result, *scale)
+        return results
+
+    def _try_batch(self, inputs: List[np.ndarray], colour_format: str,
+                   confidence: Optional[float]) -> Optional[List[Any]]:
+        try:
+            with self._inference():
+                out = self._model(list(inputs), **self._kwargs(colour_format, confidence))
+        except Exception as exc:  # noqa: BLE001 -- jatuh ke per gambar, dicatat sekali
+            self._batch_unsupported(f"model(list) raised {exc!r}")
+            return None
+        if isinstance(out, (list, tuple)) and len(out) == len(inputs):
+            if self._batch_supported is None:
+                self._batch_supported = True
+                logger.info("batch inference works on this LibreYOLO: %d images per call", len(inputs))
+            return list(out)
+        self._batch_unsupported(f"model(list) returned {type(out).__name__}, not {len(inputs)} results")
+        return None
+
+    def _batch_unsupported(self, why: str) -> None:
+        if self._batch_supported is not False:
+            logger.warning("detector.batch_inference: %s; running images one by one", why)
+        self._batch_supported = False
 
     def predict_raw(self, frame: Frame, confidence: Optional[float] = None) -> Any:
         """Return the native LibreYOLO Results object for a frame.
@@ -306,7 +394,14 @@ class DFINEDetector:
         result = self._predict(frame.image)
         self._remember_result(frame, result)
         self._refresh_class_names(result)
+        return self.postprocess(frame, result)
 
+    def note_result(self, result: Any) -> None:
+        """Class names may only arrive with the first result (shared detector path)."""
+        self._refresh_class_names(result)
+
+    def postprocess(self, frame: Frame, result: Any) -> List[Detection]:
+        """Results -> Detections for one frame. Pure: safe from any camera thread."""
         boxes = getattr(result, "boxes", None)
         if boxes is None or len(boxes) == 0:
             return []

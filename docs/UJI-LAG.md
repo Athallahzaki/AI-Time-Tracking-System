@@ -154,6 +154,91 @@ Semua perubahan bisa dimatikan dari config tanpa mengganti kode:
 | Track putus lebih cepat/lambat dari biasanya | `tracker.track_buffer_seconds` (IoU tracker sekarang menghitung detik PTS, bukan jumlah frame) |
 | fps turun / aneh setelah membatasi thread | `core.cpu_threads: 0` |
 | Engine gagal start atau gambar rusak dengan NVDEC | `ingest.hwaccel: "none"` |
+| Kotak aneh / kamera saling menunggu dengan detector bersama | `detector.share_across_cameras: false` |
+| Hasil berbeda atau error dengan batch | `detector.batch_inference: false` |
+| Kotak hilang dengan FP16 | `detector.half: false` |
+
+## Uji di RTX 4060 (detector bersama, batching, FP16)
+
+Lakukan berurutan. Setiap langkah menjawab satu pertanyaan, dan langkah berikutnya bergantung pada jawabannya. Hasil 1060 ada di dokumen project `claude/hasil-uji-lag-gtx1060-2026-10-03.md`.
+
+### 0. Pastikan laptop tidak sedang dicekik
+
+- Charger tercolok, mode daya Windows "Best performance", kipas maksimum.
+- HWiNFO (sensors) terbuka sepanjang uji. Catat clock CPU dan bendera "Thermal Throttling".
+- `nvidia-smi --query-gpu=timestamp,clocks.sm,temperature.gpu,power.draw,pstate,utilization.gpu --format=csv -l 1 > bench-out\gpu-log.csv`
+
+Di 1060, uji yang sama berubah ±50–100% hanya karena suhu. Angka tanpa langkah ini tidak bisa dibandingkan.
+
+### 1. Plafon 4 fps: ingest atau mesin?
+
+```powershell
+python -m engine.tools.ingest_ceiling --work-ms 110 --work torch --json bench-out/4060-ceiling.json
+```
+
+- Semua varian "OK" ≈ 8,5 fps: plafon 4 fps kemarin bukan dari ingest. Kemungkinan besar daya/suhu laptop.
+- Rendah: kirim JSON-nya beserta log HWiNFO.
+
+### 2. Detector sendirian: FP16 dan cudnn_benchmark
+
+`batch_check` juga mengukur ms/gambar tanpa batch, sehingga bisa dipakai untuk kombinasi ini:
+
+```powershell
+python -m engine.tools.batch_check --source C:\video\uji-siap.mp4 --batch-sizes 1 --no-half
+python -m engine.tools.batch_check --source C:\video\uji-siap.mp4 --batch-sizes 1 --half
+python -m engine.tools.batch_check --source C:\video\uji-siap.mp4 --batch-sizes 1 --half --cudnn-benchmark
+```
+
+Bandingkan baris "tanpa batch X ms/gambar". Perhatikan baris `half ...` yang dicetak: tanpa `--half`/`--no-half`, nilainya diambil dari config (di uji 3 Okt config sudah `half: true`, jadi "FP32" yang dibandingkan sebenarnya FP16 juga). Pakai kombinasi tercepat di `dfine-m.yaml` (`half`, `cudnn_benchmark`). FP16 juga harus dicek secara visual: kotak tidak boleh hilang atau melompat.
+
+### 3. Batching: benar dulu, baru cepat
+
+```powershell
+python -m engine.tools.batch_check --source C:\video\uji-siap.mp4 --batch-sizes 1,2,5 --half
+```
+
+Baca baris KESIMPULAN:
+
+- "BATCH MENGUBAH HASIL": `batch_inference` tetap `false`, apa pun angkanya.
+- "tidak menerima batch": LibreYOLO versi ini tidak mendukung batch; tetap `false`.
+- "layak dinyalakan": set `batch_inference: true` dan `max_batch` sesuai saran.
+
+### 3b. Ke mana waktu detector pergi (GPU atau CPU)?
+
+Uji 3 Okt: D-FINE M di 4060 84 ms/gambar, sama dengan GTX 1060, dan FP16 / cudnn / batch hampir tidak berpengaruh. Waktu yang tidak ikut turun saat GPU diganti bukan waktu GPU. Pisahkan:
+
+```powershell
+python -m engine.tools.detector_profile --source C:\video\uji-siap.mp4 --torch-profile bench-out\profil-4060.txt --json bench-out\profil-4060.json
+```
+
+- "PENGHAMBAT DI CPU": forward GPU murni jauh lebih kecil dari panggilan LibreYOLO penuh. Pra/pasca-proses LibreYOLO yang perlu dibenahi (Engine B); FP16, batching dan TensorRT tidak akan menolong sebelum itu. Kirim `profil-4060.txt` (operasi terberat).
+- "PENGHAMBAT DI GPU" + "GPU TIDAK NAIK CLOCK": masalah daya/mode laptop, bukan kode.
+- "MODEL DI CPU": cek `detector.device` dan `torch.cuda.is_available()`.
+
+### 4. Lima kamera sungguhan
+
+MediaMTX: jalankan dengan config bawaan exe-nya (`.\mediamtx.exe` tanpa argumen), karena config proyek hanya membuka path `cam01`. Lalu publish lima path dari video yang sama, tanpa encode ulang:
+
+```powershell
+1..5 | ForEach-Object { Start-Process ffmpeg -ArgumentList "-hide_banner -loglevel error -re -stream_loop -1 -i C:\video\uji-siap.mp4 -c copy -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/cam0$_" }
+```
+
+Engine dengan rekognisi (config `dfine-m-face.yaml` plus setelan dari langkah 2–3), lalu probe kelima kamera:
+
+```powershell
+python scripts/lag_probe.py --minutes 5 --out bench-out/4060-5cam-async.csv `
+  --camera cam01=rtsp://127.0.0.1:8554/cam01 --camera cam02=rtsp://127.0.0.1:8554/cam02 `
+  --camera cam03=rtsp://127.0.0.1:8554/cam03 --camera cam04=rtsp://127.0.0.1:8554/cam04 `
+  --camera cam05=rtsp://127.0.0.1:8554/cam05
+```
+
+Ulangi dengan `dfine-m-face-sync.yaml` (`4060-5cam-sync.csv`). Kali ini sync duluan, supaya efek suhu tidak berat sebelah. Di log engine perhatikan:
+
+- `detector bersama: 5 kamera, ... rata2 X/panggilan`. Dengan `batch_inference: true`, X harus di atas 1.
+- `rekognisi: ... rata2 Y ms, antre Z`. Antrean tidak boleh terus naik.
+- VRAM di `nvidia-smi`. Bila mendekati 8 GB, set `recognition.onnx_gpu_mem_limit_mb: 1024`.
+
+Pembanding opsional: `detector.share_across_cameras: false` (perilaku lama, 5 salinan D-FINE). Waktu start-nya akan terasa jauh lebih lama.
 
 ## Yang dikirim balik ke tim
 

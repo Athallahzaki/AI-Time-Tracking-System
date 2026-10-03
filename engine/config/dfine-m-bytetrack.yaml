@@ -120,6 +120,12 @@ detector:
                                  # worth trying on RTX 4060 — measure it. ARCHITECTURE.md §8
   pre_resize: true               # resize to image_size in OpenCV before LibreYOLO; skips
                                  # its full-resolution PIL copies. Compare accuracy once.
+  cudnn_benchmark: false         # true = cuDNN memilih algoritma tercepat (input tetap 640). Ukur di 4060.
+  share_across_cameras: true     # satu D-FINE untuk semua kamera (perception/shared_detector.py)
+  batch_inference: false         # true = frame beberapa kamera dalam satu panggilan; cek dulu dengan
+                                 # python -m engine.tools.batch_check
+  max_batch: 8
+  batch_wait_ms: 4.0             # tunggu kamera lain sebelum menjalankan batch (hanya bila >1 kamera)
 
 tracker:
   backend: "bytetrack"

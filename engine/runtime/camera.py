@@ -136,8 +136,11 @@ class CameraSupervisor:
         max_frames: Optional[int] = None,
         loop_files: bool = False,
         recognition_executor: Any = None,
+        detector_provider: Optional[Callable[[str, EngineConfig], Any]] = None,
     ) -> None:
         self.spec = spec
+        # Detector bersama milik runtime (handle per kamera); None = muat sendiri.
+        self._detector_provider = detector_provider
         # P7: RecognitionWorker bersama milik runtime; None = rekognisi sinkron.
         self._recognition_executor = recognition_executor
         # Local video files restart from the beginning when they end. For
@@ -186,6 +189,10 @@ class CameraSupervisor:
             target=self._run, name=f"camera-{self.spec.camera_id}", daemon=True
         )
         self._thread.start()
+
+    def request_stop(self) -> None:
+        """Minta berhenti tanpa menunggu; dipakai untuk menghentikan semua kamera serentak."""
+        self._stop.set()
 
     def stop(self, timeout: float = 10.0) -> None:
         self._stop.set()
@@ -373,6 +380,9 @@ class CameraSupervisor:
 
                 wrap_source = lambda inner, _fps: PlaybackSource(inner)
 
+        if self._detector is None and self._detector_provider is not None:
+            # Dimuat dan dipanaskan SEBELUM stream dibuka (lihat factory.build_engine).
+            self._detector = self._detector_provider(camera_id, config)
         engine, source, source_fps = factory.build_engine(
             config,
             source_id=camera_id,

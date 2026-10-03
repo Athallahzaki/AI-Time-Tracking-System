@@ -172,10 +172,18 @@ class EngineRuntime:
                 recognize, max_queue=self.config.recognition.worker_queue, max_age_seconds=max_age,
             ).start()
 
+        # Satu D-FINE untuk semua kamera (detector.share_across_cameras),
+        # dimuat saat kamera pertama dibuka. Lihat perception/shared_detector.py.
+        self._shared_detector: Any = None
+        self._detector_lock = threading.Lock()
+
         self._scheduler = _LockedScheduler(
             RecognitionScheduler(**self.config.recognition.scheduler_kwargs())
         )
         self._cameras: Dict[str, CameraSupervisor] = {}
+        self._close_lock = threading.Lock()
+        self._closing = False
+        self._closed = threading.Event()
         self._emit_lock = threading.Lock()
         self._state_lock = threading.RLock()
         self._stop = threading.Event()
@@ -223,15 +231,38 @@ class EngineRuntime:
         self._ticker.start()
 
     def close(self) -> None:
-        self._stop.set()
-        with self._state_lock:
-            cameras = list(self._cameras.values())
-            self._cameras.clear()
-        for camera in cameras:
-            camera.stop()
-        if self._worker is not None:
-            self._worker.stop()
-        self.api.close()
+        """Idempoten dan aman dipanggil dari dua thread (Ctrl+C + akhir serve()).
+
+        Pemanggil kedua MENUNGGU yang pertama selesai. Tanpa itu, thread utama
+        keluar duluan sementara kamera masih menutup interval (`engine_shutdown`),
+        dan proses mati sebelum event penutup terkirim. Menunggu dalam potongan
+        pendek supaya Ctrl+C kedua tetap bisa masuk di Windows.
+        """
+        with self._close_lock:
+            first = not self._closing
+            self._closing = True
+        if not first:
+            while not self._closed.wait(0.2):
+                pass
+            return
+        try:
+            self._stop.set()
+            with self._state_lock:
+                cameras = list(self._cameras.values())
+                self._cameras.clear()
+            # Serentak: minta semua berhenti dulu, baru tunggu satu per satu.
+            # Berurutan berarti 5 kamera x batas tunggu masing-masing.
+            for camera in cameras:
+                camera.request_stop()
+            for camera in cameras:
+                camera.stop()
+            if self._worker is not None:
+                self._worker.stop()
+            if self._shared_detector is not None:
+                self._shared_detector.stop()
+            self.api.close()
+        finally:
+            self._closed.set()
 
     # -- control ----------------------------------------------------------
 
@@ -264,6 +295,7 @@ class EngineRuntime:
                     logger.info("[%s] tidak ada di daftar; ditutup", camera_id)
                     camera.stop()
                     self._cameras.pop(camera_id, None)
+                    self._release_detector(camera_id)
                 elif not spec.same_stream_as(camera.spec):
                     logger.info("[%s] uri berubah; dibuka ulang", camera_id)
                     camera.stop()
@@ -292,10 +324,42 @@ class EngineRuntime:
             max_frames=self.options.max_frames,
             loop_files=self.options.loop_files,
             recognition_executor=self._worker,
+            detector_provider=self._detector_for,
         )
         self._cameras[spec.camera_id] = camera
         camera.start()
         return camera
+
+    def _detector_for(self, camera_id: str, config: EngineConfig) -> Any:
+        """Detector untuk satu kamera: handle ke detector bersama, atau miliknya sendiri.
+
+        Dipanggil dari thread kamera. Kamera pertama memuat bobot dan
+        memanaskannya (di bawah kunci); kamera berikutnya langsung dapat handle.
+        Detector yang tidak bisa dibagi (MockDetector) dikembalikan apa adanya.
+        """
+        from .. import factory
+        from ..perception.shared_detector import SharedDetector, supports_sharing
+
+        if not config.detector.share_across_cameras:
+            return None
+        with self._detector_lock:
+            if self._shared_detector is None:
+                inner = factory.build_detector(config)
+                if not supports_sharing(inner):
+                    return inner
+                shared = SharedDetector(inner, max_batch=config.detector.max_batch,
+                                        batch_wait_ms=config.detector.batch_wait_ms)
+                if config.auto_warmup:
+                    shared.warmup()
+                self._shared_detector = shared.start()
+                logger.info("detector bersama dimuat sekali untuk semua kamera (batch maks %d, tunggu %.0f ms, "
+                            "batch_inference %s)", config.detector.max_batch, config.detector.batch_wait_ms,
+                            "on" if config.detector.batch_inference else "off")
+            return self._shared_detector.handle(camera_id)
+
+    def _release_detector(self, camera_id: str) -> None:
+        if self._shared_detector is not None:
+            self._shared_detector.release(camera_id)
 
     def _on_set_roster(self, message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Same pattern as cameras: whole set in, engine matches its state.
@@ -444,6 +508,14 @@ class EngineRuntime:
                 "rekognisi: diproses %d, ditolak-penuh %d, basi %d, gagal %d, rata2 %.0f ms, antre %d",
                 int(worker["processed"]), int(worker["rejected_full"]), int(worker["dropped_stale"]),
                 int(worker["failed"]), worker["avg_recognize_ms"], int(worker["queue_depth"]),
+            )
+        shared = self._shared_detector
+        if shared is not None:
+            d = shared.metrics.as_dict()
+            logger.info(
+                "detector bersama: %d kamera, %d gambar dalam %d panggilan (rata2 %.2f/panggilan, maks %d), "
+                "%.0f ms/gambar", shared.active_cameras, int(d["images"]), int(d["batches"]),
+                d["mean_batch"], int(d["largest_batch"]), d["ms_per_image"],
             )
         api_metrics = self.api.metrics
         drop_rate = _drop_rate(api_metrics)

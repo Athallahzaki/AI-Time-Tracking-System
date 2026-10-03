@@ -180,6 +180,11 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
             device=det.get("device", "auto"),
             half=bool(det.get("half", False)),
             pre_resize=bool(det.get("pre_resize", False)),
+            cudnn_benchmark=bool(det.get("cudnn_benchmark", False)),
+            share_across_cameras=bool(det.get("share_across_cameras", True)),
+            batch_inference=bool(det.get("batch_inference", False)),
+            max_batch=int(det.get("max_batch", 8)),
+            batch_wait_ms=float(det.get("batch_wait_ms", 4.0)),
         ),
         tracker=TrackerConfig(
             backend=str(trk.get("backend", "bytetrack")),
@@ -210,6 +215,7 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
             onnx_providers=(
                 tuple(str(p) for p in rec["onnx_providers"]) if rec.get("onnx_providers") else None
             ),
+            onnx_gpu_mem_limit_mb=_optional_int(rec.get("onnx_gpu_mem_limit_mb")),
             face_detection_threshold=float(rec.get("face_detection_threshold", 0.5)),
             face_detector_input_size=int(rec.get("face_detector_input_size", 640)),
             execution=str(rec.get("execution", "async")),
