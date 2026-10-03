@@ -2,5 +2,9 @@
 # recognizer is turned on in the engine config; the default engine never
 # imports it. Pick ONE of the two lines.
 -r requirements.txt
-onnxruntime-gpu>=1.17     # CUDA machine
+# CUDA machine. Batas atas <1.27 disengaja: mulai 1.27 onnxruntime-gpu hanya
+# untuk CUDA 13, dan CUDA 13 tidak lagi mendukung GPU Pascal (GTX 10xx). Extras
+# [cuda,cudnn] memasang DLL CUDA 12 / cuDNN 9 lewat pip; engine memuatnya dengan
+# onnxruntime.preload_dlls() (identity/face_onnx.py).
+onnxruntime-gpu[cuda,cudnn]>=1.21,<1.27
 # onnxruntime>=1.17       # CPU-only machine
