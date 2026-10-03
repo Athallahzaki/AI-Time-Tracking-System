@@ -46,6 +46,16 @@ bit-identical to eager and verified per family; D-FINE opts in. One graph per
 input shape (batch size). Measured 12.6 ms instead of 57 ms. A LibreYOLO that
 does not know the option makes the adapter warn once and run eager.
 
+**Fast preprocess (`fast_preprocess`).** With cuda_graph the forward is ±12.6
+ms but a call is ±28.5 ms (RTX 4060, 3 Oct): the rest is LibreYOLO's CPU
+pre/post-processing. For a numpy input its D-FINE preprocess goes numpy -> PIL
+-> copy -> numpy -> PIL resize -> float32/255 -> CHW on the CPU, then copies a
+4.9 MB float tensor to the GPU. With `pre_resize` the frame is ALREADY an RGB
+`image_size` square, PIL's same-size resize is a plain copy, so the model input
+is just `uint8 / 255` in CHW. The hook does exactly that on the GPU (1.2 MB
+uint8 upload) and returns the same tensor bit for bit. Anything else (other
+size, BGR, not uint8) goes through LibreYOLO's own preprocess unchanged.
+
 **Low-score boxes for ByteTrack (`raw_confidence`).** The model is asked for
 boxes down to `raw_confidence`, the native `Results` keeps all of them for
 ByteTrack's second association stage, and `detect()` still filters at
@@ -94,6 +104,7 @@ class DFINEDetector:
         cudnn_benchmark: bool = False,
         batch_inference: bool = False,
         cuda_graph: Union[bool, str] = False,
+        fast_preprocess: bool = False,
     ) -> None:
         self._model_path = self._resolve_model_path(model_path)
         self._conf = confidence_threshold
@@ -116,6 +127,8 @@ class DFINEDetector:
         self._batch_inference = bool(batch_inference)
         self._batch_supported: Optional[bool] = None
         self._cuda_graph: Union[bool, str] = normalize_cuda_graph(cuda_graph) if self._device != "cpu" else False
+        self._fast_preprocess = bool(fast_preprocess)
+        self._fast_preprocess_hits = 0
 
         self._model: Any = None
         self._class_names: Dict[int, str] = {}
@@ -187,6 +200,12 @@ class DFINEDetector:
         if self._cuda_graph and version and version_tuple(version) < (1, 6):
             logger.warning("detector.cuda_graph needs LibreYOLO >= 1.6 (installed %s); it will be "
                            "turned off at the first call. pip install -U \"libreyolo>=1.6\"", version)
+        if self._fast_preprocess:
+            if not self._pre_resize:
+                logger.warning("detector.fast_preprocess needs pre_resize: true (frames must already be "
+                               "%dx%d RGB); every frame will take LibreYOLO's own path", self._image_size,
+                               self._image_size)
+            install_fast_preprocess(self)
         if self._cudnn_benchmark and self._device != "cpu":
             try:
                 import torch
@@ -481,6 +500,56 @@ class DFINEDetector:
     @property
     def device(self) -> Union[str, int]:
         return self._device
+
+
+def install_fast_preprocess(detector: "DFINEDetector") -> bool:
+    """Pasang hook `_preprocess_predict` di model LibreYOLO (lihat docstring modul).
+
+    LibreYOLO (InferenceRunner._preprocess_model_input) memakai
+    `model._preprocess_predict` bila ada, jadi atribut instance ini menggantikan
+    pra-proses hanya untuk model ini. Hook membaca `detector._fast_preprocess`
+    setiap panggilan, sehingga bisa dimatikan tanpa memasang ulang (batch_check
+    mematikannya untuk pembanding).
+    """
+    model = detector._model
+    original = getattr(model, "_preprocess_predict", None) or getattr(model, "_preprocess", None)
+    if model is None or original is None:
+        logger.warning("detector.fast_preprocess: this LibreYOLO has no preprocess hook; left off")
+        detector._fast_preprocess = False
+        return False
+
+    def preprocess(image, color_format="auto", input_size=None, **kwargs):
+        if detector._fast_preprocess and not kwargs:
+            tensor = _fast_tensor(image, color_format, input_size, getattr(model, "device", None))
+            if tensor is not None:
+                detector._fast_preprocess_hits += 1
+                height, width = image.shape[:2]
+                # orig_img: Results menerima array BGR; view tanpa salinan.
+                return tensor, image[..., ::-1], (int(width), int(height)), 1.0
+        return original(image, color_format, input_size=input_size, **kwargs)
+
+    model._preprocess_predict = preprocess
+    logger.info("detector.fast_preprocess on: RGB %dx%d uint8 frames are normalised on the GPU",
+                detector._image_size, detector._image_size)
+    return True
+
+
+def _fast_tensor(image: Any, color_format: str, input_size: Any, device: Any) -> Any:
+    """`uint8/255` CHW di GPU, atau None bila input bukan kasus yang identik."""
+    if not isinstance(image, np.ndarray) or image.ndim != 3 or image.shape[2] != 3:
+        return None
+    if image.dtype != np.uint8 or color_format != "rgb":
+        return None
+    size = input_size if isinstance(input_size, (tuple, list)) else (input_size, input_size)
+    if input_size is None or tuple(int(v) for v in size) != tuple(image.shape[:2]):
+        return None      # LibreYOLO akan me-resize; itu bukan salinan polos lagi
+    import torch
+
+    tensor = torch.from_numpy(np.ascontiguousarray(image))
+    if device is not None:
+        tensor = tensor.to(device, non_blocking=False)
+    # Sama dengan preprocess_numpy LibreYOLO: float32(uint8) / 255.0, lalu CHW.
+    return tensor.permute(2, 0, 1).to(torch.float32).div_(255.0).unsqueeze(0).contiguous()
 
 
 def normalize_cuda_graph(value: Any) -> Union[bool, str]:

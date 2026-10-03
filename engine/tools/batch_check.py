@@ -48,6 +48,7 @@ class Report:
     batch_supported: Optional[bool]
     sizes: List[SizeResult] = field(default_factory=list)
     cuda_graph: Any = False
+    fast_preprocess: bool = False
 
     @property
     def verdict(self) -> str:
@@ -57,14 +58,16 @@ class Report:
         if wrong:
             return "BATCH MENGUBAH HASIL: jangan nyalakan batch_inference"
         best = max(self.sizes, key=lambda s: s.speedup, default=None)
-        graph = " (cuda_graph aktif; pembanding eager)" if self.cuda_graph else ""
+        active = [name for name, on in (("cuda_graph", self.cuda_graph), ("fast_preprocess", self.fast_preprocess)) if on]
+        graph = f" ({' + '.join(active)} aktif; pembanding eager/PIL)" if active else ""
         if best is None or best.speedup < 1.1:
             return "Tidak lebih cepat (<10%) dari pembanding" + graph + ": tidak perlu dinyalakan"
         single = next((s for s in self.sizes if s.batch_size == 1), None)
         if best.batch_size == 1:
             # Ukuran 1 bukan batch: percepatannya datang dari cuda_graph.
             return (f"Tercepat pada ukuran 1 ({best.speedup:.2f}x){graph}: batch TIDAK membantu, "
-                    "biarkan batch_inference: false" + ("; cuda_graph: true layak dipakai" if self.cuda_graph else ""))
+                    "biarkan batch_inference: false" + (f"; {' + '.join(f'{n}: true' for n in active)} layak dipakai"
+                                                         if active else ""))
         gain = (single.ms_per_image / best.ms_per_image) if single and best.ms_per_image else best.speedup
         if single and gain < 1.1:
             return (f"Batch {best.batch_size} hanya {gain:.2f}x dibanding ukuran 1{graph}: "
@@ -133,8 +136,11 @@ def run(detector: Any, images: Sequence[np.ndarray], batch_sizes: Sequence[int],
     graph juga tertangkap sebagai "salah".
     """
     graph_mode = getattr(detector, "_cuda_graph", False)
+    fast_mode = getattr(detector, "_fast_preprocess", False)
     if hasattr(detector, "_cuda_graph"):
         detector._cuda_graph = False
+    if hasattr(detector, "_fast_preprocess"):
+        detector._fast_preprocess = False
     detector._batch_inference = False
     reference: List[Any] = []
     ref_times = []
@@ -145,6 +151,8 @@ def run(detector: Any, images: Sequence[np.ndarray], batch_sizes: Sequence[int],
 
     if hasattr(detector, "_cuda_graph"):
         detector._cuda_graph = graph_mode
+    if hasattr(detector, "_fast_preprocess"):
+        detector._fast_preprocess = fast_mode
     detector._batch_inference = True
     report = Report(images=len(images), reference_ms_per_image=round(ref_ms, 1), batch_supported=None)
     for size in batch_sizes:
@@ -168,6 +176,7 @@ def run(detector: Any, images: Sequence[np.ndarray], batch_sizes: Sequence[int],
         report.sizes.append(entry)
     report.batch_supported = getattr(detector, "_batch_supported", None)
     report.cuda_graph = graph_mode
+    report.fast_preprocess = bool(fast_mode)
     detector._batch_inference = False
     return report
 
@@ -218,6 +227,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     precision.add_argument("--no-half", action="store_true",
                            help="paksa detector.half: false (FP32), apa pun isi config")
     parser.add_argument("--cudnn-benchmark", action="store_true", help="paksa detector.cudnn_benchmark: true")
+    parser.add_argument("--fast-preprocess", action="store_true",
+                        help="paksa detector.fast_preprocess: true (pra-proses di GPU); pembanding tetap PIL")
     parser.add_argument("--cuda-graph", action="store_true",
                         help="paksa detector.cuda_graph: true (LibreYOLO >= 1.6); pembanding tetap eager")
     parser.add_argument("--json", default=None)
@@ -236,6 +247,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         changes["cudnn_benchmark"] = True
     if args.cuda_graph:
         changes["cuda_graph"] = True
+    if args.fast_preprocess:
+        changes["fast_preprocess"] = True
+        changes["pre_resize"] = True
     config = dataclasses.replace(config, source_type="video_file",
                                  detector=dataclasses.replace(config.detector, **changes))
     images = _read_frames(args.source, args.frames, max(1, args.stride))
@@ -245,7 +259,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     report = run(detector, images, sizes, repeat=max(1, args.repeat))
     print(f"model {config.detector.model_path}, half {config.detector.half}, "
           f"cudnn_benchmark {config.detector.cudnn_benchmark}, cuda_graph {getattr(detector, '_cuda_graph', '?')} "
-          "(pembanding: eager tanpa batch)")
+          f"fast_preprocess {getattr(detector, '_fast_preprocess', '?')} "
+          f"(dipakai {getattr(detector, '_fast_preprocess_hits', 0)}x) (pembanding: eager, PIL, tanpa batch)")
     print(format_report(report))
     if args.json:
         with open(args.json, "w", encoding="utf-8") as handle:

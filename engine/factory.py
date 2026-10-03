@@ -125,6 +125,7 @@ def build_detector(config: EngineConfig) -> Any:
         cudnn_benchmark=config.detector.cudnn_benchmark,
         batch_inference=config.detector.batch_inference,
         cuda_graph=config.detector.cuda_graph,
+        fast_preprocess=config.detector.fast_preprocess,
     )
 
 

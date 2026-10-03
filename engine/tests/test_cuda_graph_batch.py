@@ -126,3 +126,65 @@ def test_config_cuda_graph():
     with pytest.raises(ValueError):
         dataclasses.replace(config.detector, cuda_graph="kadang")
     assert DetectorConfig().cuda_graph is False
+
+
+# --------------------------------------------------------------------------
+# fast_preprocess: pra-proses di GPU, wajib bit-identik dengan LibreYOLO
+# --------------------------------------------------------------------------
+
+from engine.perception.dfine_detector import _fast_tensor, install_fast_preprocess  # noqa: E402
+
+
+class HookModel(Model):
+    device = None
+
+    def __init__(self):
+        super().__init__()
+        self.original_calls = 0
+
+    def _preprocess(self, image, color_format="auto", input_size=None, **kwargs):
+        self.original_calls += 1
+        return ("asli", None, (0, 0), 1.0)
+
+
+def test_kasus_yang_bukan_salinan_polos_tidak_disentuh():
+    rgb = np.zeros((640, 640, 3), np.uint8)
+    assert _fast_tensor(rgb, "bgr", 640, None) is None                       # BGR: LibreYOLO membalik kanal
+    assert _fast_tensor(np.zeros((720, 1280, 3), np.uint8), "rgb", 640, None) is None   # perlu resize
+    assert _fast_tensor(rgb.astype(np.float32), "rgb", 640, None) is None    # bukan uint8
+    assert _fast_tensor(rgb, "rgb", None, None) is None
+
+
+def test_hook_kembali_ke_pra_proses_libreyolo_saat_mati_atau_tidak_cocok():
+    detector = _detector(HookModel(), fast_preprocess=True)
+    assert install_fast_preprocess(detector)
+    model = detector._model
+    out = model._preprocess_predict(np.zeros((720, 1280, 3), np.uint8), "bgr", input_size=640)
+    assert out[0] == "asli" and model.original_calls == 1
+    detector._fast_preprocess = False
+    out = model._preprocess_predict(np.zeros((640, 640, 3), np.uint8), "rgb", input_size=640)
+    assert out[0] == "asli" and model.original_calls == 2 and detector._fast_preprocess_hits == 0
+
+
+def test_tensor_sama_persis_dengan_libreyolo():
+    """Berjalan di mesin yang punya torch + LibreYOLO (laptop uji)."""
+    torch = pytest.importorskip("torch")
+    dfine_utils = pytest.importorskip("libreyolo.models.dfine.utils")
+    rng = np.random.default_rng(3)
+    rgb = rng.integers(0, 256, (640, 640, 3), dtype=np.uint8)
+    reference, _, size, ratio = dfine_utils.preprocess_image(rgb, input_size=640, color_format="rgb")
+    fast = _fast_tensor(rgb, "rgb", 640, None)
+    assert fast.shape == reference.shape and fast.dtype == reference.dtype
+    assert torch.equal(fast, reference), "pra-proses cepat wajib bit-identik"
+    assert size == (640, 640) and ratio == 1.0
+
+
+def test_hook_mengembalikan_tensor_dan_ukuran_asli():
+    torch = pytest.importorskip("torch")
+    detector = _detector(HookModel(), fast_preprocess=True)
+    install_fast_preprocess(detector)
+    rgb = np.full((640, 640, 3), 255, np.uint8)
+    tensor, orig, size, ratio = detector._model._preprocess_predict(rgb, "rgb", input_size=640)
+    assert isinstance(tensor, torch.Tensor) and tensor.shape == (1, 3, 640, 640)
+    assert float(tensor.max()) == 1.0 and size == (640, 640) and ratio == 1.0
+    assert orig.shape == (640, 640, 3) and detector._fast_preprocess_hits == 1

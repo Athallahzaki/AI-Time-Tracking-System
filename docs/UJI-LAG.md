@@ -230,6 +230,17 @@ python -m engine.tools.batch_check --source C:\video\uji-siap.mp4 --batch-sizes 
 
 Pembanding batch_check selalu eager tanpa batch, jadi baris "salah" juga menangkap graph yang mengubah hasil. Bila "salah" = 0 di semua ukuran dan percepatan besar: set `cuda_graph: true` (dan `batch_inference: true`, `max_batch: 5` bila baris 5 jauh lebih cepat) di config, `half: false`. Frame pertama tiap ukuran batch lebih lambat (perekaman graph).
 
+### 3d. Pra-proses di GPU (`fast_preprocess`)
+
+Hasil 4060 (3 Okt, dingin): M 28,5 ms, S 25,2 ms per gambar dengan cuda_graph; forward M sendiri hanya ±12,6 ms. Sisa ±13-16 ms adalah pra/pasca-proses LibreYOLO di CPU, dan itu sama besar untuk S dan M (S hanya 12% lebih cepat walau FLOPs-nya kurang dari setengah).
+
+```powershell
+python -m pytest engine/tests/test_cuda_graph_batch.py -q      # test bit-identik jalan di mesin ber-torch
+python -m engine.tools.batch_check --source C:\video\uji-siap.mp4 --batch-sizes 1 --no-half --cuda-graph --fast-preprocess
+```
+
+Pembanding tetap pra-proses PIL LibreYOLO + eager. "salah" wajib 0. Baris pertama mencetak berapa kali jalur cepat dipakai; 0 berarti frame tidak lewat `pre_resize`.
+
 ### 4. Lima kamera sungguhan
 
 MediaMTX: jalankan dengan config bawaan exe-nya (`.\mediamtx.exe` tanpa argumen), karena config proyek hanya membuka path `cam01`. Lalu publish lima path dari video yang sama, tanpa encode ulang:

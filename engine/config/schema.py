@@ -356,6 +356,9 @@ class DetectorConfig:
     # predict(cuda_graph=...)). D-FINE M di RTX 4060: 57 -> 12,6 ms, karena
     # forward eager terikat peluncuran ±1000 kernel. False / True / "auto".
     cuda_graph: Union[bool, str] = False
+    # Pra-proses frame RGB 640x640 (hasil pre_resize) langsung di GPU, bit-identik
+    # dengan pra-proses PIL LibreYOLO. Cek: batch_check --fast-preprocess.
+    fast_preprocess: bool = False
     # Satu detector untuk semua kamera (engine/perception/shared_detector.py):
     # bobot dimuat sekali, inferensi lewat satu thread dispatcher.
     share_across_cameras: bool = True
