@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 import signal
 import sys
+import threading
 from typing import Optional
 
 from .service import EngineRuntime, RuntimeOptions
@@ -120,30 +121,112 @@ def main(argv: Optional[list] = None) -> int:
         )
     )
 
-    def _stop(signum, _frame):
-        # Cameras close their open intervals with `engine_shutdown` on the way
-        # out (§4.2). Killing the process instead leaves every presence open and
-        # the backend carrying people who never left.
-        logging.getLogger("engine.runtime").info("sinyal %s: berhenti rapi", signum)
-        runtime.close()
+    stopper = _Stopper(runtime.close)
 
-    for name in ("SIGINT", "SIGTERM"):
+    def _on_signal(signum, _frame):
+        stopper.request(f"sinyal {signum}")
+
+    for name in ("SIGINT", "SIGTERM", "SIGBREAK"):
         handler = getattr(signal, name, None)
         if handler is not None:
             try:
-                signal.signal(handler, _stop)
+                signal.signal(handler, _on_signal)
             except (ValueError, OSError):
                 pass
+    _watch_stdin(stopper)
 
     print(
         "engine siap. Menunggu `set_cameras` dari backend — kamera adalah "
         "milik backend untuk dideklarasikan (§2.2), jadi tidak ada stream yang "
-        "dibuka sebelum pesan itu datang.",
+        "dibuka sebelum pesan itu datang. Berhenti: Ctrl+C, atau ketik q lalu Enter.",
         file=sys.stderr,
     )
     runtime.serve()
     return 0
 
 
+SHUTDOWN_GRACE_SECONDS = 20.0   # batas berhenti rapi sebelum dipaksa
+STDIN_COMMANDS = {"q", "quit", "exit", "stop"}
+
+
+class _Stopper:
+    """Satu jalur berhenti untuk Ctrl+C, SIGTERM, dan perintah `q` di terminal.
+
+    Pertama kali: berhenti rapi di thread terpisah (kamera menutup interval
+    dengan `engine_shutdown`, §4.2), plus penjaga waktu yang memaksa keluar bila
+    rapi-nya macet -- mis. thread kamera masih di tengah memuat model (±55 dtk
+    di GTX 1060) atau terjebak di panggilan CUDA/FFmpeg yang tidak bisa diputus.
+    Kedua kali: keluar paksa saat itu juga.
+    """
+
+    def __init__(self, close, grace: float = SHUTDOWN_GRACE_SECONDS, exit_fn=None) -> None:
+        self._close = close
+        self._grace = grace
+        self._exit = exit_fn or os._exit
+        self._lock = threading.Lock()
+        self.requests = 0
+
+    def request(self, reason: str) -> None:
+        with self._lock:
+            self.requests += 1
+            first = self.requests == 1
+        if not first:
+            print("berhenti paksa.", file=sys.stderr, flush=True)
+            self._exit(130)
+            return
+        print(f"menghentikan engine dengan rapi ({reason}); Ctrl+C sekali lagi atau tunggu "
+              f"{self._grace:.0f} dtk untuk paksa...", file=sys.stderr, flush=True)
+        logging.getLogger("engine.runtime").info("%s: berhenti rapi", reason)
+        # Di thread terpisah: handler sinyal jalan di thread utama, dan close()
+        # menunggu kamera selesai. Ctrl+C kedua harus tetap bisa diterima.
+        threading.Thread(target=self._close, name="engine-shutdown", daemon=True).start()
+        threading.Thread(target=self._watchdog, name="engine-shutdown-watchdog", daemon=True).start()
+
+    def _watchdog(self) -> None:
+        threading.Event().wait(self._grace)
+        print(f"berhenti rapi melewati {self._grace:.0f} dtk; keluar paksa.", file=sys.stderr, flush=True)
+        self._exit(1)
+
+
+def _watch_stdin(stopper: _Stopper) -> None:
+    """Ketik `q` lalu Enter untuk berhenti -- cadangan bila Ctrl+C tertelan.
+
+    Di Windows, Ctrl+C bisa tidak sampai ke Python: pustaka native (CUDA, MKL)
+    memasang penangan konsol sendiri, atau jendela konsol sedang dalam mode
+    seleksi (QuickEdit) sehingga proses membeku saat menulis log.
+    """
+    stream = sys.stdin
+    try:
+        interactive = stream is not None and stream.isatty()
+    except (ValueError, OSError):
+        interactive = False
+    if not interactive:
+        return
+
+    def _loop() -> None:
+        for line in stream:
+            if line.strip().lower() in STDIN_COMMANDS:
+                stopper.request("perintah terminal")
+
+    threading.Thread(target=_loop, name="engine-stdin", daemon=True).start()
+
+
+def _exit_now(code: int) -> None:
+    """Keluar tanpa finalisasi interpreter.
+
+    Thread daemon yang masih berada di dalam kode native (PyAV menunggu RTSP,
+    CUDA, onnxruntime) bisa membuat finalisasi Python macet di Windows: engine
+    sudah berhenti rapi tetapi prosesnya tidak pernah selesai, dan Ctrl+C tidak
+    lagi diproses karena handler sinyal tidak jalan selama finalisasi.
+    """
+    logging.shutdown()
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except Exception:  # noqa: BLE001
+            pass
+    os._exit(code)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    _exit_now(main())

@@ -89,7 +89,41 @@ def _session(path: str, providers: Optional[Sequence[str]]):
         raise RecognizerUnavailable(f"berkas model tidak ditemukan: {path}")
     available = ort.get_available_providers()
     chosen = [p for p in (providers or available) if p in available] or available
-    return ort.InferenceSession(path, providers=chosen)
+    if "CUDAExecutionProvider" in chosen:
+        _preload_cuda_dlls(ort)
+    session = ort.InferenceSession(path, providers=chosen)
+    active = list(session.get_providers())
+    if "CUDAExecutionProvider" in chosen and "CUDAExecutionProvider" not in active:
+        # onnxruntime TIDAK error saat DLL CUDA/cuDNN tidak cocok: ia menulis
+        # peringatan lalu jalan di CPU. Rekognisi di CPU berarti setiap wajah
+        # ratusan ms dan uji async/sync tidak bermakna -- jadi berhenti di sini.
+        raise RecognizerUnavailable(
+            f"CUDAExecutionProvider diminta untuk {Path(path).name} tetapi tidak aktif "
+            f"(aktif: {active}, onnxruntime {getattr(ort, '__version__', '?')}). Biasanya DLL CUDA/cuDNN "
+            "tidak cocok dengan build onnxruntime-gpu; lihat pesan [E:onnxruntime] di atas. "
+            "Kalau memang ingin CPU, set recognition.onnx_providers: [\"CPUExecutionProvider\"]."
+        )
+    logger.info("onnx %s: provider aktif %s", Path(path).name, active)
+    return session
+
+
+_DLLS_PRELOADED = False
+
+
+def _preload_cuda_dlls(ort) -> None:
+    """onnxruntime >= 1.21: muat DLL CUDA/cuDNN dari paket pip nvidia-* atau torch.
+
+    Di Windows DLL dari `pip install onnxruntime-gpu[cuda,cudnn]` tidak ada di PATH;
+    tanpa ini onnxruntime mencari di PATH saja dan jatuh ke CPU.
+    """
+    global _DLLS_PRELOADED
+    if _DLLS_PRELOADED or not hasattr(ort, "preload_dlls"):
+        return
+    _DLLS_PRELOADED = True
+    try:
+        ort.preload_dlls()
+    except Exception as error:  # noqa: BLE001 -- yang menentukan adalah provider aktif sesudahnya
+        logger.warning("onnxruntime.preload_dlls gagal: %s", error)
 
 
 class ScrfdDetector:

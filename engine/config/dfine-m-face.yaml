@@ -92,8 +92,8 @@ recognition:
   execution: "async"
   worker_queue: 8
   recognizer: "onnx_face"
-  face_detector_model: "models/scrfd_10g_bnkps.onnx"   # relatif ke folder tempat engine dijalankan
-  face_embedder_model: "models/glintr100.onnx"
+  face_detector_model: "engine/models/recognition/scrfd_10g_bnkps.onnx"   # relatif ke folder tempat engine dijalankan
+  face_embedder_model: "engine/models/embedder/glintr100.onnx"
   embedding_version: "auraface-v1"
   reference_db_path: "engine/data/references.sqlite3"
   onnx_providers: ["CUDAExecutionProvider", "CPUExecutionProvider"]
