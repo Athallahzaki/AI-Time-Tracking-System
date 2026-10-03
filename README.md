@@ -13,10 +13,14 @@ python -m venv .venv
 source .venv/bin/activate            # Windows PowerShell: .venv\Scripts\Activate.ps1
 pip install -r backend/requirements.txt
 pip install -r contracts/validator/requirements.txt
-pip install -r engine/requirements-dfine.txt
+pip install -r engine/requirements-gpu-rtx4060.txt   # atau -rtx3050 / -gtx1060 (termasuk PyTorch CUDA)
+python scripts/check_gpu_env.py                     # semua baris harus OK sebelum menjalankan engine
 pip install -r requirements-dev.txt     # hanya untuk testing/development
 cd frontend && npm ci && cd ..
 ```
+
+Mesin tanpa GPU NVIDIA (CI, demo mock): `engine/requirements.txt` saja.
+Detail per GPU, alasan versi CUDA, dan config yang disarankan: `docs/SETUP-GPU.md`.
 
 ## Menjalankan
 

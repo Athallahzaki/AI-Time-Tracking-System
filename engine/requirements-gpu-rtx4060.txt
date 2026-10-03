@@ -1,0 +1,9 @@
+# RTX 4060 Laptop (Ada, sm_89, 8 GB). Paket sama dengan GPU lain:
+-r requirements-gpu.txt
+#
+# Config yang disarankan (engine/config/dfine-m.yaml), dari uji 3 Okt:
+#   detector.half: false              FP16 lebih LAMBAT (82 vs 69 ms): terikat peluncuran kernel
+#   detector.cuda_graph: true         57 -> 12,6 ms per forward (cek: batch_check --cuda-graph)
+#   detector.batch_inference: true    bila batch_check ukuran 5 jauh lebih cepat
+#   detector.max_batch: 5
+#   ingest.live_buffer: "latest"

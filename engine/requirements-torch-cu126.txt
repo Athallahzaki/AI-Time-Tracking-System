@@ -1,0 +1,17 @@
+# PyTorch CUDA 12.6 untuk Windows/Linux. Dipakai ketiga GPU proyek ini:
+#   GTX 1060 (Pascal, sm_61), RTX 3050 (Ampere, sm_86), RTX 4060 (Ada, sm_89).
+#
+# Kenapa cu126 dan bukan cu130 (build "stable" di PyPI):
+# - cu126 adalah SATU-SATUNYA build yang masih membawa kernel Pascal. Build
+#   cu128/cu130 tidak mendukung GTX 10xx. PyTorch 2.14 adalah rilis terakhir
+#   dengan cu126 (RFC pytorch#190385: 2.15 menghapusnya), jadi versi dipatok di
+#   2.14.1 -- jangan dinaikkan selama GTX 1060 masih dipakai.
+# - onnxruntime-gpu < 1.27 (rekognisi wajah) juga CUDA 12. Satu keluarga CUDA
+#   untuk torch dan onnxruntime menghindari campuran DLL CUDA 12/13 seperti
+#   kasus cublasLt64_13.dll kemarin.
+#
+# Versi lokal (+cu126) dipatok persis: tanpa itu pip bisa memilih torch
+# CPU-only dari PyPI yang nomornya lebih baru.
+--extra-index-url https://download.pytorch.org/whl/cu126
+torch==2.14.1+cu126
+torchvision==0.29.1+cu126

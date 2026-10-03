@@ -1,0 +1,28 @@
+# Engine lengkap di mesin GPU NVIDIA: detector D-FINE (LibreYOLO + PyTorch),
+# ByteTrack, rekognisi wajah (onnxruntime-gpu), ingest PyAV.
+#
+# Python 3.11 atau 3.12 (onnxruntime-gpu terbaru butuh >= 3.11; wheel torch
+# cu126 tersedia untuk keduanya). Disarankan env baru:
+#   conda create -n engine-gpu python=3.12 -y
+#   conda activate engine-gpu
+#   pip install -r engine/requirements-gpu-rtx4060.txt   (atau -rtx3050 / -gtx1060)
+#   python scripts/check_gpu_env.py
+#
+# Isi paket ketiga GPU SAMA; yang berbeda adalah config engine (lihat berkas
+# per GPU dan docs/SETUP-GPU.md). Driver NVIDIA minimal 560 (CUDA 12.6).
+
+-r requirements-torch-cu126.txt
+
+# Engine dasar: numpy, PyAV, OpenCV, PyYAML.
+-r requirements.txt
+
+# Detector + tracker. >= 1.6: predict(cuda_graph=...) dan predict(batch=N)
+# (uji 4060: forward 57 -> 12,6 ms). 1.5 tetap jalan tetapi tanpa keduanya.
+libreyolo>=1.6,<2
+Pillow>=10
+
+# Rekognisi wajah (SCRFD + AuraFace). CUDA 12, sekeluarga dengan torch cu126.
+-r requirements-face.txt
+
+# Uji dan alat ukur (pytest untuk memastikan upgrade tidak merusak apa pun).
+pytest>=8,<9

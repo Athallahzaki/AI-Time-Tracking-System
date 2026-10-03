@@ -1,0 +1,11 @@
+# RTX 3050 (Ampere, sm_86). Paket sama dengan GPU lain:
+-r requirements-gpu.txt
+#
+# Belum diuji di proyek ini. Perhatikan VRAM: versi laptop 4 GB (ada juga 6 GB).
+# Config awal yang disarankan:
+#   detector.model_path: LibreDFINEs.pt   mulai dari S; naik ke M bila VRAM dan fps cukup
+#   detector.half: false                  ukur dulu; di 4060 FP16 justru lebih lambat
+#   detector.cuda_graph: true             tiap ukuran batch = satu graph = VRAM tambahan
+#   detector.max_batch: 5
+#   recognition.onnx_gpu_mem_limit_mb: 1024   batasi arena onnxruntime agar tidak berebut VRAM
+# Jalankan dulu: python -m engine.tools.detector_profile dan batch_check --cuda-graph.
