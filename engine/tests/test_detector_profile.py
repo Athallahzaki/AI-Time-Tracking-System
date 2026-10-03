@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from engine.tools.detector_profile import (GpuSampler, Profile, find_torch_module, parse_smi_line,
                                            summarize_samples)
 
@@ -91,16 +93,19 @@ def test_vonis_gpu_dan_clock_rendah():
 
 
 def test_jumlah_kernel_dan_waktu_sibuk_dari_profiler():
+    """Op aten (CPU) membawa waktu CUDA anaknya; hanya event perangkat yang dihitung."""
     from types import SimpleNamespace as E
 
     from engine.tools.detector_profile import gpu_busy
 
-    events = [E(key="aten::cudnn_convolution", count=1120, self_device_time_total=147050.0),
-              E(key="aten::addmm", count=710, self_device_time_total=32073.0),
-              E(key="cudaLaunchKernel", count=9920, self_device_time_total=0.0),
-              E(key="cuLaunchKernel", count=740, self_cuda_time_total=0.0)]
+    cpu, cuda = E(name="CPU"), E(name="CUDA")
+    events = [E(key="aten::cudnn_convolution", count=1330, self_device_time_total=39661.0, device_type=cpu),
+              E(key="sm86_xmma_fprop_kernel", count=1330, self_device_time_total=39661.0, device_type=cuda),
+              E(key="elementwise_kernel", count=900, self_device_time_total=63910.0, device_type=cuda),
+              E(key="cudaLaunchKernel", count=13970, self_device_time_total=0.0, device_type=cpu),
+              E(key="cuLaunchKernel", count=870, self_cuda_time_total=0.0, device_type=cpu)]
     busy, launches = gpu_busy(events, 10)
-    assert busy == 17.9123 and launches == 1066
+    assert busy == pytest.approx(10.3571) and launches == 1484
 
 
 def test_model_di_cpu_langsung_ketahuan():

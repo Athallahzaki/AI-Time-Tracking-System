@@ -338,9 +338,22 @@ def _device_time_us(event: Any) -> float:
     return 0.0
 
 
+def _is_device_event(event: Any) -> bool:
+    """Kernel/memcpy yang berjalan DI GPU, bukan op aten di CPU.
+
+    Op aten juga membawa waktu CUDA anak-anaknya; menjumlahkan keduanya
+    menghitung kernel yang sama dua kali (v4 melaporkan 51,8 ms padahal tabel
+    torch.profiler sendiri hanya 10 ms per gambar). Ini aturan yang sama dengan
+    baris "Self CUDA time total" di tabel torch.profiler.
+    """
+    device_type = getattr(event, "device_type", None)
+    name = getattr(device_type, "name", str(device_type or "")).upper()
+    return bool(name) and "CPU" not in name and not getattr(event, "is_user_annotation", False)
+
+
 def gpu_busy(events: Sequence[Any], iters: int) -> Tuple[float, float]:
     """(ms kernel GPU per forward, peluncuran per forward) dari key_averages()."""
-    busy_us = sum(_device_time_us(e) for e in events)
+    busy_us = sum(_device_time_us(e) for e in events if _is_device_event(e))
     launches = sum(int(getattr(e, "count", 0)) for e in events if getattr(e, "key", "") in LAUNCH_EVENTS)
     return busy_us / 1000.0 / iters, launches / iters
 

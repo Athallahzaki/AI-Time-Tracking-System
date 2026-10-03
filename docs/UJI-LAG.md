@@ -217,6 +217,19 @@ Alat ini juga mengukur berapa ms GPU benar-benar mengerjakan kernel per forward 
 - "PENGHAMBAT DI GPU" + "GPU TIDAK NAIK CLOCK": masalah daya/mode laptop, bukan kode.
 - "MODEL DI CPU": cek `detector.device` dan `torch.cuda.is_available()`.
 
+### 3c. CUDA graph dan batch sungguhan (LibreYOLO >= 1.6)
+
+Hasil 3b di 4060 (3 Okt 18:28): forward eager 57 ms, CUDA graph 12,6 ms (4,5x), forward batch 5 langsung 15 ms/gambar. LibreYOLO 1.6.0 punya keduanya (`predict(cuda_graph=...)`, `predict(batch=N)`), dan engine sekarang memakainya.
+
+```powershell
+pip show libreyolo                      # versi?
+pip install -U "libreyolo>=1.6,<2"      # bila masih 1.5
+python -m pytest engine/tests -q        # pastikan tidak ada yang rusak oleh upgrade
+python -m engine.tools.batch_check --source C:\video\uji-siap.mp4 --batch-sizes 1,2,5 --no-half --cuda-graph
+```
+
+Pembanding batch_check selalu eager tanpa batch, jadi baris "salah" juga menangkap graph yang mengubah hasil. Bila "salah" = 0 di semua ukuran dan percepatan besar: set `cuda_graph: true` (dan `batch_inference: true`, `max_batch: 5` bila baris 5 jauh lebih cepat) di config, `half: false`. Frame pertama tiap ukuran batch lebih lambat (perekaman graph).
+
 ### 4. Lima kamera sungguhan
 
 MediaMTX: jalankan dengan config bawaan exe-nya (`.\mediamtx.exe` tanpa argumen), karena config proyek hanya membuka path `cam01`. Lalu publish lima path dari video yang sama, tanpa encode ulang:

@@ -31,9 +31,20 @@ algorithms once for our fixed 640x640 input; the first frames are slower,
 the rest faster. Measure it before keeping it on.
 
 **Batches (`batch_inference`, `predict_images`).** One call for several
-cameras' frames. Whether LibreYOLO accepts a list and returns one Results per
-image is checked on the first batch; if not, the adapter says so once and runs
-the images one by one, so turning the flag on can never return wrong boxes.
+cameras' frames. LibreYOLO only stacks a list into ONE forward when it is
+called with `batch=len(list)`; a bare list runs one forward per image (that is
+why batch_check measured only 1.1x on the RTX 4060). The adapter passes
+`batch=`. Whether LibreYOLO accepts it and returns one Results per image is
+checked on the first batch; if not, the adapter says so once and runs the
+images one by one, so turning the flag on can never return wrong boxes.
+
+**CUDA graph (`cuda_graph`).** D-FINE M at batch 1 is launch-bound: ±1000
+kernels per forward, each launched from Python (RTX 4060, 3 Oct: GPU busy ±10
+ms of a 57 ms forward, utilisation 26%). LibreYOLO >= 1.6 can replay the
+forward from a captured CUDA graph (`predict(..., cuda_graph=True)`),
+bit-identical to eager and verified per family; D-FINE opts in. One graph per
+input shape (batch size). Measured 12.6 ms instead of 57 ms. A LibreYOLO that
+does not know the option makes the adapter warn once and run eager.
 
 **Low-score boxes for ByteTrack (`raw_confidence`).** The model is asked for
 boxes down to `raw_confidence`, the native `Results` keeps all of them for
@@ -82,6 +93,7 @@ class DFINEDetector:
         load_model: bool = True,
         cudnn_benchmark: bool = False,
         batch_inference: bool = False,
+        cuda_graph: Union[bool, str] = False,
     ) -> None:
         self._model_path = self._resolve_model_path(model_path)
         self._conf = confidence_threshold
@@ -103,6 +115,7 @@ class DFINEDetector:
         # None = belum dicoba; True/False = hasil percobaan batch pertama.
         self._batch_inference = bool(batch_inference)
         self._batch_supported: Optional[bool] = None
+        self._cuda_graph: Union[bool, str] = normalize_cuda_graph(cuda_graph) if self._device != "cpu" else False
 
         self._model: Any = None
         self._class_names: Dict[int, str] = {}
@@ -168,6 +181,12 @@ class DFINEDetector:
             self._raw_conf,
         )
         self._model = LibreYOLO(self._model_path)
+        version = libreyolo_version()
+        logger.info("LibreYOLO %s; cuda_graph %s, batch_inference %s",
+                    version or "?", self._cuda_graph, self._batch_inference)
+        if self._cuda_graph and version and version_tuple(version) < (1, 6):
+            logger.warning("detector.cuda_graph needs LibreYOLO >= 1.6 (installed %s); it will be "
+                           "turned off at the first call. pip install -U \"libreyolo>=1.6\"", version)
         if self._cudnn_benchmark and self._device != "cpu":
             try:
                 import torch
@@ -290,18 +309,34 @@ class DFINEDetector:
         # yang gagal di-resolve harus terlihat, bukan diam-diam membuang semua.
         if self._target_class_ids:
             kwargs["classes"] = sorted(self._target_class_ids)
+        if self._cuda_graph:
+            kwargs["cuda_graph"] = self._cuda_graph
         # `half` and `verbose` are deliberately NOT passed: LibreYOLO accepts
         # both and does nothing with them (it says so in a warning).
         return kwargs
+
+    def _call(self, model_input: Any, colour_format: str, confidence: Optional[float], **extra: Any) -> Any:
+        """One LibreYOLO call. Turns cuda_graph off once if this LibreYOLO rejects it."""
+        kwargs = {**self._kwargs(colour_format, confidence), **extra}
+        try:
+            with self._inference():
+                return self._model(model_input, **kwargs)
+        except (TypeError, NotImplementedError, ValueError) as exc:
+            if not self._cuda_graph or "cuda_graph" not in str(exc):
+                raise
+            logger.warning("detector.cuda_graph rejected by LibreYOLO (%s); running eager. "
+                           "Needs LibreYOLO >= 1.6.", exc)
+            self._cuda_graph = False
+            kwargs.pop("cuda_graph", None)
+            with self._inference():
+                return self._model(model_input, **kwargs)
 
     def _predict(self, image: np.ndarray, confidence: Optional[float] = None) -> Any:
         if self._model is None:
             raise RuntimeError("LibreYOLO model not initialized.")
 
         model_input, colour_format, scale = self._prepare(image)
-        kwargs = self._kwargs(colour_format, confidence)
-        with self._inference():
-            result = self._model(model_input, **kwargs)
+        result = self._call(model_input, colour_format, confidence)
         if scale is not None:
             rescale_result(result, *scale)
         return result
@@ -321,8 +356,7 @@ class DFINEDetector:
         if results is None:
             results = []
             for model_input, colour_format, _ in prepared:
-                with self._inference():
-                    results.append(self._model(model_input, **self._kwargs(colour_format, confidence)))
+                results.append(self._call(model_input, colour_format, confidence))
         for result, (_, _, scale) in zip(results, prepared):
             if scale is not None:
                 rescale_result(result, *scale)
@@ -331,10 +365,11 @@ class DFINEDetector:
     def _try_batch(self, inputs: List[np.ndarray], colour_format: str,
                    confidence: Optional[float]) -> Optional[List[Any]]:
         try:
-            with self._inference():
-                out = self._model(list(inputs), **self._kwargs(colour_format, confidence))
+            # batch= is what makes LibreYOLO run ONE stacked forward; without
+            # it a list is processed image by image.
+            out = self._call(list(inputs), colour_format, confidence, batch=len(inputs))
         except Exception as exc:  # noqa: BLE001 -- jatuh ke per gambar, dicatat sekali
-            self._batch_unsupported(f"model(list) raised {exc!r}")
+            self._batch_unsupported(f"model(list, batch={len(inputs)}) raised {exc!r}")
             return None
         if isinstance(out, (list, tuple)) and len(out) == len(inputs):
             if self._batch_supported is None:
@@ -446,6 +481,39 @@ class DFINEDetector:
     @property
     def device(self) -> Union[str, int]:
         return self._device
+
+
+def normalize_cuda_graph(value: Any) -> Union[bool, str]:
+    """False / True / "auto" (LibreYOLO's accepted values)."""
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered == "auto":
+            return "auto"
+        if lowered in ("true", "1", "yes", "on"):
+            return True
+        if lowered in ("false", "0", "no", "off", ""):
+            return False
+        raise ValueError(f"detector.cuda_graph must be true, false or \"auto\", got {value!r}")
+    return bool(value)
+
+
+def libreyolo_version() -> Optional[str]:
+    try:
+        from importlib.metadata import version
+
+        return version("libreyolo")
+    except Exception:  # noqa: BLE001 -- informasi saja
+        return None
+
+
+def version_tuple(text: str) -> tuple:
+    import re
+
+    parts = []
+    for piece in text.split(".")[:3]:
+        match = re.match(r"\d+", piece)
+        parts.append(int(match.group()) if match else 0)
+    return tuple(parts)
 
 
 def _to_numpy(value: Any, dtype) -> np.ndarray:

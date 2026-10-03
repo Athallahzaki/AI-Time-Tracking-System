@@ -181,6 +181,7 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
             half=bool(det.get("half", False)),
             pre_resize=bool(det.get("pre_resize", False)),
             cudnn_benchmark=bool(det.get("cudnn_benchmark", False)),
+            cuda_graph=_cuda_graph(det.get("cuda_graph", False)),
             share_across_cameras=bool(det.get("share_across_cameras", True)),
             batch_inference=bool(det.get("batch_inference", False)),
             max_batch=int(det.get("max_batch", 8)),
@@ -234,3 +235,17 @@ def _optional_float(value: Any) -> Optional[float]:
 
 def _optional_int(value: Any) -> Optional[int]:
     return None if value is None else int(value)
+
+
+def _cuda_graph(value):
+    """false / true / "auto". Teks lain ditolak di DetectorConfig."""
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered == "auto":
+            return "auto"
+        if lowered in ("true", "yes", "on", "1"):
+            return True
+        if lowered in ("false", "no", "off", "0", ""):
+            return False
+        return value
+    return bool(value)

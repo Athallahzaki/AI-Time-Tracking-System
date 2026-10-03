@@ -352,6 +352,10 @@ class DetectorConfig:
     # cuDNN memilih algoritma konvolusi tercepat sekali untuk ukuran input
     # tetap (640). Frame pertama lebih lambat, sisanya lebih cepat. Ukur dulu.
     cudnn_benchmark: bool = False
+    # Putar ulang forward dari CUDA graph yang direkam (LibreYOLO >= 1.6,
+    # predict(cuda_graph=...)). D-FINE M di RTX 4060: 57 -> 12,6 ms, karena
+    # forward eager terikat peluncuran ±1000 kernel. False / True / "auto".
+    cuda_graph: Union[bool, str] = False
     # Satu detector untuk semua kamera (engine/perception/shared_detector.py):
     # bobot dimuat sekali, inferensi lewat satu thread dispatcher.
     share_across_cameras: bool = True
@@ -367,6 +371,8 @@ class DetectorConfig:
             raise ValueError("detector.max_batch must be >= 1.")
         if not 0.0 <= self.batch_wait_ms <= 100.0:
             raise ValueError("detector.batch_wait_ms must be within 0..100.")
+        if self.cuda_graph not in (False, True, "auto"):
+            raise ValueError('detector.cuda_graph must be true, false or "auto".')
 
 
 @dataclass(frozen=True)
