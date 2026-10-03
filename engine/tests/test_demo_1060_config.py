@@ -44,11 +44,16 @@ def test_sisanya_sama_dengan_profil_face():
     """Hanya target_fps dan detector yang boleh berbeda dari dfine-m-face.yaml."""
     demo = yaml.safe_load(Path(PATH).read_text(encoding="utf-8"))
     face = yaml.safe_load(Path("engine/config/dfine-m-face.yaml").read_text(encoding="utf-8"))
+    # Lokasi file model boleh beda per mesin (laptop 1060: engine/models/...);
+    # yang dikunci adalah perilakunya, bukan tata letak folder.
+    machine_paths = {"face_detector_model", "face_embedder_model"}
+    ignore = {"ingest": {"colour_conversion"}, "recognition": machine_paths}
     for section in ("ingest", "zones", "recognition", "tracker"):
-        if section == "ingest":
-            keep = {k: v for k, v in face[section].items() if k != "colour_conversion"}
-            assert {k: demo[section][k] for k in keep} == keep
-        else:
-            assert demo.get(section) == face.get(section), section
+        skip = ignore.get(section, set())
+        keep = {k: v for k, v in (face.get(section) or {}).items() if k not in skip}
+        got = {k: v for k, v in (demo.get(section) or {}).items() if k not in skip}
+        assert got == keep, section
+    for key in machine_paths:
+        assert str(demo["recognition"][key]).endswith(Path(face["recognition"][key]).name)
     assert {k: v for k, v in demo["core"].items() if k != "target_fps"} == \
         {k: v for k, v in face["core"].items() if k != "target_fps"}

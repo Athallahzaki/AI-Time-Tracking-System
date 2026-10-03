@@ -28,6 +28,16 @@ LIBREYOLO_MIN = (1, 6)
 ORT_CUDA13_FROM = (1, 27)
 DRIVER_MIN = 560
 FACE_MODEL = ROOT / "models" / "scrfd_10g_bnkps.onnx"
+# Tempat lain yang dipakai di mesin tim (laptop 1060: engine/models/recognition/).
+FACE_MODEL_CANDIDATES = (
+    FACE_MODEL,
+    ROOT / "engine" / "models" / "recognition" / "scrfd_10g_bnkps.onnx",
+    ROOT / "engine" / "models" / "scrfd_10g_bnkps.onnx",
+)
+
+
+def find_face_model(candidates=FACE_MODEL_CANDIDATES) -> Optional[Path]:
+    return next((path for path in candidates if Path(path).is_file()), None)
 
 
 @dataclass
@@ -184,14 +194,18 @@ def collect() -> List[Check]:
         providers = list(ort.get_available_providers())
     checks.append(check_onnxruntime(getattr(ort, "__version__", None), providers,
                                     _dist_version("onnxruntime-gpu") is not None))
-    if ort is not None and "CUDAExecutionProvider" in providers and FACE_MODEL.exists():
+    face_model = find_face_model()
+    if ort is not None and "CUDAExecutionProvider" in providers and face_model is None:
+        checks.append(Check("PERINGATAN", "onnx-sesi", "scrfd_10g_bnkps.onnx tidak ditemukan di models/ atau "
+                            "engine/models/recognition/: sesi CUDA rekognisi tidak diuji"))
+    elif ort is not None and "CUDAExecutionProvider" in providers:
         try:
-            session = ort.InferenceSession(str(FACE_MODEL), providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
+            session = ort.InferenceSession(str(face_model), providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
             active = session.get_providers()
             status = "OK" if "CUDAExecutionProvider" in active else "GAGAL"
-            checks.append(Check(status, "onnx-sesi", f"{FACE_MODEL.name}: provider aktif {active}"))
+            checks.append(Check(status, "onnx-sesi", f"{face_model}: provider aktif {active}"))
         except Exception as exc:  # noqa: BLE001
-            checks.append(Check("GAGAL", "onnx-sesi", f"{FACE_MODEL.name}: {exc}"))
+            checks.append(Check("GAGAL", "onnx-sesi", f"{face_model.name}: {exc}"))
 
     av = _module("av")
     if av is None:

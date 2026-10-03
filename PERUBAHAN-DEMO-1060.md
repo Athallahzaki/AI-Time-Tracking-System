@@ -33,3 +33,23 @@ python scripts/preflight_demo.py
 ```
 
 Lalu ikuti docs/DEMO-1060.md.
+
+## Revisi 4 Okt 03:00 (setelah model wajah dipindah ke engine/models/)
+
+- `demo-1060.yaml`: path model dari repo laptop 1060
+  (`engine/models/recognition/scrfd_10g_bnkps.onnx`,
+  `engine/models/embedder/glintr100.onnx`) dipertahankan.
+- `test_demo_1060_config.py`: path file model boleh beda per mesin. Tes
+  sebelumnya gagal karena itu, bukan karena perilakunya berubah. Nama file tetap
+  harus sama.
+- `scripts/check_gpu_env.py`: SCRFD dicari juga di `engine/models/recognition/`.
+  Bila tidak ketemu, sekarang muncul PERINGATAN `onnx-sesi`. Dulu barisnya hilang
+  diam-diam, dan itulah sebabnya model yang hilang tidak terlihat di laptop 1060.
+
+## Revisi 4 Okt 06:15: profil RTX 4060
+
+- `engine/config/demo-4060.yaml`: D-FINE M, `half: true`, `cuda_graph: true`,
+  `fast_preprocess: true`, `target_fps: 10`. Rekognisi, ingest, dan tracker sama
+  persis dengan demo-1060.
+- `engine/tests/test_demo_4060_config.py` (2).
+- `docs/DEMO-1060.md`: bagian "Di laptop RTX 4060".
