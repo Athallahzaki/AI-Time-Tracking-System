@@ -33,3 +33,12 @@ test_cuda_graph_batch.py +4: kasus yang tidak boleh disentuh, fallback hook, dan
 dua tes yang butuh torch/LibreYOLO (di-skip di CI tanpa torch, JALAN di laptop uji):
 tensor wajib `torch.equal` dengan `preprocess_image` LibreYOLO.
 Suite di sini: semua lulus (2 skip karena tanpa torch).
+
+## Revisi v11 (uji 4060 20:13)
+
+Hasil v10: D-FINE M cuda_graph + fast_preprocess 17,6 ms/gambar (dari 28,5),
+salah 0, TETAPI IoU min 0,989 / Δskor 0,006 -- tidak bit-identik. Tes CPU lulus,
+jadi bedanya di GPU: PyTorch CUDA membagi dengan skalar lewat perkalian
+kebalikan (beda 1 ulp). Sekarang normalisasi memakai tabel lookup 256 nilai
+float32 yang dihitung numpy persis seperti LibreYOLO -> identik di CPU dan GPU.
+Tes baru `test_tensor_di_gpu_juga_sama_persis` (jalan bila ada CUDA).

@@ -128,7 +128,8 @@ def _timed(fn: Callable[[], List[Any]]):
     return out, time.perf_counter() - started
 
 
-def run(detector: Any, images: Sequence[np.ndarray], batch_sizes: Sequence[int], repeat: int = 2) -> Report:
+def run(detector: Any, images: Sequence[np.ndarray], batch_sizes: Sequence[int], repeat: int = 2,
+        reference_fp32: bool = False) -> Report:
     """`detector` = DFINEDetector (atau yang setara) dengan predict_images.
 
     Pembanding selalu eager tanpa batch. Bila detector memakai cuda_graph,
@@ -137,6 +138,10 @@ def run(detector: Any, images: Sequence[np.ndarray], batch_sizes: Sequence[int],
     """
     graph_mode = getattr(detector, "_cuda_graph", False)
     fast_mode = getattr(detector, "_fast_preprocess", False)
+    half_mode = getattr(detector, "_half", False)
+    if reference_fp32 and hasattr(detector, "_half"):
+        # Pembanding FP32: yang diukur sekaligus adalah selisih FP16 terhadap FP32.
+        detector._half = False
     if hasattr(detector, "_cuda_graph"):
         detector._cuda_graph = False
     if hasattr(detector, "_fast_preprocess"):
@@ -153,6 +158,8 @@ def run(detector: Any, images: Sequence[np.ndarray], batch_sizes: Sequence[int],
         detector._cuda_graph = graph_mode
     if hasattr(detector, "_fast_preprocess"):
         detector._fast_preprocess = fast_mode
+    if hasattr(detector, "_half"):
+        detector._half = half_mode
     detector._batch_inference = True
     report = Report(images=len(images), reference_ms_per_image=round(ref_ms, 1), batch_supported=None)
     for size in batch_sizes:
@@ -227,6 +234,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     precision.add_argument("--no-half", action="store_true",
                            help="paksa detector.half: false (FP32), apa pun isi config")
     parser.add_argument("--cudnn-benchmark", action="store_true", help="paksa detector.cudnn_benchmark: true")
+    parser.add_argument("--reference-fp32", action="store_true",
+                        help="pembanding FP32 walau --half: 'salah' juga menangkap selisih FP16 vs FP32")
     parser.add_argument("--fast-preprocess", action="store_true",
                         help="paksa detector.fast_preprocess: true (pra-proses di GPU); pembanding tetap PIL")
     parser.add_argument("--cuda-graph", action="store_true",
@@ -256,11 +265,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     detector = factory.build_detector(config)
     detector.warmup()
     sizes = [int(x) for x in args.batch_sizes.split(",") if x.strip()]
-    report = run(detector, images, sizes, repeat=max(1, args.repeat))
+    report = run(detector, images, sizes, repeat=max(1, args.repeat), reference_fp32=args.reference_fp32)
     print(f"model {config.detector.model_path}, half {config.detector.half}, "
           f"cudnn_benchmark {config.detector.cudnn_benchmark}, cuda_graph {getattr(detector, '_cuda_graph', '?')} "
           f"fast_preprocess {getattr(detector, '_fast_preprocess', '?')} "
-          f"(dipakai {getattr(detector, '_fast_preprocess_hits', 0)}x) (pembanding: eager, PIL, tanpa batch)")
+          f"(dipakai {getattr(detector, '_fast_preprocess_hits', 0)}x) (pembanding: eager, PIL, tanpa batch"
+          f"{', FP32' if args.reference_fp32 else ''})")
     print(format_report(report))
     if args.json:
         with open(args.json, "w", encoding="utf-8") as handle:

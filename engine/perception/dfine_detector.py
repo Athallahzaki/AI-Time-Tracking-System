@@ -548,8 +548,26 @@ def _fast_tensor(image: Any, color_format: str, input_size: Any, device: Any) ->
     tensor = torch.from_numpy(np.ascontiguousarray(image))
     if device is not None:
         tensor = tensor.to(device, non_blocking=False)
-    # Sama dengan preprocess_numpy LibreYOLO: float32(uint8) / 255.0, lalu CHW.
-    return tensor.permute(2, 0, 1).to(torch.float32).div_(255.0).unsqueeze(0).contiguous()
+    # Sama PERSIS dengan preprocess_numpy LibreYOLO: float32(uint8) / 255.0.
+    # Bukan `div_(255.0)`: di CUDA pembagian dengan skalar dikerjakan sebagai
+    # kali kebalikan dan meleset 1 ulp untuk sebagian nilai (uji 4060 3 Okt:
+    # IoU min 0,989 lawan jalur PIL). Tabel 256 nilai dihitung numpy, lalu diindeks.
+    lut = _normalise_lut(tensor.device, torch)
+    return lut[tensor.long()].permute(2, 0, 1).unsqueeze(0).contiguous()
+
+
+_LUTS: Dict[str, Any] = {}
+
+
+def _normalise_lut(device: Any, torch: Any) -> Any:
+    """float32(i) / 255.0 untuk i = 0..255, dihitung numpy (identik dengan LibreYOLO)."""
+    key = str(device)
+    lut = _LUTS.get(key)
+    if lut is None:
+        values = np.arange(256, dtype=np.float32) / np.float32(255.0)
+        lut = torch.from_numpy(values).to(device)
+        _LUTS[key] = lut
+    return lut
 
 
 def normalize_cuda_graph(value: Any) -> Union[bool, str]:

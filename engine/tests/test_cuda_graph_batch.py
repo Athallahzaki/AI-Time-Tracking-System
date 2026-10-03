@@ -188,3 +188,49 @@ def test_hook_mengembalikan_tensor_dan_ukuran_asli():
     assert isinstance(tensor, torch.Tensor) and tensor.shape == (1, 3, 640, 640)
     assert float(tensor.max()) == 1.0 and size == (640, 640) and ratio == 1.0
     assert orig.shape == (640, 640, 3) and detector._fast_preprocess_hits == 1
+
+
+def test_tensor_di_gpu_juga_sama_persis():
+    """Uji 4060 20:13: `.div_(255.0)` di CUDA beda 1 ulp (IoU 0,989). Tabel lookup wajib identik."""
+    torch = pytest.importorskip("torch")
+    dfine_utils = pytest.importorskip("libreyolo.models.dfine.utils")
+    if not torch.cuda.is_available():
+        pytest.skip("butuh CUDA")
+    rgb = np.random.default_rng(5).integers(0, 256, (640, 640, 3), dtype=np.uint8)
+    reference, _, _, _ = dfine_utils.preprocess_image(rgb, input_size=640, color_format="rgb")
+    fast = _fast_tensor(rgb, "rgb", 640, "cuda")
+    assert fast.is_cuda and torch.equal(fast.cpu(), reference)
+
+
+def test_lut_sama_dengan_pembagian_numpy():
+    from engine.perception import dfine_detector as module
+
+    values = np.arange(256, dtype=np.uint8).astype(np.float32) / 255.0
+    assert values.dtype == np.float32 and values[255] == 1.0 and values[0] == 0.0
+    assert np.array_equal(values, np.array([np.float32(v) / np.float32(255.0) for v in range(256)], np.float32))
+    assert hasattr(module, "_normalise_lut")
+
+
+def test_tabel_pembagi_di_cpu():
+    torch = pytest.importorskip("torch")
+    from engine.perception.dfine_detector import _normalise_lut
+
+    lut = _normalise_lut("cpu", torch).numpy()
+    assert np.array_equal(lut, np.arange(256, dtype=np.float32) / np.float32(255.0))
+
+
+def test_pembanding_fp32_dipulihkan():
+    from engine.tools.batch_check import run
+
+    detector = _detector(Model(), batch_inference=True)
+    detector._half = True
+    seen = []
+    original = detector._call
+
+    def spy(*a, **k):
+        seen.append(detector._half)
+        return original(*a, **k)
+
+    detector._call = spy
+    run(detector, [np.zeros((8, 8, 3), np.uint8)] * 2, [1], repeat=1, reference_fp32=True)
+    assert seen[0] is False and seen[-1] is True and detector._half is True

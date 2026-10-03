@@ -241,6 +241,12 @@ python -m engine.tools.batch_check --source C:\video\uji-siap.mp4 --batch-sizes 
 
 Pembanding tetap pra-proses PIL LibreYOLO + eager. "salah" wajib 0. Baris pertama mencetak berapa kali jalur cepat dipakai; 0 berarti frame tidak lewat `pre_resize`.
 
+Hasil 4060 20:13-20:17: FP32 17,6 ms, FP16 14,4 ms (graph + fast_preprocess). Dengan graph, FP16 akhirnya lebih cepat. Tetapi pembanding `--half` juga FP16, jadi selisih FP16 vs FP32 belum terukur. Ukur dengan pembanding FP32:
+
+```powershell
+python -m engine.tools.batch_check --source C:\video\uji-siap.mp4 --batch-sizes 1 --half --cuda-graph --fast-preprocess --reference-fp32
+```
+
 ### 4. Lima kamera sungguhan
 
 MediaMTX: jalankan dengan config bawaan exe-nya (`.\mediamtx.exe` tanpa argumen), karena config proyek hanya membuka path `cam01`. Lalu publish lima path dari video yang sama, tanpa encode ulang:
