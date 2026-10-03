@@ -274,8 +274,10 @@ def _run_runtime(execution: str, seconds: float = 2.5):
     matcher.rebuild()
 
     rng = np.random.default_rng(7)
+    threads = []
 
     def slow_recognize(track, frame):
+        threads.append(threading.current_thread().name)
         time.sleep(0.05)                          # 50 ms per wajah, seperti SCRFD+AuraFace di GPU sibuk
         # Wajah asli berbeda sedikit antar-frame; bukti identik ditolak arbiter
         # sebagai redundant_evidence (bukan bukti independen).
@@ -298,13 +300,27 @@ def _run_runtime(execution: str, seconds: float = 2.5):
     finally:
         runtime.close()
     identified = [m for m in emitted if m.get("type") == "track.identified"]
-    return frames, identified
+    return frames, identified, threads
 
 
 def test_async_loop_frame_tidak_tertahan_recognizer_lambat():
-    sync_frames, sync_identified = _run_runtime("sync")
-    async_frames, async_identified = _run_runtime("async")
-    assert async_frames > 3 * max(1, sync_frames), (
+    """Yang dibuktikan: rekognisi TIDAK berjalan di thread kamera saat async.
+
+    Dulu diukur dengan rasio frame (async > 3x sync). Rasio itu bergantung mesin:
+    di Windows/4060 (3 Okt) 4410 vs 1961 = 2,25x, karena loop mock jauh lebih
+    cepat dari 50 ms sehingga porsi waktu rekognisi berbeda per mesin. Thread
+    tempat recognizer dipanggil tidak bergantung kecepatan mesin.
+    """
+    sync_frames, _, sync_threads = _run_runtime("sync")
+    async_frames, async_identified, async_threads = _run_runtime("async")
+    camera_thread = "camera-cam01"
+    assert sync_threads and all(name == camera_thread for name in sync_threads), (
+        f"sync wajib memanggil recognizer di thread kamera: {set(sync_threads)}"
+    )
+    assert async_threads and camera_thread not in async_threads, (
+        f"async: recognizer dipanggil di thread kamera -> rekognisi masih menahan loop ({set(async_threads)})"
+    )
+    assert async_frames > sync_frames, (
         f"loop frame async {async_frames} frame vs sync {sync_frames}: rekognisi masih menahan loop"
     )
     assert async_identified, "async wajib tetap mengidentifikasi orangnya"
