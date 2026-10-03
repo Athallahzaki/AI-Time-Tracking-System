@@ -66,6 +66,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Union
 
@@ -129,6 +130,8 @@ class DFINEDetector:
         self._cuda_graph: Union[bool, str] = normalize_cuda_graph(cuda_graph) if self._device != "cpu" else False
         self._fast_preprocess = bool(fast_preprocess)
         self._fast_preprocess_hits = 0
+        # (nama, t0, t1) perf_counter dari panggilan detect terakhir; dibaca pipeline.
+        self.last_spans: List[Any] = []
 
         self._model: Any = None
         self._class_names: Dict[int, str] = {}
@@ -354,10 +357,16 @@ class DFINEDetector:
         if self._model is None:
             raise RuntimeError("LibreYOLO model not initialized.")
 
+        t0 = time.perf_counter()
         model_input, colour_format, scale = self._prepare(image)
+        t1 = time.perf_counter()
         result = self._call(model_input, colour_format, confidence)
         if scale is not None:
             rescale_result(result, *scale)
+        t2 = time.perf_counter()
+        # Sub-span untuk bench (pipeline mencatatnya bila ada). LibreYOLO
+        # memanggil .cpu() di pasca-prosesnya, jadi t2 sudah menunggu GPU.
+        self.last_spans = [("detector_prepare", t0, t1), ("detector_infer", t1, t2)]
         return result
 
     def predict_images(self, images: List[np.ndarray], confidence: Optional[float] = None) -> List[Any]:
@@ -446,9 +455,12 @@ class DFINEDetector:
 
     def detect(self, frame: Frame) -> List[Detection]:
         result = self._predict(frame.image)
+        t2 = time.perf_counter()
         self._remember_result(frame, result)
         self._refresh_class_names(result)
-        return self.postprocess(frame, result)
+        detections = self.postprocess(frame, result)
+        self.last_spans = list(self.last_spans) + [("detector_post", t2, time.perf_counter())]
+        return detections
 
     def note_result(self, result: Any) -> None:
         """Class names may only arrive with the first result (shared detector path)."""

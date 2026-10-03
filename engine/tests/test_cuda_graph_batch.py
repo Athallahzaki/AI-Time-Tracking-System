@@ -234,3 +234,15 @@ def test_pembanding_fp32_dipulihkan():
     detector._call = spy
     run(detector, [np.zeros((8, 8, 3), np.uint8)] * 2, [1], repeat=1, reference_fp32=True)
     assert seen[0] is False and seen[-1] is True and detector._half is True
+
+
+def test_detect_mencatat_sub_span():
+    from engine.ports.frame import Frame, FrameMetadata
+
+    detector = _detector(Model())
+    frame = Frame(image=_img(), metadata=FrameMetadata(frame_id=1, timestamp=0.0, source_id="cam", fps=10.0,
+                                                       width=8, height=8))
+    detector.detect(frame)
+    names = [name for name, _, _ in detector.last_spans]
+    assert names == ["detector_prepare", "detector_infer", "detector_post"]
+    assert all(b >= a for _, a, b in detector.last_spans)

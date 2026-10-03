@@ -209,14 +209,21 @@ class DetectorHandle:
         self.camera_id = camera_id
         self._last_result: Any = None
         self._last_result_frame_id: Optional[int] = None
+        self.last_spans: List[Any] = []
 
     def warmup(self) -> None:
         self._shared.warmup()
 
     def detect(self, frame: Frame) -> List[Detection]:
-        result = self._shared.infer(frame.image)
+        image = frame.image
+        t0 = time.perf_counter()
+        result = self._shared.infer(image)
+        t1 = time.perf_counter()
         self._remember(frame, result)
-        return self._shared.inner.postprocess(frame, result)
+        detections = self._shared.inner.postprocess(frame, result)
+        # Antre + pra-proses + inferensi di thread dispatcher, lalu pasca-proses di sini.
+        self.last_spans = [("detector_shared_infer", t0, t1), ("detector_post", t1, time.perf_counter())]
+        return detections
 
     def predict_raw(self, frame: Frame, confidence: Optional[float] = None) -> Any:
         result = self._shared.infer(frame.image, confidence=confidence)
