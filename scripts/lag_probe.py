@@ -53,6 +53,7 @@ from contracts import handshake_auth  # noqa: E402
 GROWING_SLOPE = 0.02          # dtk umur per dtk uji (= 1,2 dtk per menit)
 GROWING_DELTA = 2.0           # selisih median menit terakhir - menit pertama
 FRESH_AGE = 1.5               # umur kotak yang dianggap segar
+REPLAY_SLACK = 5.0            # event ber-ts lebih tua dari awal uji - ini = putar ulang outbox
 FUTURE_AGE = -0.5             # lebih negatif dari ini = `at` di masa depan: data tidak valid
 
 
@@ -141,6 +142,10 @@ def _median_in(points: List[Tuple[float, float]], lo: float, hi: float) -> Optio
     return statistics.median(values) if values else None
 
 
+def _fmt(value: Optional[float]) -> str:
+    return "-" if value is None else f"{value:.2f}"
+
+
 def summarize(rows: List[Dict[str, Any]], duration: float) -> List[str]:
     lines: List[str] = []
     cameras = sorted({r["camera_id"] for r in rows if r["camera_id"]})
@@ -154,16 +159,24 @@ def summarize(rows: List[Dict[str, Any]], duration: float) -> List[str]:
                 if r["camera_id"] == camera and r["lag_s"] != ""]
         fps = [r["fps"] for r in rows if r["camera_id"] == camera and r["fps"] != ""]
         events = [r["note"] for r in rows if r["camera_id"] == camera and r["source"] == "event"]
+        identified = [r["note"] for r in rows if r["camera_id"] == camera and r.get("source") == "identified"]
+        drifts = [float(r["drift_s"]) for r in rows
+                  if r["camera_id"] == camera and r.get("drift_s") not in ("", None)]
 
         lines.append(f"== {camera}")
         if not ages:
             lines.append("  tidak ada view.frame: engine tidak menganalisis kamera ini (atau --view-fps 0).")
             continue
+        # Jendela "awal" dihitung dari view.frame PERTAMA, bukan dari probe dibuka:
+        # engine yang lama memuat model (GPU lambat, warmup CUDA) bisa baru mulai
+        # setelah lebih dari satu jendela, dan jendela kosong dulu membuat probe crash.
+        start = min(x for x, _ in ages)
         end = max(x for x, _ in ages)
-        first = _median_in(ages, 0.0, window)
+        first = _median_in(ages, start, start + window)
         last = _median_in(ages, end - window, end + 1)
         slope = _slope(ages)
-        lines.append(f"  umur kotak (median) awal {first:.2f} dtk -> akhir {last:.2f} dtk; "
+        lines.append(f"  view.frame pertama pada detik {start:.0f} probe; {len(ages)} sampel")
+        lines.append(f"  umur kotak (median) awal {_fmt(first)} dtk -> akhir {_fmt(last)} dtk; "
                      f"kemiringan {slope if slope is not None else float('nan'):+.3f} dtk/dtk")
         if lags:
             lines.append(f"  lag decode->analisis: median {statistics.median(y for _, y in lags):.2f} dtk, "
@@ -173,6 +186,11 @@ def summarize(rows: List[Dict[str, Any]], duration: float) -> List[str]:
                          "atau --health-seconds terlalu jarang untuk durasi uji).")
         if fps:
             lines.append(f"  fps analisis: median {statistics.median(fps):.1f}")
+        if drifts:
+            lines.append(f"  sisa bias jam (P18): awal {drifts[0]:+.2f} dtk -> akhir {drifts[-1]:+.2f} dtk")
+        if identified:
+            people = sorted(set(identified))
+            lines.append(f"  track.identified: {len(identified)} kali ({', '.join(people[:5])})")
         for note in events:
             lines.append(f"  event: {note}")
 
@@ -205,14 +223,17 @@ def run(host: str, port: int, cameras: List[Tuple[str, str]], seconds: float,
                  "cameras": [{"camera_id": c, "uri": u, "enabled": True} for c, u in cameras]})
 
     started = time.time()
+    replayed = 0
     rows: List[Dict[str, Any]] = []
     last_view: Dict[str, float] = {}
-    fields = ["wall_t", "elapsed_s", "camera_id", "source", "frame_age_s", "lag_s", "fps", "dropped", "note"]
+    fields = ["wall_t", "elapsed_s", "camera_id", "source", "frame_age_s", "lag_s", "fps", "dropped",
+              "drift_s", "note"]
 
     def row(camera_id: str, source: str, **values: Any) -> None:
         now = time.time()
         entry = {"wall_t": round(now, 3), "elapsed_s": round(now - started, 3), "camera_id": camera_id,
-                 "source": source, "frame_age_s": "", "lag_s": "", "fps": "", "dropped": "", "note": ""}
+                 "source": source, "frame_age_s": "", "lag_s": "", "fps": "", "dropped": "", "drift_s": "",
+                 "note": ""}
         entry.update(values)
         rows.append(entry)
 
@@ -232,6 +253,12 @@ def run(host: str, port: int, cameras: List[Tuple[str, str]], seconds: float,
                 continue
             kind = message.get("type")
             now = time.time()
+            # Engine memutar ulang outbox mulai last_event_seq=0: event dari
+            # run sebelumnya (outbox yang sama) bukan data uji ini.
+            sent = _parse_at(message.get("ts"))
+            if kind != "view.frame" and sent is not None and sent < started - REPLAY_SLACK:
+                replayed += 1
+                continue
             if kind == "view.frame":
                 camera = message.get("camera_id", "")
                 at = _parse_at(message.get("at"))
@@ -243,7 +270,10 @@ def run(host: str, port: int, cameras: List[Tuple[str, str]], seconds: float,
                     row(camera, "health",
                         lag_s=m.get("lag_seconds", ""), fps=m.get("effective_fps", ""),
                         dropped=m.get("frames_dropped_stale", ""),
+                        drift_s=m.get("clock_drift_seconds", ""),
                         note=(message.get("cameras") or {}).get(camera, ""))
+            elif kind == "track.identified":
+                row(message.get("camera_id", ""), "identified", note=str(message.get("person_id", "")))
             elif kind in ("camera.degraded", "camera.recovered", "camera.online", "camera.failed"):
                 detail = message.get("reason") or message.get("kind") or ""
                 row(message.get("camera_id", ""), "event", note=f"{kind} {detail}".strip())
@@ -258,7 +288,32 @@ def run(host: str, port: int, cameras: List[Tuple[str, str]], seconds: float,
             writer.writeheader()
             writer.writerows(rows)
 
-    return summarize(rows, time.time() - started)
+    lines = summarize(rows, time.time() - started)
+    if replayed:
+        lines.append(f"(diabaikan {replayed} event putar ulang dari outbox, lebih tua dari awal uji)")
+    return lines
+
+
+NUMERIC_FIELDS = ("wall_t", "elapsed_s", "frame_age_s", "lag_s", "fps", "dropped", "drift_s")
+
+
+def load_rows(path: Path) -> List[Dict[str, Any]]:
+    """Baca CSV probe kembali, untuk meringkas ulang tanpa mengulang uji."""
+    rows: List[Dict[str, Any]] = []
+    with path.open(newline="", encoding="utf-8") as handle:
+        for raw in csv.DictReader(handle):
+            entry: Dict[str, Any] = dict(raw)
+            for name in NUMERIC_FIELDS:
+                value = entry.get(name, "")
+                if value not in ("", None):
+                    try:
+                        entry[name] = float(value)
+                    except ValueError:
+                        entry[name] = ""
+                else:
+                    entry[name] = ""
+            rows.append(entry)
+    return rows
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -269,7 +324,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--minutes", type=float, default=5.0)
     parser.add_argument("--seconds", type=float, default=None, help="override --minutes (untuk uji singkat)")
     parser.add_argument("--out", default=None, help="berkas CSV (default bench-out/lag-probe-<waktu>.csv)")
+    parser.add_argument("--summarize", default=None, metavar="CSV",
+                        help="ringkas ulang CSV hasil probe sebelumnya, tanpa menyambung ke engine")
     args = parser.parse_args(argv)
+
+    if args.summarize:
+        rows = load_rows(Path(args.summarize))
+        duration = max((r["elapsed_s"] for r in rows if r["elapsed_s"] != ""), default=0.0)
+        print("\n".join(summarize(rows, duration)))
+        return 0
 
     host, _, port = args.engine.rpartition(":")
     cameras = [tuple(spec.split("=", 1)) for spec in (args.camera or ["cam01=rtsp://127.0.0.1:8554/cam01"])]

@@ -109,6 +109,13 @@ class Stamp:
     """
 
 
+# P18: ukur bias offset hanya setelah burst awal lewat (MediaMTX mengirim
+# mulai keyframe terakhir sekaligus), dan dari jendela beberapa detik terakhir.
+DRIFT_SETTLE_PTS = 3.0
+DRIFT_WINDOW_PTS = 10.0
+DRIFT_MIN_SPAN_PTS = 3.0
+
+
 @dataclass
 class StreamTimeline:
     """
@@ -125,6 +132,9 @@ class StreamTimeline:
     _backwards: int = 0
     _epochs_opened: int = 0
     _frames_in_epoch: int = 0
+    # P18: (pts, waktu tiba - (offset + pts)) dari frame yang sudah lewat masa
+    # burst awal. Minimum di jendela ini = bias offset + latensi terkecil.
+    _residuals: Any = None
 
     def begin_epoch(self, wall_now: Optional[float] = None) -> int:
         """
@@ -147,9 +157,10 @@ class StreamTimeline:
         self._epoch_wall_start = wall_now if wall_now is not None else time.time()
         self._last_pts = None
         self._frames_in_epoch = 0
+        self._residuals = None
         return self.epoch
 
-    def stamp(self, raw_pts: Optional[float]) -> Stamp:
+    def stamp(self, raw_pts: Optional[float], arrival: Optional[float] = None) -> Stamp:
         """
         Turns one container PTS into a `Stamp`.
 
@@ -189,7 +200,46 @@ class StreamTimeline:
 
         offset = self.wallclock_offset
         wall = None if offset is None else offset + pts
+        if arrival is not None and wall is not None and pts >= DRIFT_SETTLE_PTS:
+            self._observe_residual(pts, arrival - wall)
         return Stamp(pts=pts, container_pts=raw_pts, wallclock=wall, offset=offset)
+
+    # -- P18: bias offset ---------------------------------------------------
+
+    def _observe_residual(self, pts: float, residual: float) -> None:
+        from collections import deque
+
+        if self._residuals is None:
+            self._residuals = deque()
+        window = self._residuals
+        window.append((pts, residual))
+        while window and pts - window[0][0] > DRIFT_WINDOW_PTS:
+            window.popleft()
+
+    @property
+    def offset_bias(self) -> Optional[float]:
+        """Perkiraan berapa detik `offset + pts` MENDAHULUI waktu tiba frame.
+
+        Frame tidak mungkin tiba sebelum direkam, jadi minimum (waktu tiba -
+        (offset + pts)) di sebuah jendela adalah bias offset ditambah latensi
+        terkecil. Negatif = `at` berada di masa depan (offset diambil saat
+        stream dibuka, padahal keyframe pertama yang dikirim MediaMTX direkam
+        lebih awal). None sampai jendela cukup panjang.
+        """
+        window = self._residuals
+        if not window or window[-1][0] - window[0][0] < DRIFT_MIN_SPAN_PTS:
+            return None
+        return min(r for _, r in window)
+
+    def slew_offset(self, delta: float) -> None:
+        """Geser offset epoch ini. Residu yang tersimpan ikut digeser."""
+        if self._epoch_wall_start is None or not delta:
+            return
+        self._epoch_wall_start += delta
+        if self._residuals:
+            from collections import deque
+
+            self._residuals = deque((p, r - delta) for p, r in self._residuals)
 
     @property
     def wallclock_offset(self) -> Optional[float]:

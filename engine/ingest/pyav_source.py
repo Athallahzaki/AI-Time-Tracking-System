@@ -64,9 +64,11 @@ timeout, so a dead camera does not hang a thread forever.
 
 from __future__ import annotations
 
+import importlib
 import logging
 import threading
 import time
+import types
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, Optional, Tuple
 
@@ -130,7 +132,10 @@ class PyAVSource(BaseFrameSource):
         colour_conversion: str = "to_ndarray",
         live_buffer: str = "none",
         av_module: Any = None,
+        hwaccel: str = "none",
     ) -> None:
+        if hwaccel not in ("none", "cuda"):
+            raise ValueError(f"Unknown hwaccel {hwaccel!r}. Expected 'none' or 'cuda'.")
         if live_buffer not in LIVE_BUFFER_MODES:
             raise ValueError(
                 f"Unknown live_buffer {live_buffer!r}. Expected one of "
@@ -155,6 +160,10 @@ class PyAVSource(BaseFrameSource):
         self._reformatter: Any = None
         self._av = av_module
         self._live_buffer = live_buffer
+        self._hwaccel = hwaccel
+        # Apa yang terjadi saat hwaccel diminta: "off", "requested" (dibuka
+        # dengan HWAccel), atau "unavailable: <alasan>" (gagal, berhenti keras).
+        self.hwaccel_status = "off"
 
         # Reader-thread state (live_buffer == "latest" on a network stream).
         self._reader: Optional[threading.Thread] = None
@@ -244,7 +253,10 @@ class PyAVSource(BaseFrameSource):
 
     def _open_container(self) -> None:
         av = self._import_av()
-        self._container = av.open(self._uri, options=self._open_options())
+        open_kwargs: Dict[str, Any] = {"options": self._open_options()}
+        if self._hwaccel != "none":
+            open_kwargs["hwaccel"] = self._make_hwaccel(av)
+        self._container = av.open(self._uri, **open_kwargs)
 
         try:
             self._stream = self._container.streams.video[0]
@@ -294,6 +306,33 @@ class PyAVSource(BaseFrameSource):
                 else ""
             ),
         )
+
+    def _make_hwaccel(self, av: Any) -> Any:
+        """HWAccel PyAV (>= 14). Diminta tapi tidak bisa = error, bukan diam.
+
+        `allow_software_fallback=True` hanya untuk codec yang tidak didukung GPU
+        (mis. profil H.264 yang aneh); hasilnya tetap terbaca di `hwaccel_status`
+        dan di log FFmpeg. Frame dikembalikan ke RAM oleh PyAV, jadi `frame.image`
+        tetap ndarray BGR seperti biasa.
+        """
+        try:
+            hw_module = getattr(getattr(av, "codec", None), "hwaccel", None)
+            if hw_module is None and isinstance(av, types.ModuleType):
+                # Submodul belum tentu dimuat oleh `import av`.
+                hw_module = importlib.import_module(f"{av.__name__}.codec.hwaccel")
+            if hw_module is None:
+                raise ImportError("modul av ini tidak punya codec.hwaccel")
+            accel = hw_module.HWAccel(device_type=self._hwaccel, allow_software_fallback=True)
+        except Exception as exc:  # noqa: BLE001
+            self.hwaccel_status = f"unavailable: {exc}"
+            raise RuntimeError(
+                f"[{self._source_id}] ingest.hwaccel={self._hwaccel!r} diminta, tetapi PyAV ini "
+                f"tidak bisa membuat HWAccel ({exc}). Perlu PyAV >= 14 dengan FFmpeg ber-CUDA; "
+                f"cek `python -m engine.tools.probe_ingest`. Set ingest.hwaccel: none untuk kembali."
+            ) from exc
+        self.hwaccel_status = "requested"
+        logger.info("[%s] decode lewat hwaccel %s", self._source_id, self._hwaccel)
+        return accel
 
     def _configure_decoder_threads(self) -> Dict[str, Any]:
         """
@@ -495,7 +534,11 @@ class PyAVSource(BaseFrameSource):
         elif getattr(av_frame, "time", None) is not None:
             raw_pts = float(av_frame.time)
 
-        stamp = self.timeline.stamp(raw_pts)
+        # Waktu tiba hanya jujur bila decode berjalan segera (thread pembaca).
+        # Tanpa itu, frame di-decode saat pipeline sempat, dan antrean nyata
+        # akan terbaca sebagai "bias jam" lalu dikoreksi -- delay jadi tersembunyi.
+        arrival = time.time() if self.uses_reader_thread else None
+        stamp = self.timeline.stamp(raw_pts, arrival=arrival)
         if stamp.pts is not None:
             self._latest_decoded = (self.timeline.epoch, float(stamp.pts))
 
@@ -640,6 +683,12 @@ class PyAVSource(BaseFrameSource):
     def duration_seconds(self) -> float:
         return self._duration_seconds
 
+    def _codec_is_hwaccel(self) -> Optional[bool]:
+        """Jawaban PyAV sendiri apakah decoder benar-benar di GPU (None = tidak tahu)."""
+        context = getattr(self._stream, "codec_context", None) if self._stream is not None else None
+        value = getattr(context, "is_hwaccel", None)
+        return bool(value) if isinstance(value, bool) else None
+
     def describe(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {
             "backend": "pyav",
@@ -654,6 +703,8 @@ class PyAVSource(BaseFrameSource):
             "colour_conversion": self._colour_conversion,
             "live_buffer": self._live_buffer,
             "timeline": self.timeline.as_dict(),
+            "hwaccel": {"requested": self._hwaccel, "status": self.hwaccel_status,
+                        "codec_context_is_hwaccel": self._codec_is_hwaccel()},
         }
         if self.uses_reader_thread:
             out["live_reader"] = {

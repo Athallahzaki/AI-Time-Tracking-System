@@ -138,6 +138,10 @@ class EngineRuntime:
             import dataclasses
             self.config = dataclasses.replace(
                 self.config, target_fps=float(self.options.target_fps))
+        # Sebelum detector/recognizer dimuat, supaya variabel lingkungan
+        # masih berlaku untuk pustaka yang belum diimpor.
+        from .threads import apply_cpu_threads
+        self.cpu_threads = apply_cpu_threads(self.config.cpu_threads)
 
         if recognize is None and self.config.recognition.recognizer != "none":
             # The recognizer slot (config-driven). Fails loudly if the config
@@ -157,6 +161,16 @@ class EngineRuntime:
         self._matcher = matcher
         self._recognize = recognize
         self._store = reference_store
+        # P7: satu worker rekognisi untuk semua kamera (satu GPU). Loop frame
+        # hanya menitipkan pekerjaan; lihat pipeline/recognition_worker.py.
+        self._worker = None
+        if recognize is not None and self.config.recognition.execution == "async":
+            from ..pipeline.recognition_worker import DEFAULT_MAX_AGE_SECONDS, RecognitionWorker
+
+            max_age = self.config.recognition.max_age_seconds or DEFAULT_MAX_AGE_SECONDS
+            self._worker = RecognitionWorker(
+                recognize, max_queue=self.config.recognition.worker_queue, max_age_seconds=max_age,
+            ).start()
 
         self._scheduler = _LockedScheduler(
             RecognitionScheduler(**self.config.recognition.scheduler_kwargs())
@@ -215,6 +229,8 @@ class EngineRuntime:
             self._cameras.clear()
         for camera in cameras:
             camera.stop()
+        if self._worker is not None:
+            self._worker.stop()
         self.api.close()
 
     # -- control ----------------------------------------------------------
@@ -275,6 +291,7 @@ class EngineRuntime:
             view_fps=self.options.view_fps,
             max_frames=self.options.max_frames,
             loop_files=self.options.loop_files,
+            recognition_executor=self._worker,
         )
         self._cameras[spec.camera_id] = camera
         camera.start()
@@ -415,6 +432,19 @@ class EngineRuntime:
             )
 
         metrics = self._scheduler.metrics(0.0) if self.config.recognition.enabled else {}
+        worker_depth = 0
+        if self._worker is not None:
+            worker = self._worker.snapshot_metrics()
+            worker_depth = int(worker.get("queue_depth", 0))
+            if not self._worker.running:
+                degraded.append("recognition_worker_stopped")
+            # INFO, bukan DEBUG: satu-satunya bukti rekognisi berjalan saat roster
+            # masih kosong (belum ada track.identified). Sekali per laporan health.
+            logger.info(
+                "rekognisi: diproses %d, ditolak-penuh %d, basi %d, gagal %d, rata2 %.0f ms, antre %d",
+                int(worker["processed"]), int(worker["rejected_full"]), int(worker["dropped_stale"]),
+                int(worker["failed"]), worker["avg_recognize_ms"], int(worker["queue_depth"]),
+            )
         api_metrics = self.api.metrics
         drop_rate = _drop_rate(api_metrics)
 
@@ -422,7 +452,7 @@ class EngineRuntime:
             events.engine_health(
                 now,
                 models_loaded=models_loaded,
-                queue_depth=int(metrics.get("queue_depth", 0.0)),
+                queue_depth=int(metrics.get("queue_depth", 0.0)) + worker_depth,
                 drop_rate=drop_rate,
                 cameras=states,
                 degraded_components=sorted(set(degraded)) or None,

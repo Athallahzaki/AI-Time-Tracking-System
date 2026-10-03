@@ -142,8 +142,19 @@ class IngestConfig:
     #            skips whole, intact frames instead of corrupting the stream,
     #            and the skip is counted (describe()["live_reader"]).
     live_buffer: str = "none"          # "none" | "latest"
+    # P18: "slew" = koreksi bertahap bias offset jam (hanya aktif dengan
+    # live_buffer: latest); "none" = offset tetap seperti dibuka.
+    offset_correction: str = "slew"
+    # Decode di GPU lewat hwaccel FFmpeg (NVDEC). "none" = decode CPU seperti
+    # semula. "cuda" = frame di-decode di GPU lalu disalin balik ke RAM untuk
+    # konversi BGR; hemat CPU decode, belum hemat PCIe (lihat pyav_source.py).
+    hwaccel: str = "none"
 
     def __post_init__(self) -> None:
+        if self.hwaccel not in ("none", "cuda"):
+            raise ValueError("ingest.hwaccel must be 'none' or 'cuda'.")
+        if self.offset_correction not in ("slew", "none"):
+            raise ValueError("ingest.offset_correction must be 'slew' or 'none'.")
         if self.live_buffer not in ("none", "latest"):
             raise ValueError(
                 f"Unknown ingest.live_buffer '{self.live_buffer}'. "
@@ -258,6 +269,12 @@ class RecognitionConfig:
     # regions of ~60-150 px, so 640 mostly upscales; 320 is the candidate for
     # 5 cameras (P7) once similarity on real footage is compared at both.
     face_detector_input_size: int = 640
+    # P7: "async" = SCRFD + AuraFace berjalan di worker terpisah, loop frame
+    # tidak menunggu; "sync" = cara lama (di dalam loop frame), untuk
+    # pembanding dan cadangan. `worker_queue` = berapa permintaan boleh antre
+    # sebelum ditolak (ditolak = dicoba lagi frame berikutnya, bukan hilang).
+    execution: str = "async"
+    worker_queue: int = 8
     min_face_px: float = 40.0
     match_threshold: Optional[float] = None
     match_margin: Optional[float] = None
@@ -276,6 +293,10 @@ class RecognitionConfig:
             )
         if self.max_requests_per_frame < 0:
             raise ValueError("recognition.max_requests_per_frame must be >= 0.")
+        if self.execution not in ("async", "sync"):
+            raise ValueError("recognition.execution must be 'async' or 'sync'.")
+        if self.worker_queue < 1:
+            raise ValueError("recognition.worker_queue must be >= 1.")
         if (self.face_detector_input_size < 64 or self.face_detector_input_size > 1280
                 or self.face_detector_input_size % 32):
             raise ValueError(
@@ -339,6 +360,9 @@ class EngineConfig:
     target_fps: Optional[float] = None
     auto_warmup: bool = True
     strict_mode: bool = True
+    # Batas thread torch/OpenCV/BLAS (engine/runtime/threads.py). 0 = biarkan
+    # pustaka memakai semua core (perilaku lama).
+    cpu_threads: int = 0
 
     ingest: IngestConfig = field(default_factory=IngestConfig)
     detector: DetectorConfig = field(default_factory=DetectorConfig)
@@ -358,6 +382,8 @@ class EngineConfig:
         return min(self.target_fps, source_fps)
 
     def __post_init__(self) -> None:
+        if self.cpu_threads < 0:
+            raise ValueError("core.cpu_threads must be >= 0 (0 = tidak dibatasi).")
         if self.detection_interval < 1:
             raise ValueError(
                 f"detection_interval must be >= 1, got {self.detection_interval}."

@@ -150,6 +150,7 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
         target_fps=core.get("target_fps"),
         auto_warmup=bool(core.get("auto_warmup", True)),
         strict_mode=bool(core.get("strict_mode", True)),
+        cpu_threads=int(core.get("cpu_threads", 0) or 0),
         ingest=IngestConfig(
             backend=str(ing.get("backend", "pyav")),
             rtsp_transport=str(ing.get("rtsp_transport", "tcp")),
@@ -168,6 +169,8 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
             decoder_threads=int(ing.get("decoder_threads", 0)),
             colour_conversion=str(ing.get("colour_conversion", "to_ndarray")),
             live_buffer=str(ing.get("live_buffer", "none")),
+            offset_correction=str(ing.get("offset_correction", "slew")),
+            hwaccel=str(ing.get("hwaccel", "none")),
         ),
         detector=DetectorConfig(
             model_path=str(det.get("model_path", "LibreDFINEn.pt")),
@@ -209,6 +212,8 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
             ),
             face_detection_threshold=float(rec.get("face_detection_threshold", 0.5)),
             face_detector_input_size=int(rec.get("face_detector_input_size", 640)),
+            execution=str(rec.get("execution", "async")),
+            worker_queue=int(rec.get("worker_queue", 8)),
             min_face_px=float(rec.get("min_face_px", 40.0)),
             match_threshold=_optional_float(rec.get("match_threshold")),
             match_margin=_optional_float(rec.get("match_margin")),

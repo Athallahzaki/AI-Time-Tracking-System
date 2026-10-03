@@ -58,6 +58,7 @@ from ..presence.zones import ZONE_INTERIOR
 from ..pipeline.zoning import TrackZoner, ZonePriorityQueue
 from ..ports.frame import Frame
 from ..ports.tracking import Track, TrackState
+from .clock import OffsetCorrector
 from .lag import LagMonitor, lag_between
 
 logger = logging.getLogger("engine.runtime.camera")
@@ -134,8 +135,11 @@ class CameraSupervisor:
         unidentified_after_seconds: float = UNIDENTIFIED_AFTER_SECONDS,
         max_frames: Optional[int] = None,
         loop_files: bool = False,
+        recognition_executor: Any = None,
     ) -> None:
         self.spec = spec
+        # P7: RecognitionWorker bersama milik runtime; None = rekognisi sinkron.
+        self._recognition_executor = recognition_executor
         # Local video files restart from the beginning when they end. For
         # demos/testing only: every lap is a new run (new ids, open presences
         # closed), exactly like a camera that went away and came back.
@@ -166,6 +170,9 @@ class CameraSupervisor:
         self._epoch: Optional[int] = None
         # P17: analisis tertinggal dari kamera. Diisi per frame, dibaca health.
         self._lag = LagMonitor()
+        # P18: koreksi bertahap offset jam, hanya dengan thread pembaca.
+        self._clock_corrector = OffsetCorrector()
+        self._offset_correction = getattr(config.ingest, "offset_correction", "slew")
         self._last_view_pts: float = -1e9
         self._last_heartbeat: Dict[str, float] = {}
         self._track_born_pts: Dict[str, float] = {}
@@ -338,6 +345,7 @@ class CameraSupervisor:
             scheduler=self._scheduler,
             recognize=self._recognize,
             uuid_prefix=f"tr_{nonce}",
+            executor=self._recognition_executor,
         )
 
         if self._scheduler is not None:
@@ -420,6 +428,7 @@ class CameraSupervisor:
             self._on_reconnect(frame, epoch)
 
         self._observe_lag(frame, pts)
+        self._correct_offset()
         self._remember_live(frame, tracks, pts)
         self._heartbeats(pts)
         self._unidentified(pts)
@@ -447,6 +456,7 @@ class CameraSupervisor:
         self._epoch = epoch
         # camera.online menutup semua rentang degraded kamera ini (07 §1.4).
         self._lag.reset()
+        self._clock_corrector.reset()
         self._announce(
             self.stats.measured_fps,
             wallclock=frame.metadata.pts_wallclock_offset or time.time(),
@@ -526,7 +536,7 @@ class CameraSupervisor:
                     duration_seconds=round(duration, 3), attempts=attempts,
                     reason=(
                         "no_face_detected"
-                        if self.stats.evidence_by_uuid.get(uuid, 0) == 0
+                        if self._evidence_count(uuid) == 0
                         else "below_threshold"
                     ),
                 )
@@ -584,12 +594,15 @@ class CameraSupervisor:
         """Wraps the binding so `attempts` in §4.3 is a real count, not a guess."""
         uuid = getattr(request, "track_uuid", "")
         self.stats.attempts_by_uuid[uuid] = self.stats.attempts_by_uuid.get(uuid, 0) + 1
-        before = self._binding.metrics.evidence_submitted
         self._binding(request)
-        if self._binding.metrics.evidence_submitted > before:
-            self.stats.evidence_by_uuid[uuid] = (
-                self.stats.evidence_by_uuid.get(uuid, 0) + 1
-            )
+
+    def _evidence_count(self, uuid: str) -> int:
+        """Bukti yang sudah DITERAPKAN untuk track ini. Di jalur asinkron (P7)
+        bukti tiba beberapa frame setelah percobaan, jadi menghitungnya di sekitar
+        pemanggilan binding akan selalu nol."""
+        if self._binding is None:
+            return self.stats.evidence_by_uuid.get(uuid, 0)
+        return self._binding.evidence_by_uuid.get(uuid, 0) or self.stats.evidence_by_uuid.get(uuid, 0)
 
     def _identity_of(self, uuid: str) -> Any:
         entry = self._live.get(uuid) or {}
@@ -674,6 +687,22 @@ class CameraSupervisor:
                 since_wallclock=change.since_wallclock, until_wallclock=now,
             ))
 
+    def _correct_offset(self) -> None:
+        if self._offset_correction != "slew" or self._assembler is None:
+            return
+        source = self._source
+        if not getattr(source, "uses_reader_thread", False):
+            return
+        timeline = getattr(source, "timeline", None)
+        bias = getattr(timeline, "offset_bias", None)
+        was_active = self._clock_corrector.active
+        delta = self._clock_corrector.observe(time.time(), bias)
+        if delta:
+            timeline.slew_offset(delta)
+            self._assembler.adjust_offset(self.spec.camera_id, delta)
+        if self._clock_corrector.active and not was_active:
+            logger.info("[%s] offset jam meleset %.2f dtk; dikoreksi bertahap", self.spec.camera_id, bias)
+
     @property
     def lag_degraded(self) -> bool:
         """Rentang camera.degraded(kind=lag) sedang terbuka."""
@@ -690,6 +719,10 @@ class CameraSupervisor:
         replaced = getattr(self._source, "frames_replaced", None)
         if isinstance(replaced, int):
             out["frames_dropped_stale"] = replaced
+        bias = getattr(getattr(self._source, "timeline", None), "offset_bias", None)
+        if isinstance(bias, (int, float)):
+            # Sisa bias yang belum terkoreksi. Negatif = `at` mendahului kenyataan.
+            out["clock_drift_seconds"] = round(float(bias), 3)
         return out
 
     def health(self) -> Dict[str, Any]:

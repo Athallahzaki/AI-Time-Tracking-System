@@ -65,6 +65,7 @@ def build_source(
             decoder_threads=config.ingest.decoder_threads,
             colour_conversion=config.ingest.colour_conversion,
             live_buffer=config.ingest.live_buffer,
+            hwaccel=config.ingest.hwaccel,
         )
     elif config.source_type == "video_file":
         # realtime_pacing=False always. Pacing is a benchmark mode decision
@@ -152,7 +153,10 @@ def build_tracker(config: EngineConfig, source_fps: float, detector: Any = None)
     )
 
     if config.tracker.backend == "iou":
-        return perception.IoUTracker(max_missing_frames=buffer_frames)
+        return perception.IoUTracker(
+            max_missing_frames=buffer_frames,
+            max_missing_seconds=config.tracker.track_buffer_seconds,
+        )
 
     return perception.ByteTrackTracker(
         track_thresh=config.tracker.track_threshold,
@@ -263,14 +267,27 @@ def build_engine(
     a builder.
     """
     from .pipeline.engine import VisionEngine
-    source = build_source(config, max_frames=max_frames, source_id=source_id)
-    source_fps = resolve_source_fps(config, source)
 
     # A caller may hand in an already-loaded detector (looping a file re-opens
     # the source every lap; reloading D-FINE weights each time is pure waste).
-    # The tracker is always new: its state belongs to one run.
+    #
+    # Detector DULU, baru stream dibuka. `resolve_source_fps` membuka sumber
+    # (start) untuk membaca fps-nya; dulu itu terjadi SEBELUM bobot dimuat dan
+    # CUDA dipanaskan (±55 dtk di GTX 1060). Selama itu RTSP sudah terbuka tetapi
+    # tidak dibaca: dengan `live_buffer: none` antrean socket menumpuk, frame
+    # pertama yang dianalisis berumur ±58 dtk, lalu MediaMTX memutus pembaca
+    # yang lambat (uji 3 Okt, lag-B-none.csv). Offset jam juga ditetapkan saat
+    # dibuka, jadi `at` frame-frame itu salah sebesar waktu muat model.
     if detector is None:
         detector = build_detector(config)
+        if config.auto_warmup:
+            # VisionEngine.start memanaskan lagi; itu satu inferensi tambahan,
+            # jauh lebih murah daripada stream yang dibiarkan menumpuk.
+            detector.warmup()
+
+    source = build_source(config, max_frames=max_frames, source_id=source_id)
+    source_fps = resolve_source_fps(config, source)
+    # The tracker is always new: its state belongs to one run.
     tracker = build_tracker(config, source_fps=source_fps, detector=detector)
 
     engine_source = source if wrap_source is None else wrap_source(source, source_fps)

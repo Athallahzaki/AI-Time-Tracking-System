@@ -84,31 +84,22 @@ zones:
 # Every value below left unset means "use the constant in
 # identity/admission.py", so none of them has two homes.
 recognition:
-  enabled: false
+  # Profil uji rekognisi wajah (uji C, docs/UJI-LAG.md). Salinan dfine-m.yaml,
+  # hanya blok ini yang berbeda. Roster boleh kosong: wajah tetap dideteksi dan
+  # di-embed, hanya tidak ada yang cocok (track.identified tidak akan muncul).
+  enabled: true
   max_requests_per_frame: 2
-  execution: "async"         # "async" = SCRFD+AuraFace di worker terpisah, loop frame
-                             # tidak menunggu (P7). "sync" = cara lama, untuk pembanding.
-  worker_queue: 8            # penuh -> permintaan ditolak seketika, dicoba frame lain
-  # max_age_seconds:          0.5   # a crop older than this is worse than the next one
-  # retry_interval_seconds:   1.0
-  # reverify_interval_seconds: 60.0
-  # per_camera_quota:           4   # one busy camera must not blind the others
-  recognizer: "none"
-  # --- recognizer slot (face identity) ---------------------------------------
-  # Default OFF. To turn it on: set enabled: true, recognizer: onnx_face, and
-  # point the two model paths at ONNX files on the engine machine (not bundled).
-  # If it is turned on and cannot load, the engine refuses to start.
-  #
-  #   recognizer: "onnx_face"                       # "none" | "onnx_face"
-  #   face_detector_model: "models/scrfd_10g_bnkps.onnx"
-  #   face_embedder_model: "models/glintr100.onnx"
-  #   embedding_version: "auraface-v1"
-  #   reference_db_path: "engine/data/references.sqlite3"
-  #   onnx_providers: ["CUDAExecutionProvider", "CPUExecutionProvider"]
-  #   face_detection_threshold: 0.5
-  #   face_detector_input_size: 640          # multiple of 32; 320 = candidate for 5 cameras
-  #   min_face_px: 40
-
+  execution: "sync"
+  worker_queue: 8
+  recognizer: "onnx_face"
+  face_detector_model: "models/scrfd_10g_bnkps.onnx"   # relatif ke folder tempat engine dijalankan
+  face_embedder_model: "models/glintr100.onnx"
+  embedding_version: "auraface-v1"
+  reference_db_path: "engine/data/references.sqlite3"
+  onnx_providers: ["CUDAExecutionProvider", "CPUExecutionProvider"]
+  face_detection_threshold: 0.5
+  face_detector_input_size: 640
+  min_face_px: 40
 
 detector:
   model_path: "LibreDFINEm.pt"
@@ -122,7 +113,7 @@ detector:
                                  # its full-resolution PIL copies. Compare accuracy once.
 
 tracker:
-  backend: "bytetrack"
+  backend: "iou"
   track_threshold: 0.45
   match_threshold: 0.8
   track_buffer_seconds: 1.0

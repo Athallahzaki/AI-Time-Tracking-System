@@ -23,6 +23,7 @@ class IoUTracker:
         min_iou_threshold: float = 0.25,
         reconnect_score_threshold: float = 0.40,
         max_missing_frames: int = 30,      # Evict track after ~1 sec at 30 FPS
+        max_missing_seconds: Optional[float] = None,
         min_hits_to_confirm: int = 3,       # NEW -> TRACKED after N hits
         weight_center: float = 0.45,
         weight_iou: float = 0.30,
@@ -32,6 +33,13 @@ class IoUTracker:
         self._min_iou = min_iou_threshold
         self._reconnect_score_thresh = reconnect_score_threshold
         self._max_missing_frames = max_missing_frames
+        # 04 §5: buffer dalam DETIK dari PTS, bukan jumlah frame. Jumlah frame
+        # dihitung dari target fps (12), padahal mode live bisa menganalisis
+        # jauh lebih jarang (4 fps pada uji 2 Okt): 12 frame = 3 dtk, dan track
+        # orang yang sudah pergi sempat menempel ke orang berikutnya.
+        self._max_missing_seconds = max_missing_seconds
+        self._last_pts: Dict[int, float] = {}
+        self._frame_pts: Optional[float] = None
         self._min_hits_to_confirm = min_hits_to_confirm
 
         self._w_center = weight_center
@@ -45,6 +53,8 @@ class IoUTracker:
     def reset(self) -> None:
         """Clears all active tracks."""
         self._tracks.clear()
+        self._last_pts.clear()
+        self._frame_pts = None
         self._next_track_id = 1
 
     def update(self, detections: List[Detection], frame: Frame) -> List[Track]:
@@ -53,6 +63,12 @@ class IoUTracker:
         Updates velocities, hits, age, and handles lifecycle states.
         """
         now = frame.timestamp
+        pts = getattr(getattr(frame, "metadata", None), "pts", None)
+        timeline_restarted = (
+            pts is not None and self._frame_pts is not None and pts < self._frame_pts
+        )
+        if pts is not None:
+            self._frame_pts = float(pts)
 
         # Compute cost/score matrix between active tracks and detections
         active_track_ids = list(self._tracks.keys())
@@ -104,6 +120,8 @@ class IoUTracker:
             track.hits += 1
             track.age += 1
             track.lost_frames = 0
+            if pts is not None:
+                self._last_pts[tid] = float(pts)
             track.velocity = (smooth_vx, smooth_vy)
             track.history.append(det.bbox.center)
             if len(track.history) > 30:
@@ -122,7 +140,7 @@ class IoUTracker:
             track.lost_frames += 1
             track.age += 1
 
-            if track.lost_frames > self._max_missing_frames:
+            if self._expired(tid, track, pts, timeline_restarted):
                 track.state = TrackState.REMOVED
                 to_remove.append(tid)
             else:
@@ -150,12 +168,24 @@ class IoUTracker:
                 history=[det.bbox.center],
             )
             self._tracks[new_id] = new_track
+            if pts is not None:
+                self._last_pts[new_id] = float(pts)
 
         # Remove evicted tracks from internal tracking map
         for tid in to_remove:
             del self._tracks[tid]
+            self._last_pts.pop(tid, None)
 
         return list(self._tracks.values())
+
+    def _expired(self, tid: int, track: Track, pts: Optional[float], timeline_restarted: bool) -> bool:
+        if self._max_missing_seconds is None or pts is None or tid not in self._last_pts:
+            return track.lost_frames > self._max_missing_frames
+        if timeline_restarted:
+            # PTS mulai ulang (epoch baru): selisihnya tidak bermakna, dan
+            # supervisor kamera sudah menutup track run sebelumnya.
+            return True
+        return (float(pts) - self._last_pts[tid]) > self._max_missing_seconds
 
     def _compute_affinity_score(self, track: Track, new_box: BoundingBox) -> float:
         """

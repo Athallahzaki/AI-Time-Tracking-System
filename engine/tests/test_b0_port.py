@@ -529,12 +529,19 @@ def test_source_with_unknown_fps_is_refused_not_guessed():
 
     import engine.factory as factory_module
 
+    from engine.perception.mock_detector import MockDetector
+
     original = factory_module.build_source
+    original_detector = factory_module.build_detector
     factory_module.build_source = lambda config, max_frames=None, source_id=None: (
         FpsLessSource()
     )
+    # Detector sekarang dimuat SEBELUM stream dibuka (test_startup_order.py),
+    # jadi tes ini memakai detector tiruan supaya yang diuji tetap penolakan fps.
+    factory_module.build_detector = lambda config: MockDetector()
     try:
         with pytest.raises(RuntimeError, match="fps"):
             build_engine(EngineConfig(source_type="video_file"))
     finally:
         factory_module.build_source = original
+        factory_module.build_detector = original_detector

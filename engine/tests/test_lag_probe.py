@@ -97,3 +97,71 @@ def test_kesimpulan_membedakan_delay_bertambah_dan_tetap():
     assert "SEGAR" in fresh
     assert "TETAP tapi besar" in stuck
     assert "TIDAK VALID" in future and "SEGAR" not in future
+
+
+def test_event_putar_ulang_dari_outbox_tidak_ikut_dihitung(tmp_path):
+    """Probe mengirim last_event_seq=0, jadi engine memutar ulang outbox. Health
+    dari run sebelumnya pernah ikut terhitung dan mengacaukan ringkasan."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("lag_probe", "scripts/lag_probe.py")
+    lag_probe = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(lag_probe)
+
+    port = _free_port()
+    config = dataclasses.replace(load_config(), source_type="mock", auto_warmup=False)
+    runtime = EngineRuntime(config=config, options=RuntimeOptions(
+        tcp=("127.0.0.1", port), health_interval_seconds=0.5, view_fps=5.0))
+    # Health "lama" di outbox, seolah dari run sebelumnya.
+    runtime.api.emit_event({"type": "engine.health", "v": 1, "ts": "2026-01-01T00:00:00.000Z",
+                            "models_loaded": False, "queue_depth": 0, "drop_rate": 0.0,
+                            "cameras": {"cam01": "online"},
+                            "camera_metrics": {"cam01": {"effective_fps": 99.0, "lag_seconds": 9.0}}})
+    runtime.listen()
+    threading.Thread(target=runtime.api.serve_forever, daemon=True).start()
+    time.sleep(0.2)
+    try:
+        out = tmp_path / "probe.csv"
+        lines = lag_probe.run("127.0.0.1", port, [("cam01", "mock")], 2.0, out, None)
+        with out.open(encoding="utf-8") as handle:
+            rows = list(csv.DictReader(handle))
+        assert not any(r["fps"] == "99.0" for r in rows), "health lama ikut tercatat"
+        assert any("putar ulang" in line for line in lines)
+    finally:
+        runtime.close()
+
+
+def _load_probe():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("lag_probe", "scripts/lag_probe.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_engine_yang_lambat_mulai_tidak_membuat_ringkasan_crash(tmp_path, capsys):
+    """Laporan lapangan 3 Okt (GTX 1060): view.frame pertama baru datang setelah
+    lebih dari 60 dtk (muat model + warmup CUDA), jendela "awal" kosong, dan
+    probe crash dengan `NoneType.__format__` setelah 5 menit menunggu."""
+    lag_probe = _load_probe()
+    rows = [{"camera_id": "cam01", "source": "view", "elapsed_s": float(t), "frame_age_s": 0.5,
+             "lag_s": "", "fps": "", "note": ""} for t in range(90, 300)]
+    text = "\n".join(lag_probe.summarize(rows, 300))
+    assert "view.frame pertama pada detik 90" in text and "SEGAR" in text
+
+    # CSV yang sudah tersimpan bisa diringkas ulang tanpa mengulang uji.
+    path = tmp_path / "lag.csv"
+    fields = ["wall_t", "elapsed_s", "camera_id", "source", "frame_age_s", "lag_s", "fps", "dropped",
+              "drift_s", "note"]
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        for t in range(90, 300):
+            writer.writerow({"wall_t": 1000 + t, "elapsed_s": t, "camera_id": "cam01", "source": "view",
+                             "frame_age_s": 0.5, "lag_s": "", "fps": "", "dropped": "", "drift_s": "",
+                             "note": ""})
+        writer.writerow({"wall_t": 1300, "elapsed_s": 300, "camera_id": "cam01", "source": "health",
+                         "frame_age_s": "", "lag_s": 0.1, "fps": 7.5, "dropped": 3, "drift_s": -0.04,
+                         "note": "online"})
+    assert lag_probe.main(["--summarize", str(path)]) == 0
+    out = capsys.readouterr().out
+    assert "SEGAR" in out and "fps analisis: median 7.5" in out and "-0.04" in out

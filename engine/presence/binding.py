@@ -32,6 +32,7 @@ punya suara di `engine.health`.
 from __future__ import annotations
 
 import logging
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional, Sequence
 
@@ -64,6 +65,11 @@ class BindingMetrics:
     recognitions_empty: int = 0
     identified: int = 0
     released: int = 0
+    # Jalur asinkron (P7): dikirim ke worker, ditolak karena antrean penuh,
+    # dan hasil yang dibuang karena track-nya sudah berakhir saat hasil tiba.
+    recognitions_queued: int = 0
+    recognitions_rejected: int = 0
+    results_discarded: int = 0
 
     @property
     def ever_identified_anyone(self) -> bool:
@@ -80,6 +86,7 @@ class EngineBinding:
         scheduler: Optional[RecognitionScheduler] = None,
         recognize: Optional[Recognizer] = None,
         uuid_prefix: str = "tr",
+        executor: Any = None,
     ) -> None:
         # The runtime passes `tr_<run nonce>` so a uuid is never reused across
         # engine restarts or camera rebuilds (contract: "tidak pernah didaur ulang").
@@ -98,6 +105,15 @@ class EngineBinding:
         self._camera_by_uuid: Dict[str, str] = {}
         self._frame_by_camera: Dict[str, Frame] = {}
         self.metrics = BindingMetrics()
+        # P7: bila ada `executor` (RecognitionWorker), `recognize` dijalankan di
+        # thread worker dan hasilnya kembali lewat antrean ini. deque.append dan
+        # popleft atomik, jadi worker dan thread kamera tidak butuh kunci.
+        self._executor = executor
+        self._results: "deque[tuple]" = deque()
+        self._pending: set = set()
+        # Jumlah bukti per track, dihitung saat bukti DITERAPKAN (bukan saat
+        # diminta), supaya tetap benar di jalur asinkron.
+        self.evidence_by_uuid: Dict[str, int] = {}
 
     # ---------------- identitas track ----------------
 
@@ -130,6 +146,10 @@ class EngineBinding:
         pts = self._pts_of(frame)
         if pts is None:
             return
+
+        # Hasil rekognisi yang selesai sejak frame lalu diterapkan DI SINI, di
+        # thread kamera, sebelum frame ini diproses.
+        self.drain_results()
 
         self._frame_by_camera[camera_id] = frame
 
@@ -189,6 +209,7 @@ class EngineBinding:
 
         self._track_by_uuid.pop(uuid, None)
         self._camera_by_uuid.pop(uuid, None)
+        self.evidence_by_uuid.pop(uuid, None)
         self.metrics.tracks_closed += 1
 
     # ---------------- RequestConsumer ----------------
@@ -206,18 +227,59 @@ class EngineBinding:
             return
 
         self.metrics.recognitions_attempted += 1
+
+        if self._executor is not None:
+            if self._executor.submit(uuid, getattr(request, "camera_id", ""), track, frame,
+                                     self._enqueue_result):
+                self._pending.add(uuid)
+                self.metrics.recognitions_queued += 1
+            else:
+                # Antrean worker penuh: lepaskan giliran, scheduler mencoba lagi.
+                self.metrics.recognitions_rejected += 1
+                self._complete(uuid, produced_evidence=False)
+            return
+
         try:
             evidence = self._recognize(track, frame)
         except Exception:
             logger.exception("pengenalan gagal untuk %s", uuid)
             evidence = None
+        self._apply_result(uuid, evidence)
 
+    # ---------------- hasil asinkron ----------------
+
+    def _enqueue_result(self, uuid: str, evidence: Any) -> None:
+        """Dipanggil thread worker. Tidak menyentuh state apa pun selain antrean."""
+        self._results.append((uuid, evidence))
+
+    def drain_results(self) -> int:
+        """Terapkan hasil worker yang sudah selesai. Thread kamera saja."""
+        applied = 0
+        while self._results:
+            uuid, evidence = self._results.popleft()
+            self._pending.discard(uuid)
+            if uuid not in self._track_by_uuid:
+                # Track sudah berakhir: scheduler.forget sudah dipanggil, dan
+                # bukti untuk orang yang sudah pergi tidak boleh menempel ke
+                # siapa pun.
+                self.metrics.results_discarded += 1
+                continue
+            self._apply_result(uuid, evidence)
+            applied += 1
+        return applied
+
+    @property
+    def pending_recognitions(self) -> int:
+        return len(self._pending)
+
+    def _apply_result(self, uuid: str, evidence: Any) -> None:
         if evidence is None:
             self.metrics.recognitions_empty += 1
             self._complete(uuid, produced_evidence=False)
             return
 
         self.metrics.evidence_submitted += 1
+        self.evidence_by_uuid[uuid] = self.evidence_by_uuid.get(uuid, 0) + 1
         self.submit_evidence(uuid, evidence)
         self._complete(uuid, produced_evidence=True)
 

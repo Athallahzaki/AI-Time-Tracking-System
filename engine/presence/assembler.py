@@ -137,6 +137,18 @@ class PresenceAssembler:
                 zone=self._open[track_uuid].last_zone, end_source="forced",
             )
 
+    def adjust_offset(self, camera_id: str, delta: float) -> None:
+        """Geser offset jam kamera ini (P18). Epoch tidak berubah.
+
+        Hanya dipanggil oleh pengoreksi yang lajunya dibatasi, sehingga `*_at`
+        yang dihitung sesudahnya tetap naik monoton. Snapshot berikutnya membawa
+        offset yang baru.
+        """
+        clock = self._clocks.get(camera_id)
+        if clock is None or not delta:
+            return
+        self._clocks[camera_id] = PtsClock(camera_id, clock.stream_epoch, clock.offset + delta)
+
     def clock_for(self, camera_id: str) -> PtsClock:
         clock = self._clocks.get(camera_id)
         if clock is None:
