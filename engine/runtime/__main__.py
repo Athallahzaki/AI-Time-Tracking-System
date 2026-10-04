@@ -74,6 +74,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="interval engine.health (default 30). Turunkan ke 2-5 untuk uji lag.",
     )
     parser.add_argument("--quiet", action="store_true")
+    parser.add_argument(
+        "--allow-power-throttling", action="store_true",
+        help="Windows: biarkan EcoQoS/power throttling (default: dimatikan untuk proses engine; "
+             "lihat runtime/winpower.py)",
+    )
     return parser
 
 
@@ -97,6 +102,10 @@ def main(argv: Optional[list] = None) -> int:
         level=logging.WARNING if args.quiet else logging.INFO,
         format="%(levelname)s %(name)s: %(message)s",
     )
+    if not args.allow_power_throttling:
+        from .winpower import disable_power_throttling
+
+        logging.getLogger("engine.runtime").info("%s", disable_power_throttling())
 
     tcp = None
     if not args.socket:

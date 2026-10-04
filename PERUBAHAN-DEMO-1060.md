@@ -53,3 +53,27 @@ Lalu ikuti docs/DEMO-1060.md.
   persis dengan demo-1060.
 - `engine/tests/test_demo_4060_config.py` (2).
 - `docs/DEMO-1060.md`: bagian "Di laptop RTX 4060".
+
+## Revisi 4 Okt 09:30: engine keluar dari power throttling Windows
+
+Gladi 60 menit di 4060 (`gladi-4060-60m.csv` + log nvidia-smi):
+
+- fps berganti fase antara ±10 dan ±6, beberapa menit per fase;
+- di fase 6 fps, umur kotak naik ±0,7 dtk per detik sampai 5-8 dtk lalu jatuh
+  tiba-tiba, `lag_s` tetap ±0,03, dan frame yang dibuang pembaca hampir berhenti;
+- jadi decode/input yang lebih lambat dari waktu nyata, bukan detector;
+- GPU P0 1,6-2 GHz, utilisasi 10-20%, 53 °C: tidak terlibat.
+
+Dugaan: EcoQoS Windows 11 memindah proses yang jendelanya tidak di depan ke
+E-core. Laptop 1060 (tanpa E-core) tidak menunjukkan pola ini.
+
+- `engine/runtime/winpower.py` (baru): `SetProcessInformation(ProcessPowerThrottling)`
+  dengan StateMask 0, artinya proses engine tidak boleh di-throttle. Bila gagal,
+  dicatat dan engine tetap jalan. Selain Windows: tidak ada yang diubah.
+- `engine/runtime/__main__.py`: dipanggil saat start. Log menulis
+  `power throttling Windows dimatikan (...)`. Opsi `--allow-power-throttling`
+  untuk mematikannya.
+- Tes: `test_winpower.py` (5).
+
+Proses lain (ffmpeg publisher, MediaMTX) tidak tersentuh. Untuk itu dipakai
+`powercfg /powerthrottling disable /path ...` (lihat docs/DEMO-1060.md).
