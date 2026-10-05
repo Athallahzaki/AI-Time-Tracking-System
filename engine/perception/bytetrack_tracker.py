@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 import math
 
 from ..ports.detection import Detection
-from ..ports.frame import Frame
+from ..ports.frame import frame_hw, Frame
 from ..ports.geometry import BoundingBox
 from ..ports.tracking import Track, TrackState
 from .iou_tracker import IoUTracker
@@ -167,7 +167,7 @@ class ByteTrackTracker:
                 if tid is not None
             ]
 
-        h, w = frame.shape[:2]
+        h, w = frame_hw(frame)
         now = frame.timestamp
         active_tracks: List[Track] = []
         seen_tids: set[int] = set()

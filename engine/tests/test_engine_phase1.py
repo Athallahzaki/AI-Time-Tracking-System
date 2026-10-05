@@ -22,22 +22,20 @@ import pytest
 from contracts import handshake_auth as auth
 from contracts.validator import SchemaValidator
 from engine.api import EngineApi, Outbox
+from engine.tests import _transport
 
 KEY = "kunci-uji-0123456789abcdef-0123456789"
 
 
-def _start(api: EngineApi, tmp: str) -> str:
-    path = str(Path(tmp) / "engine.sock")
-    api.listen(socket_path=path)
+def _start(api: EngineApi, tmp: str):
+    path = _transport.listen(api, tmp)
     threading.Thread(target=api.serve_forever, daemon=True).start()
     time.sleep(0.1)
     return path
 
 
-def _open(path: str):
-    connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    connection.settimeout(3.0)
-    connection.connect(path)
+def _open(path):
+    connection = _transport.connect(path, 3.0)
     return connection, connection.makefile("r", encoding="utf-8")
 
 
@@ -165,10 +163,11 @@ def test_fake_engine_memakai_handshake_yang_sama():
     from engine.tools.fake_engine.server import FakeEngineServer
 
     with tempfile.TemporaryDirectory() as tmp:
-        path = str(Path(tmp) / "fake.sock")
-        server = FakeEngineServer(messages=[], socket_path=path, auth_key=KEY)
+        where = _transport.server_kwargs(tmp)
+        server = FakeEngineServer(messages=[], auth_key=KEY, **where)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         time.sleep(0.2)
+        path = _transport.bound_address(server, where)
         try:
             connection, _, challenge, client_nonce, reply = _authenticated(path)
             assert reply["type"] == "hello_ack", reply

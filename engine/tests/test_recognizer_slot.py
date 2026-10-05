@@ -109,6 +109,14 @@ def test_failed_camera_is_reopened(monkeypatch, tmp_path):
     from engine.runtime.camera import CameraSpec, CameraSupervisor
 
     monkeypatch.setattr(camera_module, "RETRY_INITIAL_SECONDS", 0.05)
+    # Yang diuji adalah percobaan ulang sumber, bukan model. Dengan LibreYOLO
+    # terpasang, default_config memuat D-FINE M sungguhan (detik-an) dan batas
+    # 5 dtk di bawah habis sebelum percobaan kedua (uji Windows 3 Okt).
+    from engine import factory
+    from engine.perception import MockDetector
+
+    built = []
+    monkeypatch.setattr(factory, "build_detector", lambda config: built.append(1) or MockDetector())
     emitted = []
     config = load_config("engine/config/default_config.yaml")
     import dataclasses
@@ -124,6 +132,7 @@ def test_failed_camera_is_reopened(monkeypatch, tmp_path):
         while time.time() < deadline and supervisor.stats.attempts < 2:
             time.sleep(0.05)
         assert supervisor.stats.attempts >= 2, "camera was not retried"
+        assert len(built) == 1, f"detector dimuat {len(built)}x; wajib sekali walau sumber gagal berulang"
         assert supervisor.alive
         assert sum(1 for e in emitted if e["type"] == "camera.failed") >= 2
     finally:

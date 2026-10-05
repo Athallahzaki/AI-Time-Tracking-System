@@ -91,16 +91,36 @@ class LazyFrame(Frame):
     libav, so the decoder carrying on in another thread does not touch it.
     """
 
-    def __init__(self, metadata: FrameMetadata, convert: Callable[[], Any]) -> None:
+    def __init__(self, metadata: FrameMetadata, convert: Callable[[], Any],
+                 scale: Optional[Callable[[int, int], Any]] = None) -> None:
         # Deliberately not calling Frame.__init__: `image` is a property here.
         self.metadata = metadata
         self._convert: Optional[Callable[[], Any]] = convert
         self._image: Any = None
+        self._scale = scale
+        self._scaled: dict = {}
+
+    def scaled_rgb(self, width: int, height: int) -> Any:
+        """RGB `width x height` langsung dari frame terdekode (swscale), atau None.
+
+        Tidak menyentuh `image`: frame yang hanya dipakai detector tidak pernah
+        dikonversi ke BGR resolusi penuh. Hasil di-cache per ukuran.
+        """
+        if self._scale is None:
+            return None
+        key = (int(width), int(height))
+        if key not in self._scaled:
+            self._scaled[key] = self._scale(*key)
+        return self._scaled[key]
 
     @property
     def image(self) -> Any:  # type: ignore[override]
-        if self._image is None and self._convert is not None:
-            self._image = self._convert()
+        # Variabel lokal: dengan swscale_resize, konversi BGR pertama bisa
+        # terjadi di thread rekognisi, bukan di thread kamera. Dua thread yang
+        # berbarengan paling buruk mengonversi dua kali, tidak memanggil None.
+        convert = self._convert
+        if self._image is None and convert is not None:
+            self._image = convert()
             self._convert = None
         return self._image
 
@@ -556,6 +576,7 @@ class PyAVSource(BaseFrameSource):
         # converted (see the module docstring).
         return LazyFrame(
             convert=lambda: self._to_bgr(av_frame),
+            scale=lambda width, height: self._to_rgb_scaled(av_frame, width, height),
             metadata=FrameMetadata(
                 frame_id=self._frame_count,
                 timestamp=time.time(),
@@ -571,6 +592,12 @@ class PyAVSource(BaseFrameSource):
                 pts_wallclock_offset=stamp.offset,
             ),
         )
+
+    @staticmethod
+    def _to_rgb_scaled(av_frame: Any, width: int, height: int):
+        """YUV -> RGB berukuran `width x height` dalam satu panggilan swscale (AREA)."""
+        scaled = av_frame.reformat(width=width, height=height, format="rgb24", interpolation="AREA")
+        return scaled.to_ndarray()
 
     def _to_bgr(self, av_frame: Any):
         """

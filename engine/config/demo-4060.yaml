@@ -1,3 +1,13 @@
+# Profil DEMO di laptop RTX 4060 (Ada, 8 GB), 1 kamera lewat MediaMTX,
+# rekognisi wajah menyala. Salinan dfine-m-face.yaml; yang berbeda hanya
+# core.target_fps dan blok detector. Dasar angka (uji 3 Okt, video 1080p):
+# M eager ±69 ms, M cuda_graph + fast_preprocess FP16 14,4 ms dingin / ±21 ms
+# panas, hasil setara FP32 kecuali kotak di tepi ambang. Bench pipeline 1
+# kamera TANPA rekognisi: total ±82 ms dari jatah 83 ms di 12 fps -> di sini
+# 10 fps supaya rekognisi punya ruang. Lihat docs/DEMO-1060.md (alurnya sama).
+#
+# Sengaja TIDAK memuat detector.swscale_resize (lihat demo-1060.yaml).
+#
 # Engine configuration.
 #
 # Perceptual constants only: how long before a track counts as gone, how much
@@ -46,8 +56,9 @@ core:
   source_uri: "samples/room.mp4"   # "0" for webcam, "rtsp://..." for a camera, or a file path
   source_type: "video_file"        # opencv | video_file | mock
   detection_interval: 1            # 1 is the only safe value until ARCHITECTURE.md §9 item 7 is fixed
-  target_fps: 12.0                 # runtime profile: analyse 12 fps (frames above are dropped
-                                   # before the detector). Bench baseline stays in default_config (30).
+  target_fps: 10.0                 # DEMO 4060: bukan 12. Tanpa rekognisi pipeline sudah ±82/83 ms
+                                   # di 12 fps; rekognisi berbagi GPU yang sama. Naikkan ke 12
+                                   # hanya bila gladi (lag_probe / log health) menunjukkan sisa.
   auto_warmup: true
   strict_mode: true                # fail loudly rather than degrade silently
   cpu_threads: 0                   # batas thread torch/OpenCV/BLAS. 0 = semua core
@@ -84,16 +95,15 @@ zones:
 # Every value below left unset means "use the constant in
 # identity/admission.py", so none of them has two homes.
 recognition:
-  # Profil uji rekognisi wajah (uji C, docs/UJI-LAG.md). Salinan dfine-m.yaml,
-  # hanya blok ini yang berbeda. Roster boleh kosong: wajah tetap dideteksi dan
-  # di-embed, hanya tidak ada yang cocok (track.identified tidak akan muncul).
+  # Rekognisi menyala untuk demo. Roster diisi lewat enrollment web (backend).
+  # Tombol mundur bila identifikasi aneh: execution: "sync".
   enabled: true
   max_requests_per_frame: 2
-  execution: "sync"
+  execution: "async"
   worker_queue: 8
   recognizer: "onnx_face"
-  face_detector_model: "models/scrfd_10g_bnkps.onnx"   # relatif ke folder tempat engine dijalankan
-  face_embedder_model: "models/glintr100.onnx"
+  face_detector_model: "engine/models/recognition/scrfd_10g_bnkps.onnx"   # relatif ke folder tempat engine dijalankan
+  face_embedder_model: "engine/models/embedder/glintr100.onnx"
   embedding_version: "auraface-v1"
   reference_db_path: "engine/data/references.sqlite3"
   onnx_providers: ["CUDAExecutionProvider", "CPUExecutionProvider"]
@@ -103,26 +113,21 @@ recognition:
   min_face_px: 40
 
 detector:
-  model_path: "LibreDFINEm.pt"
+  model_path: "LibreDFINEm.pt"   # DEMO 4060: M (S hanya 12% lebih cepat di 4060).
   confidence_threshold: 0.50
   iou_threshold: 0.45
   image_size: 640
   device: "auto"
-  half: false                    # FP16 (torch.autocast). Trap on Pascal (GTX 1060),
-                                 # worth trying on RTX 4060 — measure it. ARCHITECTURE.md §8
-  pre_resize: true               # resize to image_size in OpenCV before LibreYOLO; skips
-                                 # its full-resolution PIL copies. Compare accuracy once.
-  cudnn_benchmark: false         # true = cuDNN memilih algoritma tercepat (input tetap 640). Ukur di 4060.
-  cuda_graph: false              # true/"auto" = forward diputar dari CUDA graph (LibreYOLO >= 1.6).
-                                 # 4060: 57 -> 12,6 ms. Cek dulu: batch_check --cuda-graph
-  fast_preprocess: false         # true = pra-proses frame 640 RGB di GPU (bit-identik). Butuh pre_resize: true.
-  swscale_resize: false          # true = frame PyAV diperkecil ke RGB 640 oleh swscale (hemat ±20 ms CPU/frame).
-                                 # Cek dulu: python -m engine.tools.scaling_check
-  share_across_cameras: true     # satu D-FINE untuk semua kamera (perception/shared_detector.py)
-  batch_inference: false         # true = frame beberapa kamera dalam satu panggilan; cek dulu dengan
-                                 # python -m engine.tools.batch_check
+  half: true                     # 4060: FP16 + graph 14,4 vs 17,6 ms FP32; beda hanya kotak skor ±0,50.
+                                 # Hasil persis FP32 diinginkan: false.
+  pre_resize: true               # wajib untuk fast_preprocess; aktif bila frame >= 640 di kedua sisi.
+  cudnn_benchmark: false
+  cuda_graph: true               # 4060: forward 57 -> 12,6 ms, identik. Butuh libreyolo >= 1.6.
+  fast_preprocess: true          # bit-identik; hemat ±11 ms. Tidak aktif pada video < 640 (848x478).
+  share_across_cameras: true
+  batch_inference: false         # batch tidak membantu di 4060.
   max_batch: 8
-  batch_wait_ms: 4.0             # tunggu kamera lain sebelum menjalankan batch (hanya bila >1 kamera)
+  batch_wait_ms: 4.0
 
 tracker:
   backend: "iou"

@@ -21,6 +21,7 @@ import time
 from pathlib import Path
 
 from engine.api import EngineApi, Outbox
+from engine.tests import _transport
 
 HELLO = {
     "type": "hello", "v": 1, "ts": "2026-09-19T00:00:00.000Z",
@@ -36,19 +37,15 @@ def _event(index: int, pad: str = ""):
     return event
 
 
-def _start(api: EngineApi, tmp: str) -> str:
-    path = str(Path(tmp) / "engine.sock")
-    api.listen(socket_path=path)
+def _start(api: EngineApi, tmp: str):
+    path = _transport.listen(api, tmp)
     threading.Thread(target=api.serve_forever, daemon=True).start()
     time.sleep(0.1)
     return path
 
 
-def _connect(path: str, timeout: float = 3.0) -> socket.socket:
-    connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    connection.settimeout(timeout)
-    connection.connect(path)
-    return connection
+def _connect(path, timeout: float = 3.0) -> socket.socket:
+    return _transport.connect(path, timeout)
 
 
 def _hello(connection: socket.socket, last_seq: int = 0):
@@ -199,3 +196,46 @@ def test_keepalive_terpasang_di_koneksi_tcp():
         backend.close()
     finally:
         api.close()
+
+
+def test_sendall_yang_tidak_terbangun_seperti_windows_tidak_menahan_backend_baru(monkeypatch):
+    """Di Windows `shutdown` tidak membangunkan `sendall` yang tertahan di thread
+    lain (Linux membangunkannya). Disimulasikan: koneksi lama tidak diputus sama
+    sekali, jadi thread kirimnya tetap macet sampai batas kirim 60 dtk. Backend
+    baru tetap wajib dapat hello_ack DAN replay segera."""
+    real_close = EngineApi._close_connection
+    stuck = []
+
+    def close_without_waking(connection):
+        if not stuck:               # koneksi lama: biarkan sendall-nya macet
+            stuck.append(connection)
+            return
+        real_close(connection)
+
+    monkeypatch.setattr(EngineApi, "_close_connection", staticmethod(close_without_waking))
+    with tempfile.TemporaryDirectory() as tmp:
+        api = EngineApi(outbox=Outbox(), send_timeout=60.0)
+        path = _start(api, tmp)
+        try:
+            lama = _connect(path)
+            _, first = _hello(lama)
+            assert first["type"] == "hello_ack"
+            for index in range(2000):
+                api.emit_event(_event(index, PAD))
+            time.sleep(0.5)
+
+            baru = _connect(path, timeout=3.0)
+            reader, first = _hello(baru, last_seq=0)
+            assert first["type"] == "hello_ack"
+            seqs = []
+            while len(seqs) < 5:
+                message = json.loads(reader.readline())
+                if "seq" in message:
+                    seqs.append(message["seq"])
+            assert seqs == [1, 2, 3, 4, 5]
+            baru.close()
+        finally:
+            for connection in stuck:
+                real_close(connection)
+            lama.close()
+            api.close()

@@ -120,6 +120,9 @@ detector:
   cudnn_benchmark: false         # true = cuDNN memilih algoritma tercepat (input tetap 640). Ukur di 4060.
   cuda_graph: false              # true/"auto" = forward diputar dari CUDA graph (LibreYOLO >= 1.6).
                                  # 4060: 57 -> 12,6 ms. Cek dulu: batch_check --cuda-graph
+  fast_preprocess: false         # true = pra-proses frame 640 RGB di GPU (bit-identik). Butuh pre_resize: true.
+  swscale_resize: false          # true = frame PyAV diperkecil ke RGB 640 oleh swscale (hemat ±20 ms CPU/frame).
+                                 # Cek dulu: python -m engine.tools.scaling_check
   share_across_cameras: true     # satu D-FINE untuk semua kamera (perception/shared_detector.py)
   batch_inference: false         # true = frame beberapa kamera dalam satu panggilan; cek dulu dengan
                                  # python -m engine.tools.batch_check

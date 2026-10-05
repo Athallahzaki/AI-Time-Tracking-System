@@ -67,3 +67,13 @@ def test_berkas_requirements_konsisten():
     assert "<1.27" in Path("engine/requirements-face.txt").read_text(encoding="utf-8")
     for gpu in ("rtx4060", "rtx3050", "gtx1060"):
         assert "-r requirements-gpu.txt" in Path(f"engine/requirements-gpu-{gpu}.txt").read_text(encoding="utf-8")
+
+
+def test_model_wajah_dicari_di_beberapa_tempat(tmp_path):
+    """Laptop 1060 menyimpan model di engine/models/recognition/: dulu baris onnx-sesi hilang diam-diam."""
+    first, second = tmp_path / "a.onnx", tmp_path / "b.onnx"
+    assert env.find_face_model((first, second)) is None
+    second.write_bytes(b"x")
+    assert env.find_face_model((first, second)) == second
+    first.write_bytes(b"x")
+    assert env.find_face_model((first, second)) == first

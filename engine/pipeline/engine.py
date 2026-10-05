@@ -186,10 +186,20 @@ class VisionEngine:
             or not self._cached_detections
         ):
             t0 = time.perf_counter()
+            if getattr(frame, "is_converted", True) is False and not getattr(
+                self._detector, "wants_lazy_frames", False
+            ):
+                # Konversi piksel lazy (YUV -> BGR) diukur sebagai tahapnya
+                # sendiri; tetap termasuk dalam span "detector" agar angka lama
+                # bisa dibandingkan.
+                frame.image
+                self._metrics.record_span("frame_convert", t0, time.perf_counter())
 
             detections = self._detector.detect(frame)
 
             self._metrics.record_span("detector", t0, time.perf_counter())
+            for name, start, end in getattr(self._detector, "last_spans", None) or ():
+                self._metrics.record_span(name, start, end)
 
             self._cached_detections = detections
         else:

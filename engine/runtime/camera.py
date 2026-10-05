@@ -380,9 +380,18 @@ class CameraSupervisor:
 
                 wrap_source = lambda inner, _fps: PlaybackSource(inner)
 
-        if self._detector is None and self._detector_provider is not None:
-            # Dimuat dan dipanaskan SEBELUM stream dibuka (lihat factory.build_engine).
-            self._detector = self._detector_provider(camera_id, config)
+        if self._detector is None:
+            # Dimuat dan dipanaskan SEBELUM stream dibuka (lihat factory.build_engine),
+            # dan disimpan DI SINI, sebelum build_engine membuka sumber. Kalau
+            # sumbernya gagal dibuka (kamera mati), detector tetap tersimpan;
+            # dulu ia ikut hilang bersama exception dan setiap percobaan ulang
+            # memuat bobot D-FINE lagi (10+ dtk di 4060, ±55 dtk di 1060).
+            if self._detector_provider is not None:
+                self._detector = self._detector_provider(camera_id, config)
+            else:
+                self._detector = factory.build_detector(config)
+                if config.auto_warmup:
+                    self._detector.warmup()
         engine, source, source_fps = factory.build_engine(
             config,
             source_id=camera_id,

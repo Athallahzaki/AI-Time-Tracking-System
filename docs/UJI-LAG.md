@@ -199,7 +199,7 @@ python -m engine.tools.batch_check --source C:\video\uji-siap.mp4 --batch-sizes 
 
 Baca baris KESIMPULAN:
 
-- "BATCH MENGUBAH HASIL": `batch_inference` tetap `false`, apa pun angkanya.
+- "HASIL BERUBAH": pengaturan yang diuji (batch / half / cuda_graph / fast_preprocess) jangan dipakai, apa pun angkanya. Yang dihitung adalah kotak di atas ambang deteksi; kolom `beda-semua` dan `skor-maks` menunjukkan kotak skor rendah (kandidat ByteTrack) yang ikut berbeda, sebagai informasi.
 - "tidak menerima batch": LibreYOLO versi ini tidak mendukung batch; tetap `false`.
 - "layak dinyalakan": set `batch_inference: true` dan `max_batch` sesuai saran.
 
@@ -229,6 +229,38 @@ python -m engine.tools.batch_check --source C:\video\uji-siap.mp4 --batch-sizes 
 ```
 
 Pembanding batch_check selalu eager tanpa batch, jadi baris "salah" juga menangkap graph yang mengubah hasil. Bila "salah" = 0 di semua ukuran dan percepatan besar: set `cuda_graph: true` (dan `batch_inference: true`, `max_batch: 5` bila baris 5 jauh lebih cepat) di config, `half: false`. Frame pertama tiap ukuran batch lebih lambat (perekaman graph).
+
+### 3d. Pra-proses di GPU (`fast_preprocess`)
+
+Hasil 4060 (3 Okt, dingin): M 28,5 ms, S 25,2 ms per gambar dengan cuda_graph; forward M sendiri hanya ±12,6 ms. Sisa ±13-16 ms adalah pra/pasca-proses LibreYOLO di CPU, dan itu sama besar untuk S dan M (S hanya 12% lebih cepat walau FLOPs-nya kurang dari setengah).
+
+```powershell
+python -m pytest engine/tests/test_cuda_graph_batch.py -q      # test bit-identik jalan di mesin ber-torch
+python -m engine.tools.batch_check --source C:\video\uji-siap.mp4 --batch-sizes 1 --no-half --cuda-graph --fast-preprocess
+```
+
+Pembanding tetap pra-proses PIL LibreYOLO + eager. "salah" wajib 0. Baris pertama mencetak berapa kali jalur cepat dipakai; 0 berarti frame tidak lewat `pre_resize`.
+
+Hasil 4060 20:13-20:17: FP32 17,6 ms, FP16 14,4 ms (graph + fast_preprocess). Dengan graph, FP16 akhirnya lebih cepat. Tetapi pembanding `--half` juga FP16, jadi selisih FP16 vs FP32 belum terukur. Ukur dengan pembanding FP32:
+
+```powershell
+python -m engine.tools.batch_check --source C:\video\uji-siap.mp4 --batch-sizes 1 --half --cuda-graph --fast-preprocess --reference-fp32
+```
+
+### 3e. Konversi frame langsung ke 640 (`swscale_resize`)
+
+Bench realtime 1 kamera di 4060 (3 Okt 21:28 dan 21:41): span `detector` ±47 ms per frame, terdiri dari `frame_convert` ±16 ms (YUV -> BGR 1080p), `detector_prepare` ±5 ms (cv2.resize + cvtColor), `detector_infer` ±25-29 ms. Jadi ±21 ms CPU per frame dipakai hanya untuk membuat RGB 640x640. swscale bisa membuatnya langsung dari YUV dalam satu langkah, tanpa BGR 1080p.
+
+Pikselnya tidak identik dengan jalur OpenCV (implementasi filter AREA berbeda), jadi cek dulu deteksinya:
+
+```powershell
+python -m pytest engine/tests/test_swscale_resize.py -q
+python -m engine.tools.scaling_check --config engine/config/dfine-m.yaml --source C:\video\uji-siap.mp4 --json bench-out\scaling-4060.json
+```
+
+Alat ini memakai model, half, cuda_graph, fast_preprocess dari config, lalu menjalankan frame yang sama lewat dua jalur. "frame beda di ambang" wajib 0 (atau hanya kotak di tepi ambang, lihat "skor kotak tanpa pasangan maks"). Bila KESIMPULAN "layak dipakai": set `detector.swscale_resize: true` (butuh `pre_resize: true`), ulangi bench. Yang diharapkan: span `frame_convert` hilang, `detector_prepare` turun ke ±2-4 ms.
+
+Catatan: frame yang dipakai rekognisi wajah tetap dikonversi ke BGR penuh, tetapi hanya frame itu dan di thread rekognisi. Sumber non-PyAV (mock, OpenCV) otomatis memakai jalur lama.
 
 ### 4. Lima kamera sungguhan
 
