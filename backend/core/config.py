@@ -19,6 +19,7 @@ class CameraConfigError(ValueError):
     """
 
 
+
 @dataclass
 class CameraConfig:
     id: str
@@ -88,6 +89,28 @@ def load_cameras_from_yaml(yaml_path: Path) -> Dict[str, CameraConfig]:
         )
     return result
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+
+    if value is None:
+        return default
+
+    return value.strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _env_list(name: str) -> List[str]:
+    value = os.getenv(name, "")
+
+    return [
+        item.strip()
+        for item in value.split(",")
+        if item.strip()
+    ]
 
 @dataclass
 class Settings:
@@ -104,6 +127,14 @@ class Settings:
     device: Optional[str] = None
     engine_host: str = field(default_factory=lambda: os.getenv("ENGINE_HOST", "127.0.0.1"))
     engine_port: int = field(default_factory=lambda: int(os.getenv("ENGINE_PORT", "8765")))
+    engine_read_timeout_seconds: float = field(
+        default_factory=lambda: float(
+            os.getenv(
+                "ENGINE_READ_TIMEOUT_SECONDS",
+                "90",
+            )
+        )
+    )
     engine_reconnect_seconds: float = field(
         default_factory=lambda: float(os.getenv("ENGINE_RECONNECT_SECONDS", "2"))
     )
@@ -127,5 +158,70 @@ class Settings:
         self._cameras_cache = load_cameras_from_yaml(self.cameras_yaml_path)
         return self._cameras_cache
 
+    smtp_enabled: bool = field(
+        default_factory=lambda: _env_bool(
+            "SMTP_ENABLED",
+            False,
+        )
+    )
+
+    smtp_host: str = field(
+        default_factory=lambda: os.getenv(
+            "SMTP_HOST",
+            "",
+        )
+    )
+
+    smtp_port: int = field(
+        default_factory=lambda: int(
+            os.getenv(
+                "SMTP_PORT",
+                "587",
+            )
+        )
+    )
+
+    smtp_security: str = field(
+        default_factory=lambda: os.getenv(
+            "SMTP_SECURITY",
+            "starttls",
+        ).strip().lower()
+    )
+
+    smtp_username: str = field(
+        default_factory=lambda: os.getenv(
+            "SMTP_USERNAME",
+            "",
+        )
+    )
+
+    smtp_password: str = field(
+        default_factory=lambda: os.getenv(
+            "SMTP_PASSWORD",
+            "",
+        )
+    )
+
+    smtp_from: str = field(
+        default_factory=lambda: os.getenv(
+            "SMTP_FROM",
+            "",
+        )
+    )
+
+    smtp_to: List[str] = field(
+        default_factory=lambda: _env_list(
+            "SMTP_TO"
+        )
+    )
+
+    smtp_timeout_seconds: float = field(
+        default_factory=lambda: float(
+            os.getenv(
+                "SMTP_TIMEOUT_SECONDS",
+                "10",
+            )
+        )
+    )
 
 settings = Settings()

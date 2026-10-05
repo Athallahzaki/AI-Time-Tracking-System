@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 
 from backend.core.database import get_enrollments
-from backend.core.security import require_api_key
+from backend.core.security import require_admin
 from backend.schemas.enrollment import EnrollmentRequest
 from backend.services.engine_client import EngineConnectionError, engine_client
 from backend.services.enrollment_service import enrollment_service
@@ -11,13 +11,21 @@ from backend.services.enrollment_service import enrollment_service
 router = APIRouter(prefix="/api/enrollments", tags=["Enrollments"])
 
 
+
+@router.post(
+    "/corrections",
+    dependencies=[
+        Depends(require_admin)
+    ],
+)
+
 @router.get("")
 def list_enrollments():
     enrollments = get_enrollments()
     return {"status": "success", "count": len(enrollments), "enrollments": enrollments}
 
 
-@router.post("", dependencies=[Depends(require_api_key)])
+@router.post("", dependencies=[Depends(require_admin)])
 def create_enrollment(req: EnrollmentRequest):
     try:
         message = enrollment_service.create_request(req)

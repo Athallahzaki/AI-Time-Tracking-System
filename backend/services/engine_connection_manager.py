@@ -57,24 +57,82 @@ class EngineConnectionManager:
 
     def _run(self) -> None:
         while not self._stop.is_set():
+
+            if self.client.connected:
+                read_timed_out = getattr(
+                    self.client,
+                    "read_timed_out",
+                    None,
+                )
+
+                if (
+                    callable(read_timed_out)
+                    and read_timed_out(
+                        settings.engine_read_timeout_seconds
+                    )
+                ):
+                    age_fn = getattr(
+                        self.client,
+                        "seconds_since_last_receive",
+                        None,
+                    )
+
+                    age = (
+                        age_fn()
+                        if callable(age_fn)
+                        else settings.engine_read_timeout_seconds
+                    )
+
+                    logger.warning(
+                        "Engine read timeout: no message "
+                        "received for %.1fs "
+                        "(limit %.1fs); reconnecting",
+                        age,
+                        settings.engine_read_timeout_seconds,
+                    )
+
+                    self.client.close()
+                    self._last_warning = ""
+
+                    # Reconnect immediately on the next loop.
+                    continue
+
             if not self.client.connected:
                 try:
                     self.client.connect()
                     self.client.start_receiver()
                     self.sync_desired_state()
+
                     self._last_warning = ""
-                    logger.info("Connected to engine and reconciled cameras/roster")
+
+                    logger.info(
+                        "Connected to engine and reconciled "
+                        "cameras/roster"
+                    )
+
                 except OutboxChangedError:
-                    continue  # reconnect right away with the new outbox cursor
+                    continue
+
                 except EngineConnectionError as exc:
                     text = str(exc)
+
                     if text != self._last_warning:
-                        logger.warning("Engine unavailable: %s", text)
+                        logger.warning(
+                            "Engine unavailable: %s",
+                            text,
+                        )
+
                         self._last_warning = text
-                except Exception:  # noqa: BLE001
-                    logger.exception("Engine connection/reconciliation failed")
+
+                except Exception:
+                    logger.exception(
+                        "Engine connection/reconciliation failed"
+                    )
                     self.client.close()
-            self._stop.wait(settings.engine_reconnect_seconds)
+
+            self._stop.wait(
+                settings.engine_reconnect_seconds
+            )
 
 
 engine_connection_manager = EngineConnectionManager()

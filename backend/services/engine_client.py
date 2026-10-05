@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import json
 import logging
 import socket
@@ -57,6 +58,7 @@ class EngineClient:
         self.outbox_id = get_integration_state("engine_outbox_id", "")
         self.last_event_seq = self._stored_seq(self.outbox_id)
         self._gap_allowed_to: Optional[int] = None
+        self._last_receive_monotonic: Optional[float] = None
         self._gap_retries: Dict[int, int] = {}
 
     @staticmethod
@@ -160,6 +162,7 @@ class EngineClient:
 
     def receive_message(self) -> Dict[str, Any]:
         reader = self._reader
+        
         if reader is None:
             raise EngineConnectionError("Engine reader is not connected")
         try:
@@ -168,6 +171,7 @@ class EngineClient:
             raise EngineConnectionError(f"Failed to receive message from engine: {exc}") from exc
         if not line:
             raise EngineConnectionError("Engine connection closed")
+        self._last_receive_monotonic = time.monotonic()
         try:
             message = json.loads(line)
         except json.JSONDecodeError as exc:
@@ -276,6 +280,41 @@ class EngineClient:
         self.acknowledge(seq)
 
     # ------------------------------------------------------------------
+    # connection health
+    # ------------------------------------------------------------------
+
+    def seconds_since_last_receive(self) -> float:
+        if (
+            not self.connected
+            or self._last_receive_monotonic is None
+        ):
+            return 0.0
+
+        return max(
+            0.0,
+            time.monotonic()
+            - self._last_receive_monotonic,
+        )
+
+
+    def read_timed_out(
+        self,
+        timeout_seconds: float,
+    ) -> bool:
+        if timeout_seconds <= 0:
+            return False
+
+        if not self.connected:
+            return False
+
+        if self._last_receive_monotonic is None:
+            return False
+
+        return (
+            self.seconds_since_last_receive()
+            >= timeout_seconds
+        )
+    # ------------------------------------------------------------------
     # receiver thread
     # ------------------------------------------------------------------
     def receive_loop(self) -> None:
@@ -316,6 +355,8 @@ class EngineClient:
         buffer lock forever (backend shutdown used to hang here).
         """
         self.connected = False
+        self._last_receive_monotonic = None
+
         reader, sock = self._reader, self._socket
         self._reader = None
         self._socket = None
