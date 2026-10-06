@@ -96,6 +96,58 @@ def _create_schema(conn: sqlite3.Connection) -> None:
         )
     """)
 
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at REAL NOT NULL
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS auth_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            token_hash TEXT UNIQUE NOT NULL,
+            created_at REAL NOT NULL,
+            expires_at REAL NOT NULL,
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """)
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_auth_sessions_token "
+        "ON auth_sessions(token_hash)"
+    )
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dedupe_key TEXT UNIQUE NOT NULL,
+            person_id TEXT,
+            notification_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            message TEXT NOT NULL,
+            event_at REAL NOT NULL,
+            created_at REAL NOT NULL,
+            read_at REAL,
+            payload TEXT NOT NULL
+        )
+    """)
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_notifications_created "
+        "ON notifications(created_at)"
+    )
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_notifications_person "
+        "ON notifications(person_id)"
+    )
+
     # --- protocol_events: migrate the old `seq INTEGER PRIMARY KEY` layout ---
     existing = _columns(conn, "protocol_events")
     if existing and "outbox_id" not in existing:
@@ -173,6 +225,31 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             payload TEXT NOT NULL
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS violations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            person_id TEXT NOT NULL,
+            local_date TEXT NOT NULL,
+            violation_type TEXT NOT NULL DEFAULT 'free_time_exceeded',
+            occurred_at REAL NOT NULL,
+            used_seconds REAL NOT NULL,
+            allowance_seconds REAL NOT NULL,
+            payload TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            UNIQUE(person_id, local_date)
+        )
+    """)
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_violations_date "
+        "ON violations(local_date)"
+    )
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_violations_person "
+        "ON violations(person_id)"
+    )
+
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_corrections_person_date "
         "ON corrections(person_id, local_date)"
@@ -251,6 +328,248 @@ def _create_schema(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_frames_observed ON detection_frames(observed_at)"
     )
 
+
+# ---------------------------------------------------------------------------
+# notifications
+# ---------------------------------------------------------------------------
+
+def save_notification(
+    dedupe_key: str,
+    person_id: Optional[str],
+    notification_type: str,
+    title: str,
+    message: str,
+    event_at: float,
+    payload: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    init_database()
+
+    created_at = time.time()
+
+    with connect() as conn:
+        cursor = conn.execute(
+            """
+            INSERT OR IGNORE INTO notifications (
+                dedupe_key,
+                person_id,
+                notification_type,
+                title,
+                message,
+                event_at,
+                created_at,
+                payload
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                dedupe_key,
+                person_id,
+                notification_type,
+                title,
+                message,
+                float(event_at),
+                created_at,
+                json.dumps(payload),
+            ),
+        )
+
+        if cursor.rowcount == 0:
+            return None
+
+        notification_id = cursor.lastrowid
+
+    return {
+        "id": notification_id,
+        "dedupe_key": dedupe_key,
+        "person_id": person_id,
+        "type": notification_type,
+        "title": title,
+        "message": message,
+        "event_at": float(event_at),
+        "created_at": created_at,
+        "read_at": None,
+        "payload": payload,
+    }
+
+
+def get_notifications(
+    person_id: Optional[str] = None,
+    unread_only: bool = False,
+    limit: int = 200,
+) -> List[Dict[str, Any]]:
+    init_database()
+
+    query = """
+        SELECT
+            id,
+            dedupe_key,
+            person_id,
+            notification_type,
+            title,
+            message,
+            event_at,
+            created_at,
+            read_at,
+            payload
+        FROM notifications
+    """
+
+    clauses: List[str] = []
+    params: List[Any] = []
+
+    if person_id is not None:
+        clauses.append("person_id = ?")
+        params.append(str(person_id))
+
+    if unread_only:
+        clauses.append("read_at IS NULL")
+
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+
+    query += " ORDER BY created_at DESC LIMIT ?"
+    params.append(int(limit))
+
+    with connect() as conn:
+        rows = conn.execute(query, params).fetchall()
+
+    return [
+        {
+            "id": row[0],
+            "dedupe_key": row[1],
+            "person_id": row[2],
+            "type": row[3],
+            "title": row[4],
+            "message": row[5],
+            "event_at": row[6],
+            "created_at": row[7],
+            "read_at": row[8],
+            "payload": json.loads(row[9]),
+        }
+        for row in rows
+    ]
+
+
+def mark_notification_read(notification_id: int) -> bool:
+    init_database()
+
+    with connect() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE notifications
+            SET read_at = ?
+            WHERE id = ? AND read_at IS NULL
+            """,
+            (
+                time.time(),
+                int(notification_id),
+            ),
+        )
+
+    return cursor.rowcount > 0
+# ---------------------------------------------------------------------------
+# violations
+# ---------------------------------------------------------------------------
+
+def save_violation(
+    person_id: str,
+    local_date: str,
+    occurred_at: float,
+    used_seconds: float,
+    allowance_seconds: float,
+    payload: Dict[str, Any],
+    violation_type: str = "free_time_exceeded",
+) -> bool:
+    """Record at most one violation for one person on one local date."""
+
+    init_database()
+
+    with connect() as conn:
+        cursor = conn.execute(
+            """
+            INSERT OR IGNORE INTO violations (
+                person_id,
+                local_date,
+                violation_type,
+                occurred_at,
+                used_seconds,
+                allowance_seconds,
+                payload,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(person_id),
+                str(local_date),
+                str(violation_type),
+                float(occurred_at),
+                float(used_seconds),
+                float(allowance_seconds),
+                json.dumps(payload),
+                time.time(),
+            ),
+        )
+
+    return cursor.rowcount > 0
+
+# ---------------------------------------------------------------------------
+# violations
+# ---------------------------------------------------------------------------
+
+def get_violations(
+    person_id: Optional[str] = None,
+    local_date: Optional[str] = None,
+    limit: int = 200,
+) -> List[Dict[str, Any]]:
+    init_database()
+
+    query = """
+        SELECT
+            id,
+            person_id,
+            local_date,
+            violation_type,
+            occurred_at,
+            used_seconds,
+            allowance_seconds,
+            payload,
+            created_at
+        FROM violations
+    """
+
+    clauses: List[str] = []
+    params: List[Any] = []
+
+    if person_id is not None:
+        clauses.append("person_id = ?")
+        params.append(str(person_id))
+
+    if local_date is not None:
+        clauses.append("local_date = ?")
+        params.append(str(local_date))
+
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+
+    query += " ORDER BY occurred_at DESC LIMIT ?"
+    params.append(int(limit))
+
+    with connect() as conn:
+        rows = conn.execute(query, params).fetchall()
+
+    return [
+        {
+            "id": row[0],
+            "person_id": row[1],
+            "date": row[2],
+            "type": row[3],
+            "occurred_at": row[4],
+            "used_seconds": row[5],
+            "allowance_seconds": row[6],
+            "payload": json.loads(row[7]),
+            "created_at": row[8],
+        }
+        for row in rows
+    ]
 
 # ---------------------------------------------------------------------------
 # enrollments / employees
@@ -540,6 +859,196 @@ def get_known_person_ids() -> List[str]:
     return [str(row[0]) for row in rows]
 
 
+# ---------------------------------------------------------------------------
+# users / authentication
+# ---------------------------------------------------------------------------
+
+def create_user(
+    username: str,
+    password_hash: str,
+    role: str,
+) -> Dict[str, Any]:
+    init_database()
+
+    now = time.time()
+
+    with connect() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO users (
+                username,
+                password_hash,
+                role,
+                enabled,
+                created_at
+            )
+            VALUES (?, ?, ?, 1, ?)
+            """,
+            (
+                username,
+                password_hash,
+                role,
+                now,
+            ),
+        )
+
+        user_id = cursor.lastrowid
+
+    return {
+        "id": user_id,
+        "username": username,
+        "role": role,
+        "enabled": True,
+        "created_at": now,
+    }
+
+
+def get_user_by_username(
+    username: str,
+) -> Optional[Dict[str, Any]]:
+    init_database()
+
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                id,
+                username,
+                password_hash,
+                role,
+                enabled,
+                created_at
+            FROM users
+            WHERE username = ?
+            """,
+            (username,),
+        ).fetchone()
+
+    if row is None:
+        return None
+
+    return {
+        "id": row[0],
+        "username": row[1],
+        "password_hash": row[2],
+        "role": row[3],
+        "enabled": bool(row[4]),
+        "created_at": row[5],
+    }
+
+
+def get_users() -> List[Dict[str, Any]]:
+    init_database()
+
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, username, role, enabled, created_at
+            FROM users
+            ORDER BY username
+            """
+        ).fetchall()
+
+    return [
+        {
+            "id": row[0],
+            "username": row[1],
+            "role": row[2],
+            "enabled": bool(row[3]),
+            "created_at": row[4],
+        }
+        for row in rows
+    ]
+
+
+def create_auth_session(
+    user_id: int,
+    token_hash: str,
+    expires_at: float,
+) -> None:
+    init_database()
+
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO auth_sessions (
+                user_id,
+                token_hash,
+                created_at,
+                expires_at
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                int(user_id),
+                token_hash,
+                time.time(),
+                float(expires_at),
+            ),
+        )
+
+
+def get_user_by_session(
+    token_hash: str,
+    now: Optional[float] = None,
+) -> Optional[Dict[str, Any]]:
+    init_database()
+
+    now = time.time() if now is None else now
+
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                u.id,
+                u.username,
+                u.role,
+                u.enabled,
+                s.expires_at
+            FROM auth_sessions s
+            JOIN users u ON u.id = s.user_id
+            WHERE s.token_hash = ?
+              AND s.expires_at > ?
+            """,
+            (
+                token_hash,
+                now,
+            ),
+        ).fetchone()
+
+    if row is None:
+        return None
+
+    return {
+        "id": row[0],
+        "username": row[1],
+        "role": row[2],
+        "enabled": bool(row[3]),
+        "expires_at": row[4],
+    }
+
+
+def delete_auth_session(
+    token_hash: str,
+) -> None:
+    init_database()
+
+    with connect() as conn:
+        conn.execute(
+            "DELETE FROM auth_sessions WHERE token_hash = ?",
+            (token_hash,),
+        )
+
+
+def delete_expired_auth_sessions() -> None:
+    init_database()
+
+    with connect() as conn:
+        conn.execute(
+            "DELETE FROM auth_sessions WHERE expires_at <= ?",
+            (time.time(),),
+        )
+        
 # ---------------------------------------------------------------------------
 # corrections (append-only)
 # ---------------------------------------------------------------------------

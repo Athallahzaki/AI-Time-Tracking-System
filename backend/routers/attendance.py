@@ -7,8 +7,10 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend.core.database import get_corrections, save_correction
-from backend.core.security import require_api_key
 from backend.core.state import system_state
+from backend.core.security import (
+    require_admin,
+)
 from backend.schemas.corrections import CorrectionCreate
 from backend.services.break_policy import break_policy
 from backend.services.free_time import free_time_ledger
@@ -71,6 +73,12 @@ def _usage_payload(person_id: str, target_date: str) -> Dict[str, Any]:
         "status": usage["status"],
     }
 
+@router.post(
+    "/corrections",
+    dependencies=[
+        Depends(require_admin)
+    ],
+)
 
 @router.get("/active")
 def get_active_sessions():
@@ -79,7 +87,7 @@ def get_active_sessions():
     return {"status": "success", "count": len(sessions), "sessions": sessions}
 
 
-@router.post("/corrections", dependencies=[Depends(require_api_key)])
+@router.post("/corrections", dependencies=[Depends(require_admin)])
 def create_manual_correction(req: CorrectionCreate):
     """Append-only. Recorded AND applied to the allowance calculation."""
     if req.new_classification is not None and req.new_classification not in EXCLUDING_CLASSIFICATIONS:

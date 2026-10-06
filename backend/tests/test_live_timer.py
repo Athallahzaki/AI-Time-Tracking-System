@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from backend.core.state import SystemState
 from backend.routers import attendance
+from backend.services.break_policy import break_policy
 from backend.schemas.protocol import parse_message
 
 
@@ -33,7 +34,7 @@ def test_view_frame_creates_a_backend_timer(monkeypatch):
     assert sessions[0]["formatted_duration"] == "5s"
     assert sessions[0]["presence_status"] == "VERIFYING"
     assert sessions[0]["qualification_remaining_seconds"] == pytest.approx(14.6)
-    assert sessions[0]["daily_used_seconds"] == 0
+    assert sessions[0]["daily_used_seconds"] == 0.0
 
 
 def test_passing_person_is_not_charged_and_charge_starts_after_20_seconds(monkeypatch):
@@ -61,8 +62,12 @@ def test_passing_person_is_not_charged_and_charge_starts_after_20_seconds(monkey
     })
     at_25 = state.get_active_sessions()[0]
     assert at_25["presence_status"] == "CONFIRMED"
-    assert at_25["daily_used_seconds"] == pytest.approx(5.0)
-    assert at_25["remaining_seconds"] == pytest.approx(1795.0)
+    # view.frame is display-only and must never charge
+    # the durable free-time ledger.
+    assert at_25["daily_used_seconds"] == 0.0
+    assert at_25["remaining_seconds"] == pytest.approx(
+        break_policy.allowance_seconds
+    )
 
 
 def test_timer_pauses_during_official_break(monkeypatch):
@@ -92,7 +97,10 @@ def test_timer_pauses_during_official_break(monkeypatch):
     })
     after_break = state.get_active_sessions()[0]
     assert after_break["presence_status"] == "CONFIRMED"
-    assert after_break["daily_used_seconds"] == pytest.approx(5.0)
+
+    # view.frame hanya untuk realtime/display.
+    # Free-time hanya dihitung dari durable engine events.
+    assert after_break["daily_used_seconds"] == 0.0
 
 
 def test_snapshot_schema_matches_contract_shape():
@@ -115,46 +123,62 @@ def test_snapshot_schema_matches_contract_shape():
     assert parsed.live[0].stream_epoch == 1
     assert parsed.pts_wallclock_offset["r1"].offset == 100.0
 
-
 def test_breaks_endpoint_returns_frontend_shape(monkeypatch):
-    base = {
-        "type": "presence.interval",
-        "person_id": "4471",
-        "camera_id": "r1",
-        "start_zone": "door",
-        "end_zone": "door",
-        "end_reason": "left_frame",
-        "identity_confidence": 0.9,
-        "evidence_count": 2,
-        "stream_epoch": 0,
-    }
-    first = {
-        **base,
-        "interval_id": "int-1",
-        "start_at": "2026-09-22T01:00:00Z",
-        "end_at": "2026-09-22T01:10:00Z",
-    }
-    second = {
-        **base,
-        "interval_id": "int-2",
-        "start_at": "2026-09-22T01:20:00Z",
-        "end_at": "2026-09-22T01:30:00Z",
-    }
+    start = datetime.fromisoformat(
+        "2026-09-22T01:00:00+00:00"
+    ).timestamp()
+
+    end = datetime.fromisoformat(
+        "2026-09-22T01:10:00+00:00"
+    ).timestamp()
+
     monkeypatch.setattr(
-        attendance,
-        "get_protocol_events",
-        lambda event_type: [{"payload": first}, {"payload": second}],
-    )
-    monkeypatch.setattr(
-        attendance,
-        "get_enrollments",
-        lambda: [{"person_id": "4471"}],
+        attendance.free_time_ledger,
+        "known_person_ids",
+        lambda: {"4471"},
     )
 
-    response = attendance.get_all_break_usage("2026-09-22")
+    monkeypatch.setattr(
+        attendance.free_time_ledger,
+        "usage",
+        lambda person_id, local_date: {
+            "person_id": person_id,
+            "date": local_date,
+            "used_seconds": 600.0,
+            "allowance_seconds": 1800.0,
+            "remaining_seconds": 1200.0,
+            "status": "ok",
+            "adjustment_seconds": 0.0,
+            "present": False,
+            "qualification_remaining_seconds": 0.0,
+            "is_official_break": False,
+            "visits": [
+                {
+                    "visit_id": "visit-test",
+                    "start_ts": start,
+                    "end_ts": end,
+                    "cameras": ["r1"],
+                    "open": False,
+                    "countable_seconds": 620.0,
+                    "charged_seconds": 600.0,
+                    "original_charged_seconds": 600.0,
+                    "excluded": False,
+                }
+            ],
+        },
+    )
+
+    response = attendance.get_all_break_usage(
+        "2026-09-22"
+    )
+
     usage = response["data"][0]
+
     assert response["status"] == "success"
     assert usage["person_id"] == "4471"
     assert usage["break_count"] == 1
     assert usage["used_minutes"] == 10.0
-    assert usage["breaks"][0]["duration_seconds"] == 600.0
+    assert (
+        usage["breaks"][0]["duration_seconds"]
+        == 600.0
+    )

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict
 
+from backend.services.violation_service import violation_service
 from backend.core.database import save_protocol_event
 from backend.core.state import system_state
 from backend.services.free_time import free_time_ledger
@@ -40,8 +41,14 @@ class EventIngestionService:
         )
         if inserted:
             free_time_ledger.apply_event(validated)
-            system_state.record_event(event_type, validated)
-        return inserted
 
+            violation_service.evaluate_event(
+                validated
+            )
+
+            system_state.record_event(
+                event_type,
+                validated,
+            )
 
 event_ingestion_service = EventIngestionService()

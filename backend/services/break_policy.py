@@ -13,10 +13,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date as date_type, datetime, time as dt_time, timedelta
 from pathlib import Path
-from typing import List, Tuple
+from typing import Any, Dict, List, Tuple
 from zoneinfo import ZoneInfo
 
 import yaml
+
+from backend.schemas.attendance import GapClassification
 
 
 def _minutes(value: str) -> int:
@@ -71,7 +73,84 @@ class BreakPolicy:
     @property
     def warning_seconds(self) -> float:
         return float(self.warning_remaining_minutes) * 60.0
+        
+    @property
+    def tracking_loss_threshold(self) -> float:
+        """
+        Compatibility alias untuk policy/session lama.
 
+        Pada model free-time baru, threshold ini memakai nilai
+        visit_merge_gap_seconds.
+        """
+        return float(self.visit_merge_gap_seconds)
+
+
+    def classify(
+        self,
+        gap: Dict[str, Any],
+        previous_interval: Dict[str, Any],
+        next_interval: Dict[str, Any],
+    ) -> GapClassification:
+        """
+        Compatibility classification untuk SessionDeriver.
+
+        Ini tidak menentukan free-time charging.
+        Free-time tetap dihitung oleh FreeTimeLedger.
+        """
+
+        gap_seconds = float(
+            gap.get("gap_seconds", 0.0)
+        )
+
+        end_reason = previous_interval.get(
+            "end_reason"
+        )
+
+        if end_reason == "camera_lost":
+            return GapClassification.CAMERA_FAILURE
+
+        if end_reason in {
+            "engine_shutdown",
+            "system_shutdown",
+        }:
+            return GapClassification.SYSTEM_EVENT
+
+        gap_started_at = gap.get(
+            "gap_started_at"
+        )
+
+        if isinstance(gap_started_at, str):
+            try:
+                timestamp = datetime.fromisoformat(
+                    gap_started_at.replace(
+                        "Z",
+                        "+00:00",
+                    )
+                ).timestamp()
+
+                if self.in_official_break(timestamp):
+                    return GapClassification.OFFICIAL_BREAK
+
+            except ValueError:
+                pass
+
+        if (
+            previous_interval.get("end_zone")
+            == "interior"
+            and gap_seconds
+            <= self.tracking_loss_threshold
+        ):
+            return GapClassification.TRACKING_LOSS
+
+        if (
+            previous_interval.get("end_zone")
+            == "door"
+            and next_interval.get("start_zone")
+            == "door"
+        ):
+            return GapClassification.BREAK
+
+        return GapClassification.UNKNOWN
     # --- time helpers ------------------------------------------------------
     def local_date(self, timestamp: float) -> str:
         return datetime.fromtimestamp(timestamp, self.timezone).date().isoformat()

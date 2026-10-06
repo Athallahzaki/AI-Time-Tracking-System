@@ -10,11 +10,23 @@ from backend.core.config import settings
 from backend.core.database import init_database
 from backend.routers import (
     attendance,
+    auth,
     cameras,
     enrollments,
+    notifications,
+    settings as settings_router,
     stats,
     streams,
     system,
+    violations,
+)
+
+from backend.services.auth_service import (
+    auth_service,
+)
+
+from backend.services.email_service import (
+    email_service,
 )
 from backend.services.engine_client import engine_client
 from backend.services.engine_connection_manager import engine_connection_manager
@@ -46,12 +58,18 @@ async def lifespan(app: FastAPI):
 
     init_database()
 
+    if auth_service.bootstrap_admin():
+        logger.info(
+            "Initial admin user created"
+        )
+        
     # Fail at startup, loudly, on a broken cameras.yaml — never "no cameras".
     cameras = settings.cameras
     logger.info("Loaded %s camera(s) from %s", len(cameras), settings.cameras_yaml_path)
 
     engine_integration.configure()
-
+    
+    email_service.start()
     engine_connection_manager.start()
 
     yield
@@ -60,7 +78,9 @@ async def lifespan(app: FastAPI):
         "Shutting down AI Time Tracking Backend..."
     )
 
+    
     engine_connection_manager.stop()
+    email_service.stop()
     detection_writer.stop()
 
 
@@ -84,10 +104,13 @@ app.add_middleware(
 app.include_router(attendance.router)
 app.include_router(cameras.router)
 app.include_router(enrollments.router)
+app.include_router(settings_router.router)
 app.include_router(stats.router)
 app.include_router(streams.router)
 app.include_router(system.router)
-
+app.include_router(violations.router)
+app.include_router(notifications.router)
+app.include_router(auth.router)
 
 @app.get("/")
 def root():

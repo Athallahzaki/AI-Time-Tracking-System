@@ -7,7 +7,9 @@ from pydantic import BaseModel
 
 from backend.core.config import settings
 from backend.core.database import set_camera_override
-from backend.core.security import require_api_key
+from backend.core.security import (
+    require_admin,
+)
 from backend.core.state import system_state
 from backend.services.camera_state import effective_cameras, set_cameras_message, source_allowed
 from backend.services.engine_client import EngineConnectionError, engine_client
@@ -76,7 +78,7 @@ def get_camera_detail(camera_id: str):
     raise HTTPException(status_code=404, detail=f"Camera '{camera_id}' not found")
 
 
-@router.post("/{camera_id}/start", dependencies=[Depends(require_api_key)])
+@router.post("/{camera_id}/start", dependencies=[Depends(require_admin)])
 def start_camera(camera_id: str):
     _require_camera(camera_id)
     set_camera_override(camera_id, enabled=True)
@@ -85,7 +87,7 @@ def start_camera(camera_id: str):
             "message": f"Camera '{camera_id}' enabled"}
 
 
-@router.post("/{camera_id}/stop", dependencies=[Depends(require_api_key)])
+@router.post("/{camera_id}/stop", dependencies=[Depends(require_admin)])
 def stop_camera(camera_id: str):
     _require_camera(camera_id)
     set_camera_override(camera_id, enabled=False)
@@ -94,7 +96,7 @@ def stop_camera(camera_id: str):
             "message": f"Camera '{camera_id}' disabled"}
 
 
-@router.post("/{camera_id}/source", dependencies=[Depends(require_api_key)])
+@router.post("/{camera_id}/source", dependencies=[Depends(require_admin)])
 def switch_camera_source(camera_id: str, req: SwitchSourceRequest):
     """Switch only to a source listed for this camera in cameras.yaml.
 
