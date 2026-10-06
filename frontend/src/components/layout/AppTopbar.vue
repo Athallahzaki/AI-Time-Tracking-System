@@ -1,5 +1,17 @@
 <script setup>
-import { Bell, LayoutGrid, Menu, Settings } from '@lucide/vue';
+import { computed } from 'vue';
+import { RouterLink, useRouter } from 'vue-router';
+import { Bell, LayoutGrid, LogIn, LogOut, Menu } from '@lucide/vue';
+import { useAuth } from '@/composables/useAuth';
+
+const router = useRouter();
+const { isLoggedIn, user, logout } = useAuth();
+const initials = computed(() => (user.value?.username || '?').slice(0, 2).toUpperCase());
+
+async function handleLogout() {
+  await logout();
+  router.push('/');
+}
 
 defineProps({
   crumbs: {
@@ -52,11 +64,29 @@ defineEmits(['toggle-sidebar']);
         <Bell class="h-4 w-4 sm:h-5 sm:w-5" />
       </button>
 
-      <div
-        class="h-7 w-7 sm:h-8 sm:w-8 rounded-full bg-indigo-100 text-center text-xs font-semibold leading-7 sm:leading-8 text-indigo-600 shrink-0"
+      <template v-if="isLoggedIn">
+        <div
+          class="h-7 w-7 sm:h-8 sm:w-8 rounded-full bg-indigo-100 text-center text-xs font-semibold leading-7 sm:leading-8 text-indigo-600 shrink-0"
+          :title="`${user?.username} (${user?.role})`"
+        >
+          {{ initials }}
+        </div>
+        <button
+          class="rounded-lg p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition-colors"
+          title="Keluar"
+          @click="handleLogout"
+        >
+          <LogOut class="h-4 w-4 sm:h-5 sm:w-5" />
+        </button>
+      </template>
+      <RouterLink
+        v-else
+        to="/login"
+        class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
       >
-        AD
-      </div>
+        <LogIn class="h-3.5 w-3.5" />
+        <span>Masuk</span>
+      </RouterLink>
     </div>
   </header>
 </template>

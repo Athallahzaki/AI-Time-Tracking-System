@@ -1,4 +1,5 @@
 import { ref, reactive } from 'vue';
+import { apiFetch } from './useAuth';
 
 export interface EnrolledPerson {
   person_id: string;
@@ -105,12 +106,15 @@ export function useEnrollment() {
         })),
       );
 
-      const res = await fetch('/api/enrollments', {
+      const res = await apiFetch('/api/enrollments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ person_id: personId, images: encodedImages }),
       });
 
+      if (res.status === 401 || res.status === 403) {
+        throw new Error('Sesi admin habis atau belum login. Masuk lagi lalu kirim ulang.');
+      }
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body?.detail || `HTTP ${res.status}`);

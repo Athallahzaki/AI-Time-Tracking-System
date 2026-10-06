@@ -1,5 +1,6 @@
 <script setup>
 import { ref } from 'vue';
+import { apiFetch } from '@/composables/useAuth';
 
 const props = defineProps({
   presetPersonId: { type: String, default: '' },
@@ -67,12 +68,15 @@ async function handleSubmit() {
       notes: form.value.notes || null,
     };
 
-    const res = await fetch('/api/attendance/corrections', {
+    const res = await apiFetch('/api/attendance/corrections', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
 
+    if (res.status === 401 || res.status === 403) {
+      throw new Error('Koreksi butuh login admin.');
+    }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       throw new Error(body?.detail || `HTTP ${res.status}`);
