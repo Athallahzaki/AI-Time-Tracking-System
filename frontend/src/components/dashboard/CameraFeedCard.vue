@@ -1,8 +1,18 @@
 <script setup>
-import { ref, reactive, watch, onMounted, onBeforeUnmount, computed } from 'vue';
+import {
+  ref,
+  reactive,
+  watch,
+  onMounted,
+  onBeforeUnmount,
+  computed,
+} from 'vue';
 import Hls from 'hls.js';
 import { Circle, ScanSearch, TriangleAlert, Video, Wifi } from '@lucide/vue';
 import DetectionBox from './DetectionBox.vue';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import {
   resolveDetectionsAt,
   resolveDetectionsAtPts,
@@ -83,14 +93,15 @@ function formatLiveDuration(seconds) {
 // timer_as_of. Whatever frame is on screen -- live, delayed HLS, or a direct
 // MP4 at 0.8x -- "how long" is server_now - first_seen_at, so one second on
 // screen is exactly one second and switching frames cannot speed it up.
-const lastShown = new Map();   // per-track guard against tiny clock-offset steps back
+const lastShown = new Map(); // per-track guard against tiny clock-offset steps back
 const LAST_SHOWN_TTL_MS = 30000;
 
 function monotonic(key, value, nowMs) {
   const previous = lastShown.get(key);
-  const shown = previous && value < previous.value && previous.value - value < 1
-    ? previous.value
-    : value;
+  const shown =
+    previous && value < previous.value && previous.value - value < 1
+      ? previous.value
+      : value;
   lastShown.set(key, { value: shown, seenMs: nowMs });
   return shown;
 }
@@ -112,7 +123,10 @@ function withLiveTimers(detections) {
     if (detection.firstSeenAt != null && detection.timerAsOf != null) {
       elapsed = Math.max(0, serverNow - detection.firstSeenAt);
       sinceAsOf = Math.max(0, serverNow - detection.timerAsOf);
-    } else if (detection.elapsedSeconds != null && detection.elapsedObservedAtMs != null) {
+    } else if (
+      detection.elapsedSeconds != null &&
+      detection.elapsedObservedAtMs != null
+    ) {
       // Older backend without absolute timestamps.
       sinceAsOf = Math.max(0, nowMs - detection.elapsedObservedAtMs) / 1000;
       elapsed = detection.elapsedSeconds + sinceAsOf;
@@ -123,16 +137,27 @@ function withLiveTimers(detections) {
 
     let extra = `${formatLiveDuration(elapsed)}${detection.durationSuffix || ''}`;
     if (detection.timerMode === 'qualifying') {
-      const remaining = Math.max(0, (detection.qualificationRemainingSeconds || 0) - sinceAsOf);
+      const remaining = Math.max(
+        0,
+        (detection.qualificationRemainingSeconds || 0) - sinceAsOf,
+      );
       extra = `${Math.ceil(remaining)}s`;
     } else if (detection.timerMode === 'paused') {
       extra = 'Istirahat 12:00–13:00 · timer dijeda';
-    } else if (detection.timerMode === 'counting' || detection.timerMode === 'limit') {
-      const used = monotonic(`${key}:u`, (detection.dailyUsedSeconds || 0) + sinceAsOf, nowMs);
+    } else if (
+      detection.timerMode === 'counting' ||
+      detection.timerMode === 'limit'
+    ) {
+      const used = monotonic(
+        `${key}:u`,
+        (detection.dailyUsedSeconds || 0) + sinceAsOf,
+        nowMs,
+      );
       const allowance = detection.allowanceSeconds || 1800;
-      extra = detection.timerMode === 'limit'
-        ? `BATAS TERCAPAI · ${formatLiveDuration(used)} / ${formatLiveDuration(allowance)}`
-        : `Jatah terpakai ${formatLiveDuration(used)} / ${formatLiveDuration(allowance)}`;
+      extra =
+        detection.timerMode === 'limit'
+          ? `BATAS TERCAPAI · ${formatLiveDuration(used)} / ${formatLiveDuration(allowance)}`
+          : `Jatah terpakai ${formatLiveDuration(used)} / ${formatLiveDuration(allowance)}`;
     }
     return {
       ...detection,
@@ -182,7 +207,6 @@ function tick() {
   rafId = requestAnimationFrame(tick);
 }
 
-
 function isWhepUrl(url) {
   return url && (url.endsWith('/whep') || url.includes('/whep?'));
 }
@@ -198,14 +222,19 @@ const WEBRTC_PLAYOUT_DELAY = 0.8;
 // few seconds. Now the video's playbackRate follows the engine's measured
 // throughput so it slows down smoothly instead. Pausing stays only as a last
 // resort when the engine stalls completely.
-const DIRECT_TARGET_LEAD_SECONDS = 1.5;   // how far analysis should run ahead
-const DIRECT_HARD_LAG_SECONDS = 1.0;      // video ahead of analysis by this -> pause
-const DIRECT_SEEK_LAG_SECONDS = 3.0;      // further ahead than this -> jump back instead
+const DIRECT_TARGET_LEAD_SECONDS = 1.5; // how far analysis should run ahead
+const DIRECT_HARD_LAG_SECONDS = 1.0; // video ahead of analysis by this -> pause
+const DIRECT_SEEK_LAG_SECONDS = 3.0; // further ahead than this -> jump back instead
 const DIRECT_LAG_GRACE_MS = 1500;
 const DIRECT_MIN_RATE = 0.25;
-const DIRECT_RATE_GAIN = 0.4;             // per second of lead error
-const DIRECT_RATE_STEP = 0.03;            // ignore tiny changes (no thrash)
-const directRate = { lastPts: Number.NaN, lastMs: 0, engineRate: 1, prevLatest: Number.NaN };
+const DIRECT_RATE_GAIN = 0.4; // per second of lead error
+const DIRECT_RATE_STEP = 0.03; // ignore tiny changes (no thrash)
+const directRate = {
+  lastPts: Number.NaN,
+  lastMs: 0,
+  engineRate: 1,
+  prevLatest: Number.NaN,
+};
 
 function seekVideoTo(video, seconds) {
   const target = Math.max(0, seconds);
@@ -222,7 +251,10 @@ function measureEngineRate(latest) {
       directRate.lastPts = latest;
       directRate.lastMs = nowMs;
     }
-  } else if (!Number.isFinite(directRate.lastPts) || latest < directRate.lastPts) {
+  } else if (
+    !Number.isFinite(directRate.lastPts) ||
+    latest < directRate.lastPts
+  ) {
     directRate.lastPts = latest;
     directRate.lastMs = nowMs;
   }
@@ -230,7 +262,10 @@ function measureEngineRate(latest) {
 
 function setPlaybackRate(video, rate) {
   const clamped = Math.min(1, Math.max(DIRECT_MIN_RATE, rate));
-  if (Math.abs(video.playbackRate - clamped) >= DIRECT_RATE_STEP || clamped === 1) {
+  if (
+    Math.abs(video.playbackRate - clamped) >= DIRECT_RATE_STEP ||
+    clamped === 1
+  ) {
     if (video.playbackRate !== clamped) video.playbackRate = clamped;
   }
 }
@@ -241,10 +276,13 @@ function synchronizeDirectPlayback() {
   if (!video || streamMode.value !== 'direct') return;
 
   const latest = buffer.length ? buffer[buffer.length - 1].pts : Number.NaN;
-  const duration = Number.isFinite(video.duration) ? video.duration : Number.NaN;
-  const analysisComplete = Number.isFinite(latest)
-    && Number.isFinite(duration)
-    && latest >= duration - 0.5;
+  const duration = Number.isFinite(video.duration)
+    ? video.duration
+    : Number.NaN;
+  const analysisComplete =
+    Number.isFinite(latest) &&
+    Number.isFinite(duration) &&
+    latest >= duration - 0.5;
 
   // With no analyzed frame at all, hold the first video frame immediately so
   // the beginning cannot be lost while the model warms up.
@@ -269,8 +307,9 @@ function synchronizeDirectPlayback() {
   // The engine restarted the file (--loop-files, or a camera re-open): its
   // timeline went back to 0. Follow it instead of waiting a whole lap with
   // the video frozen near the end -- that was the "stuck at AI sync".
-  const restarted = Number.isFinite(directRate.prevLatest)
-    && latest < directRate.prevLatest - 1;
+  const restarted =
+    Number.isFinite(directRate.prevLatest) &&
+    latest < directRate.prevLatest - 1;
   directRate.prevLatest = latest;
   if (restarted) {
     directRate.lastPts = Number.NaN;
@@ -299,8 +338,9 @@ function synchronizeDirectPlayback() {
   directLagStartedAtMs = null;
 
   // Follow the engine: its throughput, corrected toward the target lead.
-  const rate = directRate.engineRate
-    + DIRECT_RATE_GAIN * (lead - DIRECT_TARGET_LEAD_SECONDS);
+  const rate =
+    directRate.engineRate +
+    DIRECT_RATE_GAIN * (lead - DIRECT_TARGET_LEAD_SECONDS);
   setPlaybackRate(video, rate);
 
   if (directSyncWaiting.value && lead >= DIRECT_TARGET_LEAD_SECONDS) {
@@ -518,8 +558,10 @@ function handleWarning() {
 </script>
 
 <template>
-  <div
-    class="overflow-hidden rounded-xl border bg-white shadow-xs transition-all"
+  <!-- id dipakai UnidentifiedAlertPanel untuk scroll ke kamera yang dimaksud -->
+  <Card
+    :id="`camera-${camera.id}`"
+    class="gap-0 overflow-hidden py-0 shadow-xs transition-all"
   >
     <div
       class="flex flex-wrap items-center justify-between gap-1.5 sm:gap-2 border-b px-3 py-2 sm:px-4 sm:py-2.5"
@@ -542,23 +584,25 @@ function handleWarning() {
         class="flex items-center gap-1.5 sm:gap-2.5 text-[11px] sm:text-xs text-slate-500"
       >
         <span class="font-medium text-slate-700">{{ camera.fps }} FPS</span>
-        <span
+        <Badge
           v-if="streamMode"
-          class="rounded px-1.5 py-0.5 text-[10px] sm:text-[11px] font-medium bg-sky-50 text-sky-700 border border-sky-200"
+          variant="outline"
+          class="rounded border-sky-200 bg-sky-50 px-1.5 text-[10px] text-sky-700 sm:text-[11px]"
           :title="camera.stream_url"
         >
           {{ streamMode.toUpperCase() }}
-        </span>
-        <span
-          class="rounded px-1.5 py-0.5 text-[10px] sm:text-[11px] font-medium"
+        </Badge>
+        <Badge
+          variant="outline"
+          class="rounded px-1.5 text-[10px] sm:text-[11px]"
           :class="
             camera.is_running
-              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-              : 'bg-slate-100 text-slate-600'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+              : 'border-transparent bg-slate-100 text-slate-600'
           "
         >
           {{ camera.is_running ? 'Online' : 'Standby' }}
-        </span>
+        </Badge>
       </div>
     </div>
 
@@ -661,24 +705,28 @@ function handleWarning() {
       <div
         class="w-full sm:w-auto ml-0 sm:ml-auto flex items-center gap-2 pt-1.5 sm:pt-0 border-t sm:border-t-0 border-slate-100"
       >
-        <button
-          class="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 rounded-md border px-2.5 py-1.5 text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer text-[11px] sm:text-xs"
-          @click="handleInspect"
+        <Button
+          variant="outline"
+          size="sm"
+          class="h-7 flex-1 text-[11px] text-slate-600 sm:h-8 sm:flex-initial sm:text-xs"
           title="View active presence sessions JSON"
           :disabled="!displayDetections.length"
+          @click="handleInspect"
         >
-          <ScanSearch class="h-3.5 w-3.5 shrink-0" />
-          <span>Inspect Sessions</span>
-        </button>
-        <button
-          class="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 font-medium text-red-500 hover:bg-red-50 transition-colors cursor-pointer text-[11px] sm:text-xs"
-          @click="handleWarning"
+          <ScanSearch class="size-3.5" />
+          Inspect Sessions
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-7 flex-1 text-[11px] text-red-500 hover:bg-red-50 hover:text-red-600 sm:h-8 sm:flex-initial sm:text-xs"
           :disabled="!displayDetections.length"
+          @click="handleWarning"
         >
-          <TriangleAlert class="h-3.5 w-3.5 shrink-0" />
-          <span>Manual Warning</span>
-        </button>
+          <TriangleAlert class="size-3.5" />
+          Manual Warning
+        </Button>
       </div>
     </div>
-  </div>
+  </Card>
 </template>

@@ -1,17 +1,38 @@
 <script setup>
 import { computed } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
-import { Bell, LayoutGrid, LogIn, LogOut, Menu } from '@lucide/vue';
+import { LayoutGrid, LogIn, LogOut, Menu } from '@lucide/vue';
 import { useAuth } from '@/composables/useAuth';
 import NotificationDropdown from './NotificationDropdown.vue';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from '@/components/ui/breadcrumb';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Separator } from '@/components/ui/separator';
 
 const router = useRouter();
 const { isLoggedIn, user, logout } = useAuth();
-const initials = computed(() => (user.value?.username || '?').slice(0, 2).toUpperCase());
+const initials = computed(() =>
+  (user.value?.username || '?').slice(0, 2).toUpperCase(),
+);
 
 async function handleLogout() {
   await logout();
-  router.push('/');
+  router.push('/login');
 }
 
 defineProps({
@@ -25,67 +46,94 @@ defineEmits(['toggle-sidebar']);
 </script>
 
 <template>
-  <header class="flex h-14 items-center justify-between border-b bg-white px-3 sm:px-6">
-    <!-- Left: Hamburger button + Breadcrumbs -->
-    <div class="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-slate-500 min-w-0">
-      <button
-        class="mr-1 -ml-1 rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 md:hidden"
+  <header
+    class="flex h-14 shrink-0 items-center justify-between border-b bg-white px-3 sm:px-6"
+  >
+    <!-- Kiri: tombol menu + breadcrumb -->
+    <div class="flex min-w-0 items-center gap-2">
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        class="-ml-1 text-slate-600 md:hidden"
+        aria-label="Buka menu navigasi"
         @click="$emit('toggle-sidebar')"
-        aria-label="Toggle navigation menu"
       >
-        <Menu class="h-5 w-5" />
-      </button>
+        <Menu class="size-5" />
+      </Button>
+      <Separator orientation="vertical" class="mr-1 h-4! md:hidden" />
 
-      <LayoutGrid class="h-4 w-4 shrink-0 text-slate-400 hidden xs:block" />
+      <LayoutGrid class="hidden h-4 w-4 shrink-0 text-slate-400 sm:block" />
 
-      <!-- Mobile crumb: only current view name -->
-      <span class="font-medium text-slate-900 truncate sm:hidden">
+      <!-- Mobile: hanya halaman aktif -->
+      <span class="truncate text-xs font-medium text-slate-900 sm:hidden">
         {{ crumbs[crumbs.length - 1] }}
       </span>
 
-      <!-- Desktop crumbs: full path -->
-      <div class="hidden sm:flex sm:items-center sm:gap-1.5">
-        <template v-for="(crumb, i) in crumbs" :key="crumb">
-          <span :class="i === crumbs.length - 1 ? 'font-medium text-slate-900' : ''">{{ crumb }}</span>
-          <span v-if="i < crumbs.length - 1" class="text-slate-300">/</span>
-        </template>
-      </div>
+      <!-- Desktop: jalur lengkap -->
+      <Breadcrumb class="hidden sm:block">
+        <BreadcrumbList class="gap-1.5 text-sm text-slate-500 sm:gap-1.5">
+          <template v-for="(crumb, i) in crumbs" :key="crumb">
+            <BreadcrumbItem>
+              <BreadcrumbPage
+                v-if="i === crumbs.length - 1"
+                class="font-medium text-slate-900"
+              >
+                {{ crumb }}
+              </BreadcrumbPage>
+              <template v-else>{{ crumb }}</template>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator
+              v-if="i < crumbs.length - 1"
+              class="text-slate-300"
+            />
+          </template>
+        </BreadcrumbList>
+      </Breadcrumb>
     </div>
 
-    <!-- Right: Status Badge + Action Buttons -->
-    <div class="flex items-center gap-2 sm:gap-3 shrink-0">
-      <!-- <span
-        class="flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 sm:px-2.5 py-0.5 sm:py-1 text-[11px] sm:text-xs font-medium text-emerald-700 border border-emerald-200"
-      >
-        <span class="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-        <span class="hidden sm:inline">AI Engine </span>Online
-      </span> -->
-
+    <!-- Kanan: notifikasi + akun -->
+    <div class="flex shrink-0 items-center gap-1.5 sm:gap-2">
       <NotificationDropdown />
 
-      <template v-if="isLoggedIn">
-        <div
-          class="h-7 w-7 sm:h-8 sm:w-8 rounded-full bg-indigo-100 text-center text-xs font-semibold leading-7 sm:leading-8 text-indigo-600 shrink-0"
-          :title="`${user?.username} (${user?.role})`"
-        >
-          {{ initials }}
-        </div>
-        <button
-          class="rounded-lg p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition-colors"
-          title="Keluar"
-          @click="handleLogout"
-        >
-          <LogOut class="h-4 w-4 sm:h-5 sm:w-5" />
-        </button>
-      </template>
-      <RouterLink
-        v-else
-        to="/login"
-        class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-      >
-        <LogIn class="h-3.5 w-3.5" />
-        <span>Masuk</span>
-      </RouterLink>
+      <DropdownMenu v-if="isLoggedIn">
+        <DropdownMenuTrigger as-child>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            class="rounded-full"
+            :title="`${user?.username} (${user?.role})`"
+            aria-label="Menu akun"
+          >
+            <Avatar class="size-7 sm:size-8">
+              <AvatarFallback
+                class="bg-indigo-100 text-xs font-semibold text-indigo-600"
+              >
+                {{ initials }}
+              </AvatarFallback>
+            </Avatar>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" class="w-56">
+          <DropdownMenuLabel class="flex items-center justify-between gap-2">
+            <span class="truncate">{{ user?.username }}</span>
+            <Badge variant="secondary" class="capitalize">{{
+              user?.role
+            }}</Badge>
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem variant="destructive" @select="handleLogout">
+            <LogOut />
+            Keluar
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <Button v-else as-child variant="outline" size="sm" class="h-8 text-xs">
+        <RouterLink to="/login">
+          <LogIn />
+          Masuk
+        </RouterLink>
+      </Button>
     </div>
   </header>
 </template>

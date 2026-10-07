@@ -1,4 +1,6 @@
 <script setup>
+import { Badge } from '@/components/ui/badge';
+
 defineProps({
   // salah satu dari GapClassification: tracking_loss | break | departure |
   // camera_failure | system_event | official_break | unknown
@@ -37,8 +39,9 @@ const DOTS = {
 </script>
 
 <template>
-  <span
-    class="inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium"
+  <Badge
+    variant="outline"
+    class="text-[10px]"
     :class="STYLES[classification] || STYLES.unknown"
   >
     <span
@@ -46,5 +49,5 @@ const DOTS = {
       :class="DOTS[classification] || DOTS.unknown"
     />
     {{ LABELS[classification] || classification }}
-  </span>
+  </Badge>
 </template>

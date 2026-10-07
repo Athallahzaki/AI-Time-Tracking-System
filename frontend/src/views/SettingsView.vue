@@ -1,11 +1,29 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue';
 import DashboardLayout from '@/layouts/DashboardLayout.vue';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+  CardFooter,
+} from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Alert, AlertTitle } from '@/components/ui/alert';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { useSettings } from '@/composables/useSettings';
-import { Clock, Mail, CheckCircle2, AlertCircle, Send, Save, RefreshCw } from '@lucide/vue';
+import {
+  Clock,
+  Mail,
+  CheckCircle2,
+  AlertCircle,
+  Send,
+  Save,
+  RefreshCw,
+} from '@lucide/vue';
 
 const {
   policy,
@@ -21,9 +39,11 @@ const {
   sendTestEmail,
 } = useSettings();
 
-const dailyAllowance = ref<number>(60);
-const warningThreshold = ref<number>(10);
-const emailAlert = ref<{ type: 'success' | 'error'; text: string } | null>(null);
+const dailyAllowance = ref<number | string>(60);
+const warningThreshold = ref<number | string>(10);
+const emailAlert = ref<{ type: 'success' | 'error'; text: string } | null>(
+  null,
+);
 
 onMounted(() => {
   fetchPolicy();
@@ -39,12 +59,11 @@ watch(policy, (p) => {
 
 async function handleSavePolicy() {
   emailAlert.value = null;
-  const success = await updatePolicy(dailyAllowance.value, warningThreshold.value);
-  if (success) {
-    setTimeout(() => {
-      // Hilangkan pesan sukses otomatis setelah beberapa detik jika diinginkan
-    }, 4000);
-  }
+  // Input shadcn bisa mengembalikan string; pastikan yang dikirim tetap angka.
+  await updatePolicy(
+    Number(dailyAllowance.value),
+    Number(warningThreshold.value),
+  );
 }
 
 async function handleSendTestEmail() {
@@ -61,18 +80,28 @@ async function handleSendTestEmail() {
   <DashboardLayout :crumbs="['Dashboard', 'Pengaturan Sistem']">
     <div class="max-w-5xl mx-auto space-y-6">
       <!-- Title & Header -->
-      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div
+        class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+      >
         <div>
-          <h1 class="text-2xl font-bold tracking-tight text-slate-900">Pengaturan Sistem</h1>
+          <h1 class="text-2xl font-bold tracking-tight text-slate-900">
+            Pengaturan Sistem
+          </h1>
           <p class="text-sm text-slate-500 mt-1">
-            Konfigurasi batas jatah waktu karyawan, notifikasi, dan integrasi pengiriman email SMTP.
+            Konfigurasi batas jatah waktu karyawan, notifikasi, dan integrasi
+            pengiriman email SMTP.
           </p>
         </div>
         <Button
           variant="outline"
           size="sm"
-          class="gap-2 cursor-pointer self-start sm:self-auto"
-          @click="() => { fetchPolicy(); fetchEmailStatus(); }"
+          class="self-start sm:self-auto"
+          @click="
+            () => {
+              fetchPolicy();
+              fetchEmailStatus();
+            }
+          "
           :disabled="isLoading"
         >
           <RefreshCw class="h-4 w-4" :class="isLoading ? 'animate-spin' : ''" />
@@ -81,21 +110,19 @@ async function handleSendTestEmail() {
       </div>
 
       <!-- Feedback Global Alert -->
-      <div
+      <Alert
         v-if="error"
-        class="flex items-center gap-2 p-3.5 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm"
+        variant="destructive"
+        class="border-red-200 bg-red-50"
       >
-        <AlertCircle class="h-4 w-4 shrink-0" />
-        <span>{{ error }}</span>
-      </div>
+        <AlertCircle />
+        <AlertTitle class="line-clamp-none">{{ error }}</AlertTitle>
+      </Alert>
 
-      <div
-        v-if="successMessage"
-        class="flex items-center gap-2 p-3.5 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm"
-      >
-        <CheckCircle2 class="h-4 w-4 shrink-0" />
-        <span>{{ successMessage }}</span>
-      </div>
+      <Alert v-if="successMessage" variant="success">
+        <CheckCircle2 />
+        <AlertTitle class="line-clamp-none">{{ successMessage }}</AlertTitle>
+      </Alert>
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- 1. Card: Kebijakan Jatah Free Time -->
@@ -107,74 +134,98 @@ async function handleSendTestEmail() {
                   <Clock class="h-5 w-5" />
                 </div>
                 <div>
-                  <CardTitle class="text-base font-semibold">Batas Jatah Waktu Istirahat (Free Time)</CardTitle>
+                  <CardTitle class="text-base font-semibold"
+                    >Batas Jatah Waktu Istirahat (Free Time)</CardTitle
+                  >
                   <CardDescription class="text-xs">
-                    Pengaturan jatah maksimal karyawan dan ambang batas peringatan sistem.
+                    Pengaturan jatah maksimal karyawan dan ambang batas
+                    peringatan sistem.
                   </CardDescription>
                 </div>
               </div>
             </CardHeader>
             <CardContent class="space-y-4">
               <div class="space-y-1.5">
-                <label class="text-xs font-semibold text-slate-700">
+                <Label
+                  for="daily-allowance"
+                  class="text-xs font-semibold text-slate-700"
+                >
                   Jatah Harian Karyawan (Menit)
-                </label>
+                </Label>
                 <div class="relative">
-                  <input
-                    v-model.number="dailyAllowance"
+                  <Input
+                    id="daily-allowance"
+                    v-model="dailyAllowance"
                     type="number"
                     min="1"
                     max="1440"
-                    class="w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm text-slate-900 outline-none transition focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600"
+                    class="pr-28"
                     placeholder="Contoh: 60"
                   />
-                  <span class="absolute right-3 top-2.5 text-xs text-slate-400">menit/hari</span>
+                  <span
+                    class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs text-slate-400"
+                    >menit/hari</span
+                  >
                 </div>
                 <p class="text-[11px] text-slate-400">
-                  Total waktu bebas di luar jam kerja resmi sebelum dianggap melanggar (exceeded).
+                  Total waktu bebas di luar jam kerja resmi sebelum dianggap
+                  melanggar (exceeded).
                 </p>
               </div>
 
               <div class="space-y-1.5">
-                <label class="text-xs font-semibold text-slate-700">
+                <Label
+                  for="warning-threshold"
+                  class="text-xs font-semibold text-slate-700"
+                >
                   Ambang Peringatan / Warning Threshold (Sisa Menit)
-                </label>
+                </Label>
                 <div class="relative">
-                  <input
-                    v-model.number="warningThreshold"
+                  <Input
+                    id="warning-threshold"
+                    v-model="warningThreshold"
                     type="number"
                     min="0"
                     :max="dailyAllowance"
-                    class="w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm text-slate-900 outline-none transition focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600"
+                    class="pr-28"
                     placeholder="Contoh: 10"
                   />
-                  <span class="absolute right-3 top-2.5 text-xs text-slate-400">menit tersisa</span>
+                  <span
+                    class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs text-slate-400"
+                    >menit tersisa</span
+                  >
                 </div>
                 <p class="text-[11px] text-slate-400">
-                  Status akan berubah menjadi <strong>Warning</strong> saat sisa jatah kurang dari angka ini.
+                  Status akan berubah menjadi <strong>Warning</strong> saat sisa
+                  jatah kurang dari angka ini.
                 </p>
               </div>
 
-              <div v-if="policy" class="mt-4 p-3 rounded-lg bg-slate-50 border border-slate-100 text-xs space-y-1 text-slate-600">
+              <div
+                v-if="policy"
+                class="mt-4 p-3 rounded-lg bg-slate-50 border border-slate-100 text-xs space-y-1 text-slate-600"
+              >
                 <div class="flex justify-between">
                   <span>Zona Waktu:</span>
-                  <span class="font-medium text-slate-800">{{ policy.timezone }}</span>
+                  <span class="font-medium text-slate-800">{{
+                    policy.timezone
+                  }}</span>
                 </div>
                 <div class="flex justify-between">
                   <span>Istirahat Resmi:</span>
                   <span class="font-medium text-slate-800">
-                    {{ policy.official_breaks?.map(b => `${b.start}-${b.end}`).join(', ') || '-' }}
+                    {{
+                      policy.official_breaks
+                        ?.map((b) => `${b.start}-${b.end}`)
+                        .join(', ') || '-'
+                    }}
                   </span>
                 </div>
               </div>
             </CardContent>
           </div>
           <CardFooter class="border-t border-slate-100 pt-4 flex justify-end">
-            <Button
-              @click="handleSavePolicy"
-              class="gap-2 cursor-pointer bg-indigo-600 hover:bg-indigo-700 text-white"
-              :disabled="isSaving"
-            >
+            <Button @click="handleSavePolicy" :disabled="isSaving">
               <Save class="h-4 w-4" />
               {{ isSaving ? 'Menyimpan...' : 'Simpan Perubahan' }}
             </Button>
@@ -190,44 +241,79 @@ async function handleSendTestEmail() {
                   <Mail class="h-5 w-5" />
                 </div>
                 <div>
-                  <CardTitle class="text-base font-semibold">Integrasi Email (SMTP Alert)</CardTitle>
+                  <CardTitle class="text-base font-semibold"
+                    >Integrasi Email (SMTP Alert)</CardTitle
+                  >
                   <CardDescription class="text-xs">
-                    Status pengiriman email otomatis saat terjadi pelanggaran jatah waktu.
+                    Status pengiriman email otomatis saat terjadi pelanggaran
+                    jatah waktu.
                   </CardDescription>
                 </div>
               </div>
             </CardHeader>
             <CardContent class="space-y-4">
               <!-- Status Badge Summary -->
-              <div class="p-4 rounded-xl border border-slate-100 bg-slate-50/60 space-y-3">
+              <div
+                class="p-4 rounded-xl border border-slate-100 bg-slate-50/60 space-y-3"
+              >
                 <div class="flex items-center justify-between">
-                  <span class="text-xs font-semibold text-slate-700">Status SMTP Service:</span>
+                  <span class="text-xs font-semibold text-slate-700"
+                    >Status SMTP Service:</span
+                  >
                   <Badge
                     :variant="emailStatus?.enabled ? 'default' : 'secondary'"
-                    :class="emailStatus?.enabled ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'"
+                    :class="
+                      emailStatus?.enabled
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-slate-200 text-slate-600'
+                    "
                   >
                     {{ emailStatus?.enabled ? 'Aktif' : 'Nonaktif' }}
                   </Badge>
                 </div>
 
                 <div class="flex items-center justify-between">
-                  <span class="text-xs font-semibold text-slate-700">Worker Pengiriman:</span>
-                  <span class="text-xs font-medium" :class="emailStatus?.worker_running ? 'text-emerald-600' : 'text-amber-600'">
-                    {{ emailStatus?.worker_running ? 'Berjalan (Ready)' : 'Tidak Berjalan' }}
+                  <span class="text-xs font-semibold text-slate-700"
+                    >Worker Pengiriman:</span
+                  >
+                  <span
+                    class="text-xs font-medium"
+                    :class="
+                      emailStatus?.worker_running
+                        ? 'text-emerald-600'
+                        : 'text-amber-600'
+                    "
+                  >
+                    {{
+                      emailStatus?.worker_running
+                        ? 'Berjalan (Ready)'
+                        : 'Tidak Berjalan'
+                    }}
                   </span>
                 </div>
 
                 <div class="flex items-center justify-between">
-                  <span class="text-xs font-semibold text-slate-700">Server Host:</span>
+                  <span class="text-xs font-semibold text-slate-700"
+                    >Server Host:</span
+                  >
                   <span class="text-xs font-mono text-slate-600">
-                    {{ emailStatus?.host || '-' }}:{{ emailStatus?.port || '-' }}
+                    {{ emailStatus?.host || '-' }}:{{
+                      emailStatus?.port || '-'
+                    }}
                   </span>
                 </div>
 
                 <div class="space-y-1">
-                  <span class="text-xs font-semibold text-slate-700 block">Penerima Notifikasi:</span>
+                  <span class="text-xs font-semibold text-slate-700 block"
+                    >Penerima Notifikasi:</span
+                  >
                   <div class="flex flex-wrap gap-1">
-                    <template v-if="emailStatus?.recipients && emailStatus.recipients.length > 0">
+                    <template
+                      v-if="
+                        emailStatus?.recipients &&
+                        emailStatus.recipients.length > 0
+                      "
+                    >
                       <Badge
                         v-for="rec in emailStatus.recipients"
                         :key="rec"
@@ -237,27 +323,37 @@ async function handleSendTestEmail() {
                         {{ rec }}
                       </Badge>
                     </template>
-                    <span v-else class="text-xs text-slate-400 italic">Belum ada penerima disetel</span>
+                    <span v-else class="text-xs text-slate-400 italic"
+                      >Belum ada penerima disetel</span
+                    >
                   </div>
                 </div>
               </div>
 
               <!-- Email Alert Message -->
-              <div
+              <Alert
                 v-if="emailAlert"
-                class="flex items-center gap-2 p-3 rounded-lg border text-xs"
+                :variant="
+                  emailAlert.type === 'success' ? 'success' : 'destructive'
+                "
                 :class="
-                  emailAlert.type === 'success'
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                    : 'border-rose-200 bg-rose-50 text-rose-800'
+                  emailAlert.type === 'error' && 'border-red-200 bg-red-50'
                 "
               >
-                <component :is="emailAlert.type === 'success' ? CheckCircle2 : AlertCircle" class="h-4 w-4 shrink-0" />
-                <span>{{ emailAlert.text }}</span>
-              </div>
+                <component
+                  :is="
+                    emailAlert.type === 'success' ? CheckCircle2 : AlertCircle
+                  "
+                />
+                <AlertTitle class="line-clamp-none text-xs">{{
+                  emailAlert.text
+                }}</AlertTitle>
+              </Alert>
             </CardContent>
           </div>
-          <CardFooter class="border-t border-slate-100 pt-4 flex items-center justify-between">
+          <CardFooter
+            class="border-t border-slate-100 pt-4 flex items-center justify-between"
+          >
             <span class="text-[11px] text-slate-400">
               Kirim email percobaan ke daftar penerima
             </span>
@@ -265,10 +361,12 @@ async function handleSendTestEmail() {
               variant="outline"
               size="sm"
               @click="handleSendTestEmail"
-              class="gap-2 cursor-pointer hover:bg-slate-50"
               :disabled="isSendingTestEmail"
             >
-              <Send class="h-3.5 w-3.5" :class="isSendingTestEmail ? 'animate-pulse' : ''" />
+              <Send
+                class="h-3.5 w-3.5"
+                :class="isSendingTestEmail ? 'animate-pulse' : ''"
+              />
               {{ isSendingTestEmail ? 'Mengirim...' : 'Kirim Email Uji Coba' }}
             </Button>
           </CardFooter>
