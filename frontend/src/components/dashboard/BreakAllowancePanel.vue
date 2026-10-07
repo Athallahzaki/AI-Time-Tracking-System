@@ -1,5 +1,6 @@
 <script setup>
 import { reactive } from 'vue';
+import { RouterLink } from 'vue-router';
 import { ChevronDown } from '@lucide/vue';
 import { useEmployeeAllowance } from '@/composables/useEmployeeAllowance';
 
@@ -51,12 +52,20 @@ const STATUS_BAR_COLOR = {
       <h3 class="text-sm font-semibold text-slate-800">
         Jatah Free Time Karyawan
       </h3>
-      <button
-        class="text-xs text-slate-500 hover:text-slate-700"
-        @click="refetch"
-      >
-        Refresh
-      </button>
+      <div class="flex items-center gap-3">
+        <RouterLink
+          to="/settings"
+          class="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+        >
+          Atur Kebijakan
+        </RouterLink>
+        <button
+          class="text-xs text-slate-500 hover:text-slate-700 cursor-pointer"
+          @click="refetch"
+        >
+          Refresh
+        </button>
+      </div>
     </div>
 
     <div v-if="isLoading" class="px-4 py-6 text-center text-sm text-slate-400">

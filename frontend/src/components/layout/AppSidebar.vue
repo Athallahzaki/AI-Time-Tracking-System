@@ -1,9 +1,9 @@
 <script setup>
-import { computed } from 'vue';
-import { Bell, ChevronsUpDown, FileText, LayoutDashboard, ShieldCheck, UserCheck, Users, Video, X } from '@lucide/vue';
+import { Bell, ChevronsUpDown, FileText, LayoutDashboard, Settings, ShieldCheck, UserCheck, Users, Video, X } from '@lucide/vue';
 import { RouterLink, useRoute } from 'vue-router';
 import { Badge } from '../ui/badge';
 import { useEnrollment } from '@/composables/useEnrollment';
+import { useAuth } from '@/composables/useAuth';
 
 defineProps({
   isOpen: {
@@ -16,6 +16,7 @@ defineEmits(['close']);
 
 const route = useRoute();
 const { enrolledPersons } = useEnrollment();
+const { user, isAdmin } = useAuth();
 
 const mainNav = computed(() => [
   { label: 'Dashboard', icon: LayoutDashboard, to: '/' },
@@ -27,7 +28,7 @@ const mainNav = computed(() => [
     badge: enrolledPersons.length > 0 ? `${enrolledPersons.length}` : undefined,
   },
   { label: 'Reports', icon: FileText, to: '/#' },
-  { label: 'Notifications', icon: Bell, to: '/#' },
+  { label: 'Pengaturan Sistem', icon: Settings, to: '/settings' },
 ]);
 
 const isActive = (path) => {
@@ -97,14 +98,13 @@ const isActive = (path) => {
 
     <!-- User Profile Footer -->
     <div class="flex items-center gap-3 border-t px-4 py-3.5">
-      <div class="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-100 text-xs font-semibold text-indigo-600">
-        AD
+      <div class="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-100 text-xs font-semibold text-indigo-600 uppercase">
+        {{ (user?.username || 'Guest').slice(0, 2) }}
       </div>
       <div class="min-w-0 flex-1 leading-tight">
-        <p class="truncate text-sm font-medium text-slate-900">Administrator</p>
-        <p class="truncate text-xs text-slate-500">admin@hotelmurah.com</p>
+        <p class="truncate text-sm font-medium text-slate-900">{{ user?.username || 'Tamu / Viewer' }}</p>
+        <p class="truncate text-xs text-slate-500 capitalize">{{ user?.role || 'Belum masuk' }}</p>
       </div>
-      <ChevronsUpDown class="h-4 w-4 shrink-0 text-slate-400" />
     </div>
   </aside>
 </template>

@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import { Bell, LayoutGrid, LogIn, LogOut, Menu } from '@lucide/vue';
 import { useAuth } from '@/composables/useAuth';
+import NotificationDropdown from './NotificationDropdown.vue';
 
 const router = useRouter();
 const { isLoggedIn, user, logout } = useAuth();
@@ -60,9 +61,7 @@ defineEmits(['toggle-sidebar']);
         <span class="hidden sm:inline">AI Engine </span>Online
       </span> -->
 
-      <button class="rounded-lg p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition-colors">
-        <Bell class="h-4 w-4 sm:h-5 sm:w-5" />
-      </button>
+      <NotificationDropdown />
 
       <template v-if="isLoggedIn">
         <div
