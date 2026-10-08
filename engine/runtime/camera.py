@@ -71,6 +71,9 @@ Emit = Callable[[Dict[str, Any]], None]
 HEARTBEAT_INTERVAL_SECONDS = 30.0
 UNIDENTIFIED_AFTER_SECONDS = 120.0
 DEFAULT_VIEW_FPS = 10.0
+# Track LOST masih digambar sebentar supaya satu frame tanpa deteksi tidak
+# membuat kotak berkedip; lebih dari ini kotaknya hantu (posisi membeku).
+VIEW_LOST_GRACE_SECONDS = 0.3
 
 # How far below the expected rate a camera may run before it is called degraded.
 DEGRADED_FPS_FRACTION = 0.5
@@ -577,6 +580,13 @@ class CameraSupervisor:
 
         boxes = []
         for track in tracks:
+            # Track LOST (masa tenggang track_buffer_seconds) membawa kotak
+            # TERAKHIR yang membeku. Digambar selama masa tenggang penuh, ia jadi
+            # kotak hantu di samping track baru orang yang sama setelah ID
+            # switch -> "2-3 kotak per orang". Hanya overlay yang dipangkas;
+            # presensi (_remember_live, assembler) tetap memakai masa tenggang.
+            if not track.is_active and not _recently_seen(track, frame):
+                continue
             uuid = track.attributes.get("track_uuid")
             if not uuid:
                 continue
@@ -779,6 +789,13 @@ def _empty_matcher() -> Any:
     matcher = MatrixMatcher(InMemoryReferenceStore({}, embedding_version="unset"))
     matcher.rebuild()
     return matcher
+
+
+def _recently_seen(track: Track, frame: Frame) -> bool:
+    """LOST yang baru sekejap (< VIEW_LOST_GRACE_SECONDS) tetap digambar."""
+    if track.state != TrackState.LOST:
+        return False
+    return (frame.timestamp - track.last_seen_timestamp) <= VIEW_LOST_GRACE_SECONDS
 
 
 def _normalized(track: Track, frame: Frame) -> Sequence[float]:

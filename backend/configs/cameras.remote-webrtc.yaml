@@ -1,0 +1,17 @@
+# Mode remote, video lewat WebRTC (docs/DEMO-REMOTE.md, bagian WebRTC).
+# Sama dengan cameras.remote-hls.yaml, hanya stream_url yang berbeda.
+#
+# Signalling WHEP lewat domain (nginx server -> MediaMTX laptop :8889).
+# Media lewat TCP 8189 di IP publik VPS -> NetBird -> laptop. Butuh:
+#   - MediaMTX laptop dengan webrtcLocalTCPAddress :8189 dan
+#     webrtcAdditionalHosts = IP publik VPS (start-mediamtx-laptop.ps1 -VpsPublicIp)
+#   - penerusan TCP 8189 di VPS (deploy/vps/nginx-stream-webrtc.conf)
+# Jaringan yang hanya membuka 80/443 akan memblokir 8189: kembali ke HLS.
+cameras:
+  - id: "r1"
+    code: "CAM-01"
+    name: "Entertainment Room"
+    source_uri: "rtsp://127.0.0.1:8554/cam01"
+    stream_url: "/whep/cam01/whep"
+    enabled_by_default: true
+    fps: 25

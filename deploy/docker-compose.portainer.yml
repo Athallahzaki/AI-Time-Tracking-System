@@ -1,0 +1,111 @@
+# =============================================================================
+# AI Time Tracking System — compose untuk Portainer (server), engine di laptop
+#
+# Topologi demo jarak jauh (docs/DEMO-REMOTE.md):
+#
+#   LAPTOP (lokasi)                         SERVER (Portainer CE)
+#   ffmpeg -> MediaMTX -> engine            frontend (nginx) + backend
+#                ^          ^                    |            |
+#                |          +---- TCP 8765 ------+------------+  backend -> engine
+#                +-- HTTP 8888/8889 (HLS/WHEP) <-+  nginx -> MediaMTX laptop
+#
+#   Semua lintas mesin lewat NetBird. Penonton: Cloudflare -> VPS -> NetBird -> :80.
+#
+# Beda dengan deploy/docker-compose.yml (alur lokal, tidak diubah):
+#   - Tanpa bind mount relatif. Portainer CE meng-clone repo ke dalam
+#     container-nya sendiri, jadi path seperti ../backend/configs tidak
+#     menunjuk ke host. Config kamera ikut image (Dockerfile meng-COPY backend/),
+#     policy.yaml disalin ke volume /data saat start pertama supaya bisa diubah
+#     dari halaman Pengaturan.
+#   - env_file: stack.env. Variabel di UI Portainer hanya mengisi ${...} di file
+#     ini; tanpa env_file, INITIAL_ADMIN_PASSWORD dan SMTP_* tidak sampai ke
+#     container (admin tidak terbentuk, tidak ada yang bisa login).
+#   - Tanpa MediaMTX dan fake engine: MediaMTX jalan di laptop.
+#
+# Portainer: Stacks -> Add stack -> Repository
+#   Compose path : deploy/docker-compose.portainer.yml
+#   Environment  : isi dari deploy/portainer.env.example
+#   GitOps update: MATIKAN di hari demo.
+#
+# Tanpa Portainer (uji di server lewat CLI), dari folder deploy/:
+#   cp portainer.env.example stack.env   # lalu isi
+#   docker compose -f docker-compose.portainer.yml --env-file stack.env up -d --build
+# =============================================================================
+
+name: ${COMPOSE_PROJECT_NAME:-ai-time-tracking}
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/backend/Dockerfile
+    image: ${IMAGE_PREFIX:-ai-time-tracking}/backend:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    # Semua variabel stack (admin awal, SMTP, DASHBOARD_URL, AUTH_SESSION_HOURS)
+    # diteruskan apa adanya. Yang di `environment:` di bawah menimpanya.
+    env_file:
+      - stack.env
+    environment:
+      TZ: ${TZ:-Asia/Jakarta}
+      # IP NetBird laptop (100.x.y.z), BUKAN nama *.netbird.cloud: DNS NetBird
+      # terpasang di host, container tidak bisa me-resolve-nya.
+      ENGINE_HOST: ${LAPTOP_NETBIRD_IP:?isi LAPTOP_NETBIRD_IP dengan IP NetBird laptop}
+      ENGINE_PORT: ${ENGINE_PORT:-8765}
+      ENGINE_RECONNECT_SECONDS: ${ENGINE_RECONNECT_SECONDS:-2}
+      CAMERAS_CONFIG: /app/backend/configs/${CAMERAS_CONFIG_FILE:-cameras.remote-hls.yaml}
+      POLICY_CONFIG: /data/policy.yaml
+      BACKEND_DB_PATH: /data/backend.db
+    # Sama dengan CMD di Dockerfile, ditambah penyalinan policy.yaml awal ke
+    # /data. File di image tetap jadi bawaan; perubahan dari UI tinggal di volume.
+    command:
+      - sh
+      - -c
+      - >-
+        [ -f /data/policy.yaml ] || cp /app/backend/configs/policy.yaml /data/policy.yaml;
+        exec uvicorn backend.main:app --host 0.0.0.0 --port 8000 --workers 1
+        --proxy-headers --forwarded-allow-ips='*' --timeout-graceful-shutdown 10
+    volumes:
+      - backend-data:/data
+    # Hanya untuk debugging di server. Akses normal lewat nginx (/api).
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+    networks: [app]
+    logging: *default-logging
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: deploy/frontend/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api/detections/stream}
+    image: ${IMAGE_PREFIX:-ai-time-tracking}/frontend:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-Asia/Jakarta}
+      BACKEND_UPSTREAM: http://backend:8000
+      # /hls/ dan /whep/ diteruskan nginx ke MediaMTX di laptop lewat NetBird.
+      MEDIAMTX_HLS_UPSTREAM: http://${LAPTOP_NETBIRD_IP:?isi LAPTOP_NETBIRD_IP}:8888
+      MEDIAMTX_WHEP_UPSTREAM: http://${LAPTOP_NETBIRD_IP:?isi LAPTOP_NETBIRD_IP}:8889
+      BACKEND_API_KEY: ${BACKEND_API_KEY:-}
+      CLIENT_MAX_BODY_SIZE: ${CLIENT_MAX_BODY_SIZE:-25m}
+    ports:
+      - "${HTTP_BIND:-0.0.0.0}:${HTTP_PORT:-80}:80"
+    networks: [app]
+    logging: *default-logging
+
+networks:
+  app:
+    name: ${COMPOSE_PROJECT_NAME:-ai-time-tracking}-net
+
+volumes:
+  backend-data:
+    name: ${COMPOSE_PROJECT_NAME:-ai-time-tracking}-backend-data
