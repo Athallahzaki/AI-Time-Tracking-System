@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any, Dict
 
@@ -8,7 +9,8 @@ from backend.core.database import save_protocol_event
 from backend.core.state import system_state
 from backend.services.free_time import free_time_ledger
 from backend.services.protocol_adapter import protocol_adapter
-from backend.core.state import system_state
+
+logger = logging.getLogger(__name__)
 
 
 def _timestamp(value: str) -> float:
@@ -42,13 +44,21 @@ class EventIngestionService:
         if inserted:
             free_time_ledger.apply_event(validated)
 
-            violation_service.evaluate_event(
-                validated
-            )
+            # Event sudah tersimpan dan sudah masuk ledger. Kegagalan menilai
+            # pelanggaran (DB, notifikasi) tidak boleh membuat event itu
+            # dicatat sebagai dead letter oleh engine_client, dan tidak boleh
+            # melewatkan record_event di bawah.
+            try:
+                violation_service.evaluate_event(validated)
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "Evaluasi pelanggaran gagal untuk %s seq=%s", event_type, seq
+                )
 
             system_state.record_event(
                 event_type,
                 validated,
             )
+        return inserted
 
 event_ingestion_service = EventIngestionService()

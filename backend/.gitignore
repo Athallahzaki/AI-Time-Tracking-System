@@ -45,5 +45,3 @@ data/*.db-shm
 data/*.db-wal
 data/
 
-tests/
-

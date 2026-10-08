@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import queue
+from datetime import datetime
 import smtplib
 import ssl
 import threading
@@ -194,30 +195,54 @@ class EmailService:
         self,
         notification: Dict[str, Any],
     ) -> None:
-        person_id = notification.get(
-            "person_id",
-            "unknown",
-        )
-
-        subject = (
-            "[AI Time Tracking] "
-            "Batas jatah waktu terlampaui"
-        )
-
-        message = (
-            f"{notification.get('title', 'Notification')}\n\n"
-            f"Person ID: {person_id}\n"
-            f"Pesan: {notification.get('message', '')}\n"
-            f"Jenis: {notification.get('type', '')}\n"
-            f"Event time: {notification.get('event_at', '')}\n\n"
-            "Pesan ini dikirim otomatis oleh "
-            "AI Time Tracking System."
-        )
-
+        subject, body = self.compose_notification(notification)
         self._send(
             subject=subject,
-            body=message,
+            body=body,
         )
+
+    @staticmethod
+    def compose_notification(
+        notification: Dict[str, Any],
+    ) -> tuple[str, str]:
+        """Subjek dan isi email: siapa, kapan (jam lokal kebijakan), pemakaian, tautan.
+
+        Tanpa foto (02-ARSITEKTUR-BACKEND §6): email bisa diteruskan ke siapa
+        saja, bukti hanya terlihat setelah login di dashboard.
+        """
+        from backend.services.break_policy import break_policy
+
+        person_id = notification.get("person_id") or "unknown"
+        payload = notification.get("payload") or {}
+        when = "-"
+        event_at = notification.get("event_at")
+        if isinstance(event_at, (int, float)):
+            when = datetime.fromtimestamp(
+                float(event_at), tz=break_policy.timezone
+            ).strftime("%d-%m-%Y %H:%M:%S %Z")
+
+        lines = [
+            notification.get("title", "Notifikasi"),
+            "",
+            f"Karyawan (ID): {person_id}",
+            f"Tanggal: {payload.get('date', '-')}",
+            f"Waktu kejadian: {when}",
+        ]
+        used = payload.get("used_seconds")
+        allowance = payload.get("allowance_seconds")
+        if isinstance(used, (int, float)) and isinstance(allowance, (int, float)):
+            lines.append(
+                f"Pemakaian: {used / 60.0:.1f} dari {allowance / 60.0:.1f} menit"
+            )
+        lines += [
+            f"Jenis: {notification.get('type', '-')}",
+            "",
+            f"Lihat di dashboard: {settings.dashboard_url}",
+            "",
+            "Pesan ini dikirim otomatis oleh AI Time Tracking System.",
+        ]
+        subject = f"[AI Time Tracking] {notification.get('title', 'Notifikasi')}: {person_id}"
+        return subject, "\n".join(lines)
 
     def send_test_email(self) -> None:
         self._send(

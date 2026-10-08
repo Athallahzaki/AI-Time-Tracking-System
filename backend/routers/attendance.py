@@ -73,13 +73,6 @@ def _usage_payload(person_id: str, target_date: str) -> Dict[str, Any]:
         "status": usage["status"],
     }
 
-@router.post(
-    "/corrections",
-    dependencies=[
-        Depends(require_admin)
-    ],
-)
-
 @router.get("/active")
 def get_active_sessions():
     """Live tracks on screen (display), with allowance fields from the ledger."""

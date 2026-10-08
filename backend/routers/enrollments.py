@@ -12,13 +12,6 @@ router = APIRouter(prefix="/api/enrollments", tags=["Enrollments"])
 
 
 
-@router.post(
-    "/corrections",
-    dependencies=[
-        Depends(require_admin)
-    ],
-)
-
 @router.get("")
 def list_enrollments():
     enrollments = get_enrollments()

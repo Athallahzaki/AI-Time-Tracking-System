@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -61,11 +62,7 @@ class PolicyService:
 
             try:
                 temp_path.write_text(
-                    yaml.safe_dump(
-                        data,
-                        sort_keys=False,
-                        allow_unicode=True,
-                    ),
+                    self._render(data),
                     encoding="utf-8",
                 )
 
@@ -95,6 +92,27 @@ class PolicyService:
             free_time_ledger.invalidate()
             
         return self.get()
+
+    def _render(self, data: dict[str, Any]) -> str:
+        """Teks YAML baru: ganti nilai di baris yang ada supaya komentar HRD tetap.
+
+        `yaml.safe_dump` membuang semua komentar di policy.yaml. Hanya kunci
+        tingkat atas yang diubah endpoint ini, jadi cukup mengganti nilainya di
+        baris `kunci: nilai`. Kunci yang belum ada ditambahkan di akhir; bila
+        file tidak bisa dibaca sebagai teks, jatuh ke safe_dump.
+        """
+        try:
+            text = self.path.read_text(encoding="utf-8")
+        except OSError:
+            return yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+        for key in ("daily_free_time_allowance_minutes", "warning_remaining_minutes"):
+            value = data[key]
+            pattern = re.compile(rf"^({re.escape(key)}[ \t]*:[ \t]*)([^#\n]*?)([ \t]*(#.*)?)$", re.M)
+            if pattern.search(text):
+                text = pattern.sub(lambda m: f"{m.group(1)}{value}{m.group(3)}", text, count=1)
+            else:
+                text = text.rstrip("\n") + f"\n{key}: {value}\n"
+        return text
 
     def _read_yaml(self) -> dict[str, Any]:
         if not self.path.exists():
