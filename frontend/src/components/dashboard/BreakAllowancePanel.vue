@@ -1,16 +1,27 @@
 <script setup>
 import { reactive } from 'vue';
-import { ChevronDown } from '@lucide/vue';
+import { RouterLink } from 'vue-router';
+import { AlertTriangle, ChevronDown, RefreshCw } from '@lucide/vue';
 import { useEmployeeAllowance } from '@/composables/useEmployeeAllowance';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
+import { Skeleton } from '@/components/ui/skeleton';
 
 const { sortedUsages, isLoading, loadError, refetch, getEmployeeName } =
   useEmployeeAllowance();
 
 const expandedIds = reactive(new Set());
 
-function toggleExpanded(personId) {
-  if (expandedIds.has(personId)) expandedIds.delete(personId);
-  else expandedIds.add(personId);
+function setExpanded(personId, open) {
+  if (open) expandedIds.add(personId);
+  else expandedIds.delete(personId);
 }
 
 function formatTimeRange(startAt, endAt) {
@@ -46,31 +57,53 @@ const STATUS_BAR_COLOR = {
 </script>
 
 <template>
-  <div class="rounded-xl border bg-white shadow-xs">
+  <Card class="gap-0 py-0 shadow-xs">
     <div class="flex items-center justify-between border-b px-4 py-3">
       <h3 class="text-sm font-semibold text-slate-800">
         Jatah Free Time Karyawan
       </h3>
-      <button
-        class="text-xs text-slate-500 hover:text-slate-700"
-        @click="refetch"
-      >
-        Refresh
-      </button>
+      <div class="flex items-center gap-1">
+        <Button
+          as-child
+          variant="link"
+          size="xs"
+          class="text-indigo-600 hover:text-indigo-800"
+        >
+          <RouterLink to="/settings">Atur Kebijakan</RouterLink>
+        </Button>
+        <Button
+          variant="ghost"
+          size="xs"
+          class="text-slate-500 hover:text-slate-700"
+          :disabled="isLoading"
+          @click="refetch"
+        >
+          <RefreshCw :class="isLoading && 'animate-spin'" />
+          Refresh
+        </Button>
+      </div>
     </div>
 
-    <div v-if="isLoading" class="px-4 py-6 text-center text-sm text-slate-400">
-      Memuat data...
+    <div v-if="isLoading" class="space-y-3 px-4 py-4">
+      <div v-for="n in 3" :key="n" class="flex items-center gap-3">
+        <div class="flex-1 space-y-2">
+          <Skeleton class="h-3.5 w-40" />
+          <Skeleton class="h-1.5 w-full max-w-55" />
+        </div>
+        <Skeleton class="h-4 w-16" />
+      </div>
     </div>
 
-    <div
-      v-else-if="loadError"
-      class="px-4 py-6 text-center text-sm text-red-500"
-    >
-      Gagal memuat: {{ loadError }}
-      <p class="mt-1 text-[11px] text-slate-400">
-        (Periksa backend: GET /api/attendance/breaks)
-      </p>
+    <div v-else-if="loadError" class="p-4">
+      <Alert variant="destructive" class="border-red-200 bg-red-50">
+        <AlertTriangle />
+        <AlertTitle class="line-clamp-none"
+          >Gagal memuat: {{ loadError }}</AlertTitle
+        >
+        <AlertDescription
+          >Periksa backend: GET /api/attendance/breaks</AlertDescription
+        >
+      </Alert>
     </div>
 
     <div
@@ -81,10 +114,15 @@ const STATUS_BAR_COLOR = {
     </div>
 
     <ul v-else class="divide-y">
-      <li v-for="u in sortedUsages" :key="u.person_id">
-        <button
-          class="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-slate-50"
-          @click="toggleExpanded(u.person_id)"
+      <Collapsible
+        v-for="u in sortedUsages"
+        :key="u.person_id"
+        as="li"
+        :open="expandedIds.has(u.person_id)"
+        @update:open="(open) => setExpanded(u.person_id, open)"
+      >
+        <CollapsibleTrigger
+          class="group flex w-full items-center gap-3 px-4 py-3 text-left outline-none hover:bg-slate-50 focus-visible:bg-slate-50"
         >
           <div class="min-w-0 flex-1">
             <p class="truncate text-sm font-medium text-slate-800">
@@ -101,9 +139,10 @@ const STATUS_BAR_COLOR = {
             </div>
             <p
               v-if="u.suspicious_gap_count > 0"
-              class="mt-1 text-[11px] text-amber-600"
+              class="mt-1 flex items-center gap-1 text-[11px] text-amber-600"
             >
-              ⚠ {{ u.suspicious_gap_count }} celah mencurigakan tidak dihitung —
+              <AlertTriangle class="h-3 w-3 shrink-0" />
+              {{ u.suspicious_gap_count }} celah mencurigakan tidak dihitung —
               perlu ditinjau manual
             </p>
           </div>
@@ -119,15 +158,11 @@ const STATUS_BAR_COLOR = {
             </p>
           </div>
           <ChevronDown
-            class="h-4 w-4 shrink-0 text-slate-400 transition-transform"
-            :class="{ 'rotate-180': expandedIds.has(u.person_id) }"
+            class="h-4 w-4 shrink-0 text-slate-400 transition-transform group-data-[state=open]:rotate-180"
           />
-        </button>
+        </CollapsibleTrigger>
 
-        <div
-          v-if="expandedIds.has(u.person_id)"
-          class="bg-slate-50/60 px-4 pb-3"
-        >
+        <CollapsibleContent class="bg-slate-50/60 px-4 pb-3">
           <div v-if="u.breaks.length === 0" class="py-3 text-xs text-slate-400">
             Tidak ada kunjungan ke ruang fasilitas hari ini.
           </div>
@@ -148,15 +183,23 @@ const STATUS_BAR_COLOR = {
                   <span class="text-slate-400"> · {{ b.camera_id }}</span>
                 </div>
                 <div class="flex items-center gap-1.5">
-                  <span class="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-600">
-                    {{ b.end_reason === 'open' ? 'Sedang di ruangan' : 'Kunjungan' }}
-                  </span>
-                  <span
+                  <Badge
+                    variant="outline"
+                    class="border-slate-200 bg-slate-50 text-[10px] text-slate-600"
+                  >
+                    {{
+                      b.end_reason === 'open'
+                        ? 'Sedang di ruangan'
+                        : 'Kunjungan'
+                    }}
+                  </Badge>
+                  <Badge
                     v-if="b.corrected"
-                    class="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-700"
+                    variant="outline"
+                    class="border-violet-200 bg-violet-50 text-[10px] text-violet-700"
                   >
                     Dikoreksi
-                  </span>
+                  </Badge>
                 </div>
               </div>
 
@@ -178,8 +221,8 @@ const STATUS_BAR_COLOR = {
               </div>
             </li>
           </ul>
-        </div>
-      </li>
+        </CollapsibleContent>
+      </Collapsible>
     </ul>
-  </div>
+  </Card>
 </template>

@@ -1,8 +1,19 @@
 <script setup>
 import { ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { LogIn, AlertCircle } from '@lucide/vue';
+import { AlertCircle, Eye, EyeOff, Loader2, ShieldCheck } from '@lucide/vue';
 import { useAuth } from '@/composables/useAuth';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 const route = useRoute();
 const router = useRouter();
@@ -10,6 +21,7 @@ const { login } = useAuth();
 
 const username = ref('');
 const password = ref('');
+const showPassword = ref(false);
 const error = ref(null);
 const isSubmitting = ref(false);
 
@@ -17,8 +29,9 @@ async function handleSubmit() {
   error.value = null;
   isSubmitting.value = true;
   try {
-    await login(username.value, password.value);
-    const target = typeof route.query.redirect === 'string' ? route.query.redirect : '/';
+    await login(username.value.trim(), password.value);
+    const target =
+      typeof route.query.redirect === 'string' ? route.query.redirect : '/';
     router.replace(target.startsWith('/') ? target : '/');
   } catch (err) {
     error.value = err?.message || 'Login gagal';
@@ -29,51 +42,96 @@ async function handleSubmit() {
 </script>
 
 <template>
-  <div class="flex min-h-screen items-center justify-center bg-slate-50 px-4">
-    <form
-      class="w-full max-w-sm space-y-4 rounded-xl border border-slate-200 bg-white p-6 shadow-xs"
-      @submit.prevent="handleSubmit"
-    >
-      <div>
-        <h1 class="text-lg font-bold text-slate-900">Masuk</h1>
-        <p class="text-xs text-slate-500">AI Time Tracking System</p>
+  <div
+    class="flex min-h-svh flex-col items-center justify-center bg-slate-50 px-4 py-10"
+  >
+    <div class="w-full max-w-sm">
+      <!-- Brand: sama dengan header sidebar -->
+      <div class="mb-6 flex flex-col items-center gap-3 text-center">
+        <div
+          class="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-900 text-white shadow-xs"
+        >
+          <ShieldCheck class="h-6 w-6" />
+        </div>
+        <div class="leading-tight">
+          <p class="text-base font-semibold text-slate-900">Hotel Murah</p>
+          <p class="text-xs text-slate-500">AI Time Tracking System</p>
+        </div>
       </div>
 
-      <div>
-        <label class="block text-xs font-semibold text-slate-700">Username</label>
-        <input
-          v-model="username"
-          type="text"
-          required
-          autocomplete="username"
-          class="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
-        />
-      </div>
+      <Card class="gap-6 shadow-xs">
+        <CardHeader class="text-center">
+          <CardTitle class="text-lg">Masuk</CardTitle>
+          <CardDescription
+            >Masukkan username dan password akun Anda.</CardDescription
+          >
+        </CardHeader>
 
-      <div>
-        <label class="block text-xs font-semibold text-slate-700">Password</label>
-        <input
-          v-model="password"
-          type="password"
-          required
-          autocomplete="current-password"
-          class="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
-        />
-      </div>
+        <CardContent>
+          <form class="space-y-4" @submit.prevent="handleSubmit">
+            <Alert
+              v-if="error"
+              variant="destructive"
+              class="border-red-200 bg-red-50"
+            >
+              <AlertCircle />
+              <AlertDescription>{{ error }}</AlertDescription>
+            </Alert>
 
-      <div v-if="error" class="flex items-start gap-2 rounded-lg bg-red-50 p-3 text-xs text-red-700">
-        <AlertCircle class="mt-0.5 h-4 w-4 shrink-0" />
-        <span>{{ error }}</span>
-      </div>
+            <div class="space-y-2">
+              <Label for="username">Username</Label>
+              <Input
+                id="username"
+                v-model="username"
+                type="text"
+                required
+                autofocus
+                autocomplete="username"
+                placeholder="admin"
+                :aria-invalid="!!error || undefined"
+              />
+            </div>
 
-      <button
-        type="submit"
-        :disabled="isSubmitting"
-        class="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-40"
-      >
-        <LogIn class="h-3.5 w-3.5" />
-        <span>{{ isSubmitting ? 'Memeriksa...' : 'Masuk' }}</span>
-      </button>
-    </form>
+            <div class="space-y-2">
+              <Label for="password">Password</Label>
+              <div class="relative">
+                <Input
+                  id="password"
+                  v-model="password"
+                  :type="showPassword ? 'text' : 'password'"
+                  required
+                  autocomplete="current-password"
+                  placeholder="••••••••"
+                  class="pr-10"
+                  :aria-invalid="!!error || undefined"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  class="absolute top-1/2 right-0.5 -translate-y-1/2 text-slate-400 hover:bg-transparent hover:text-slate-700"
+                  :aria-label="
+                    showPassword ? 'Sembunyikan password' : 'Tampilkan password'
+                  "
+                  @click="showPassword = !showPassword"
+                >
+                  <EyeOff v-if="showPassword" />
+                  <Eye v-else />
+                </Button>
+              </div>
+            </div>
+
+            <Button type="submit" class="w-full" :disabled="isSubmitting">
+              <Loader2 v-if="isSubmitting" class="animate-spin" />
+              {{ isSubmitting ? 'Memeriksa...' : 'Masuk' }}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <p class="mt-6 text-center text-xs text-slate-400">
+        Lupa password? Hubungi administrator sistem.
+      </p>
+    </div>
   </div>
 </template>

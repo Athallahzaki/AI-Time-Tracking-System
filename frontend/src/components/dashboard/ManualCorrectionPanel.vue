@@ -1,5 +1,7 @@
 <script setup>
 import { ref } from 'vue';
+import { Plus } from '@lucide/vue';
+import { Button } from '@/components/ui/button';
 import ManualCorrectionForm from './ManualCorrectionForm.vue';
 import CorrectionAuditLog from './CorrectionAuditLog.vue';
 
@@ -29,13 +31,16 @@ defineExpose({ openForm });
   <div class="space-y-3">
     <div class="flex items-center justify-between">
       <h2 class="text-sm font-semibold text-slate-700">Koreksi Manual</h2>
-      <button
+      <Button
         v-if="!showForm"
-        class="rounded-md border px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+        variant="outline"
+        size="sm"
+        class="h-8 text-xs text-slate-600"
         @click="openForm()"
       >
-        + Koreksi Baru
-      </button>
+        <Plus />
+        Koreksi Baru
+      </Button>
     </div>
 
     <ManualCorrectionForm

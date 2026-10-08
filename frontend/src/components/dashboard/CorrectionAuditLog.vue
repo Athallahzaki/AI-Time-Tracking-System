@@ -1,5 +1,10 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue';
+import { AlertTriangle, RefreshCw } from '@lucide/vue';
+import { Alert, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 
 const events = ref([]);
 const isLoading = ref(false);
@@ -36,7 +41,10 @@ async function fetchAuditLog() {
 
 function formatDateTime(iso) {
   if (!iso) return '-';
-  return new Date(iso).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
+  return new Date(iso).toLocaleString('id-ID', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
 }
 
 onMounted(() => {
@@ -52,19 +60,36 @@ defineExpose({ refetch: fetchAuditLog });
 </script>
 
 <template>
-  <div class="rounded-xl border bg-white shadow-xs">
+  <Card class="gap-0 py-0 shadow-xs">
     <div class="flex items-center justify-between border-b px-4 py-3">
       <h3 class="text-sm font-semibold text-slate-800">Riwayat Koreksi</h3>
-      <button class="text-xs text-slate-500 hover:text-slate-700" @click="fetchAuditLog">
+      <Button
+        variant="ghost"
+        size="xs"
+        class="text-slate-500 hover:text-slate-700"
+        :disabled="isLoading"
+        @click="fetchAuditLog"
+      >
+        <RefreshCw :class="isLoading && 'animate-spin'" />
         Refresh
-      </button>
+      </Button>
     </div>
 
-    <div v-if="isLoading" class="px-4 py-6 text-center text-sm text-slate-400">Memuat...</div>
-    <div v-else-if="loadError" class="px-4 py-6 text-center text-sm text-red-500">
-      Gagal memuat: {{ loadError }}
+    <div v-if="isLoading" class="space-y-3 px-4 py-4">
+      <Skeleton v-for="n in 2" :key="n" class="h-10 w-full" />
     </div>
-    <div v-else-if="events.length === 0" class="px-4 py-6 text-center text-sm text-slate-400">
+    <div v-else-if="loadError" class="p-4">
+      <Alert variant="destructive" class="border-red-200 bg-red-50">
+        <AlertTriangle />
+        <AlertTitle class="line-clamp-none"
+          >Gagal memuat: {{ loadError }}</AlertTitle
+        >
+      </Alert>
+    </div>
+    <div
+      v-else-if="events.length === 0"
+      class="px-4 py-6 text-center text-sm text-slate-400"
+    >
       Belum ada koreksi tercatat.
     </div>
 
@@ -72,21 +97,34 @@ defineExpose({ refetch: fetchAuditLog });
       <li v-for="c in events" :key="c.correction_id" class="px-4 py-3">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <p class="text-sm font-medium text-slate-800">{{ c.corrected_by }}</p>
-          <p class="text-[11px] text-slate-400">{{ formatDateTime(c.corrected_at) }}</p>
+          <p class="text-[11px] text-slate-400">
+            {{ formatDateTime(c.corrected_at) }}
+          </p>
         </div>
         <p class="mt-1 text-xs text-slate-600">{{ c.reason }}</p>
-        <div class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-400">
-          <span v-if="c.gap_id">Gap: <strong class="text-slate-600">{{ c.gap_id }}</strong></span>
-          <span v-if="c.session_id">Sesi: <strong class="text-slate-600">{{ c.session_id }}</strong></span>
+        <div
+          class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-400"
+        >
+          <span v-if="c.gap_id"
+            >Gap: <strong class="text-slate-600">{{ c.gap_id }}</strong></span
+          >
+          <span v-if="c.session_id"
+            >Sesi:
+            <strong class="text-slate-600">{{ c.session_id }}</strong></span
+          >
           <span v-if="c.new_classification">
-            Klasifikasi baru: <strong class="text-slate-600">{{ c.new_classification }}</strong>
+            Klasifikasi baru:
+            <strong class="text-slate-600">{{ c.new_classification }}</strong>
           </span>
           <span v-if="c.adjustment_minutes != null">
-            Penyesuaian: <strong class="text-slate-600">{{ c.adjustment_minutes }}m</strong>
+            Penyesuaian:
+            <strong class="text-slate-600">{{ c.adjustment_minutes }}m</strong>
           </span>
         </div>
-        <p v-if="c.notes" class="mt-1 text-[11px] text-slate-400">Catatan: {{ c.notes }}</p>
+        <p v-if="c.notes" class="mt-1 text-[11px] text-slate-400">
+          Catatan: {{ c.notes }}
+        </p>
       </li>
     </ul>
-  </div>
+  </Card>
 </template>
