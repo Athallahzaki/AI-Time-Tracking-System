@@ -7,37 +7,6 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
-## 2026-10-09 · paket eb-r10 — Alat baseline 5 kamera (`-Count`, ringkasan multi-kamera)
-
-Dasar: repo 9 Okt (sesudah ea-r2). **Hanya alat ukur di laptop**; `engine/runtime/`, profil
-`engine/config/`, `engine/ports/`, dan kontrak tidak disentuh. Eksekusi baseline dilakukan nanti di
-laptop 4060 (dokumen 04 §14, DEMO-REMOTE §8.1).
-
-**Apa yang berubah**
-
-- `scripts/publish_test_video.ps1`: parameter `-Count N` (1..99, default 1). `-Count 1` memakai jalur
-  lama (satu `ffmpeg`, `-Path` dihormati). `-Count > 1`: satu proses ffmpeg per path `cam01..camN`,
-  daftar argumen encode sama (satu array dipakai kedua jalur), jeda 0,5 dtk antar start; bila satu
-  proses mati, semua dihentikan dan skrip gagal (baseline yang kehilangan stream diam-diam tidak
-  valid); `-Path` bersama `-Count > 1` ditolak.
-- `scripts/summarize_gladi.py`: CSV dengan beberapa `camera_id` dihitung **per kamera** lalu digabung.
-  Tabel: satu baris per kamera + satu baris gabungan per file (`<file> [N kam]`). Vonis tetap per file:
-  LULUS hanya bila semua kamera LULUS (kamera tanpa sampel box = GAGAL). Gabungan: fps/lambat/umur box
-  dari semua sampel, ganti dan stall dijumlahkan, drop/s = jumlah median per kamera. CSV satu kamera
-  atau tanpa `camera_id` menghasilkan angka dan tabel yang sama seperti sebelumnya.
-- `docs/DEMO-REMOTE.md` §8.1: perintah publish `-Count 5` dan cara membaca tabel multi-kamera.
-- `engine/tests/test_summarize_gladi.py`: +6 tes (1 kamera ber-id = tanpa id, 5 kamera bersih,
-  satu kamera macet menggagalkan file, irama per kamera bukan deret campuran, kamera tanpa box,
-  `main` per file).
-
-**Alasan.** Skrip lama mencampur semua baris `health` dari lima kamera dalam satu deret: "ganti fase"
-dan laju drop jadi tak bermakna (selisih `dropped` antar kamera berbeda), dan satu kamera macet bisa
-tertutup median kamera lain. Publish lima stream tadinya butuh lima terminal manual.
-
-**Cara uji.** `python -m pytest engine/tests/test_summarize_gladi.py -q` (10 lulus).
-`publish_test_video.ps1` tidak bisa diuji di cloud (tanpa PowerShell/MediaMTX): langkah di
-SERAH-TERIMA.
-
 ## 2026-10-09 · paket ea-r2 — Kit latih OSNet ReID dari RandPerson (`tools/reid_train/`)
 
 Dasar: repo 9 Okt (sudah berisi ea-r1). **Hanya alat latih di laptop**; `engine/`, `engine/ports/`,
