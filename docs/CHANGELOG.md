@@ -7,6 +7,39 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-10-09 · paket ea-r6 — Engine sebagai tugas Windows + watchdog + auto-start
+
+Dasar: ea-r5. Dokumen 12 §2.4 (stabil 3 hari tanpa intervensi, pulih sendiri) dan timeline
+dokumen 14 (EA 26–30 Okt). **Default engine tidak berubah**: dua opsi baru mati bila tidak diisi.
+
+**Apa yang berubah**
+
+- Baru `engine/runtime/heartbeat.py` + `RuntimeOptions.heartbeat_path`: ticker runtime menulis
+  berkas detak JSON (`pid`, `ts`, state/frame per kamera) tiap 5 dtk, atomik. Detak ditulis
+  thread yang juga memancarkan snapshot/health, jadi engine macet = detak basi.
+- `RuntimeOptions.stop_file`: bila berkas muncul, engine berhenti rapi (cara menghentikan engine
+  tanpa SIGTERM di Windows); berkas stop sisa run sebelumnya dihapus saat start.
+- `runtime/__main__.py`: `--heartbeat-file`, `--heartbeat-seconds`, `--stop-file`
+  (juga env `ENGINE_HEARTBEAT_FILE`, `ENGINE_STOP_FILE`).
+- Baru `deploy/laptop/engine-watchdog.ps1`: menjalankan engine, menghidupkannya ulang bila keluar
+  atau detak basi (`-StaleSeconds` 60; sebelum detak pertama `-StartupGraceSeconds` 240), jeda
+  5→10→20… dtk (maks 120, kembali 5 bila run bertahan 10 menit), menunggu IP NetBird saat boot,
+  mematikan engine yatim dari `engine.pid`, rahasia lewat `-EnvFile` (bukan argumen), log harian
+  di `logs/engine/` (dihapus setelah 14 hari). Berhenti rapi lewat `watchdog.stop` atau Ctrl+C.
+- Baru `deploy/laptop/install-engine-task.ps1`: Task Scheduler bawaan Windows (tanpa NSSM).
+  `-Trigger Startup` (default, S4U, sebelum login) atau `Logon`; jeda boot 60 dtk; Task Scheduler
+  menghidupkan ulang watchdog bila watchdog keluar; `-StartNow`, `-Stop`, `-Uninstall`,
+  `-DisableSleepOnAC` (opsional, mematikan sleep saat terhubung listrik).
+- `.gitignore`: `logs/`.
+
+**Cara uji.** `python -m pytest engine/tests -q` (632 lulus, 7 dilewati seperti sebelumnya); baru
+`test_heartbeat.py` (10). Watchdog diuji di cloud dengan PowerShell 7 Linux + engine asli tanpa
+kamera: berhenti rapi lewat `watchdog.stop` (engine keluar lewat berkas stop), `kill -9` → hidup
+ulang setelah 5 dtk, `SIGSTOP` (macet) → dimatikan saat detak basi lalu hidup ulang dengan detak
+baru. `install-engine-task.ps1` hanya diperiksa sintaksnya (cmdlet Task Scheduler tidak ada di
+Linux); kedua skrip ASCII dan tanpa sintaks khusus PowerShell 7. Uji Windows: langkah 9 di
+`docs/SERAH-TERIMA-EA-R3.md`.
+
 ## 2026-10-09 · paket ea-r5 — `schedule_off` di engine asli (di belakang flag)
 
 Dasar: ea-r4. Kontrak ea-k1 (`schedule_off`) kini bisa dipancarkan engine sungguhan, bukan hanya

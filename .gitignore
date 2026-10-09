@@ -33,6 +33,10 @@ bench-out/
 *.onnx
 *.engine
 *.safetensors
+# Folder model engine (ReID OSNet, wajah, dst.): disalin manual di laptop, tidak pernah di-commit.
+engine/models/
+# Log + berkas detak/stop watchdog engine (deploy/laptop/engine-watchdog.ps1).
+logs/
 
 # Database lokal, termasuk database referensi wajah (references.sqlite3).
 # Data biometrik karyawan: tidak pernah di-commit.

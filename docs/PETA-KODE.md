@@ -1,7 +1,7 @@
 # Peta Kode
 
 Untuk menemukan file tanpa menjelajah repo. Perbarui saat menambah/memindah modul.
-Per 9 Oktober 2026 (paket ea-r5).
+Per 9 Oktober 2026 (paket ea-r6).
 
 ## Alur data
 
@@ -43,6 +43,7 @@ frontend (Vue + Vite): dashboard, overlay kotak, enrollment, pengaturan
 | Referensi wajah tersimpan | `store/references.py` (data: `engine/data/references.sqlite3`, di-ignore) |
 | Skema + loader config, profil | `config/schema.py`, `config/loader.py`, `config/*.yaml` (`demo-4060.yaml`, `demo-4060-tick.yaml`, `demo-1060.yaml`) |
 | Mematikan power throttling Windows | `runtime/winpower.py` |
+| Berkas detak untuk watchdog (`--heartbeat-file`), berkas stop (`--stop-file`) | `runtime/heartbeat.py`, `runtime/service.py` (`_tick_loop`) |
 | Engine palsu untuk BE/FE | `tools/fake_engine/` |
 | Tes | `engine/tests/test_<topik>.py` |
 
@@ -85,7 +86,7 @@ generator `.xlsx`, halaman report, penyaringan per peran di semua endpoint.
 | Pemeriksa kebijakan di engine | `contracts/tools/policy_grep.py` |
 | Compose lokal / Portainer | `deploy/docker-compose.yml`, `deploy/docker-compose.portainer.yml`, `deploy/portainer.env.example` |
 | nginx frontend (proxy API, HLS, WHEP) | `deploy/frontend/nginx/` |
-| Laptop engine (Windows) | `deploy/laptop/start-engine.ps1`, `start-mediamtx.ps1`, `firewall.ps1` |
+| Laptop engine (Windows); watchdog + tugas auto-start (Task Scheduler) | `deploy/laptop/start-engine.ps1`, `start-mediamtx.ps1`, `firewall.ps1`, `engine-watchdog.ps1`, `install-engine-task.ps1` (log di `logs/engine/`, di-ignore) |
 | VPS WebRTC | `deploy/vps/nginx-stream-webrtc.conf` |
 | Uji lag/gladi, ringkasan (`lag_probe.py --events-out` = rekam event NDJSON untuk validator) | `scripts/lag_probe.py`, `scripts/summarize_gladi.py` |
 | Spike NVDEC | `scripts/spike_nvdec.py` |

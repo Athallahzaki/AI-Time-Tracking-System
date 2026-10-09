@@ -1,6 +1,6 @@
-# Serah terima EA — paket ea-r3 s.d. ea-r5: ReID dirakit ke engine, `schedule_off`
+# Serah terima EA — paket ea-r3 s.d. ea-r6: ReID, `schedule_off`, engine sebagai tugas Windows
 
-9 Oktober 2026 · Jalur EA · Rincian: `docs/CHANGELOG.md` (ea-r3, ea-r4, ea-r5). File ini **tidak** menggantikan
+9 Oktober 2026 · Jalur EA · Rincian: `docs/CHANGELOG.md` (ea-r3 s.d. ea-r6). File ini **tidak** menggantikan
 `docs/SERAH-TERIMA.md` (status EB, paket eb-r10); keduanya berlaku.
 
 ## Selesai
@@ -13,7 +13,10 @@
   `reid.daily_purge_time` (jam lokal, default `"00:00"`), lewat ticker runtime, walau tidak ada orang terlihat.
 - ea-r5: `schedule_off` di engine asli, di belakang `core.analysis_off_mode: "pause"` (default `"stop"` = lama).
   Jeda analisis: track ditutup `schedule_off` + forced, kamera tetap hidup, tanpa `camera.failed`/`camera.online` baru.
-- Tes: 622 lulus / 7 dilewati (sama seperti sebelumnya) di `engine/tests`; 47 tes ReID + 5 `schedule_off` + 1 probe.
+- ea-r6: `engine-watchdog.ps1` (hidup ulang bila keluar/macet via berkas detak, berhenti rapi via berkas stop)
+  dan `install-engine-task.ps1` (Task Scheduler, auto-start saat boot). Engine: `--heartbeat-file`, `--stop-file`.
+- Tes: 632 lulus / 7 dilewati (sama seperti sebelumnya) di `engine/tests`; 47 ReID + 5 `schedule_off` + 10 detak + 1 probe.
+  Watchdog diuji di PowerShell 7 Linux (mati, macet, berhenti rapi); Task Scheduler belum pernah dijalankan.
   `policy_grep` bersih. **Default tidak berubah** (`reid.enabled: false`).
 
 ## Belum
@@ -28,7 +31,9 @@
 5. Mode `pause` belum aman dengan backend sungguhan: `EndReason` backend belum punya `schedule_off`, dan tombol
    start/stop operator memakai `enabled=false` yang sama (dengan `pause`, "stop" operator berarti stream tetap dibaca).
    BE perlu memutuskan: jadwal vs stop operator dibedakan, atau stop operator ikut berarti jeda.
-6. Engine sebagai service Windows + watchdog + auto-start (EA, dok 14: 26–30 Okt) belum dikerjakan.
+6. Watchdog + tugas Windows belum pernah dijalankan di Windows (langkah 9). Belum diketahui apakah GPU/CUDA
+   jalan dari tugas S4U (sesi 0) di laptop tim; bila tidak, pakai `-Trigger Logon` + login otomatis.
+7. MediaMTX belum diawasi watchdog (hanya engine). Untuk kamera RTSP langsung tidak perlu.
 
 ## Keputusan
 
@@ -83,8 +88,19 @@ Masih perlu disetujui:
    Harap: `track.ended reason schedule_off` hanya di cam01, tidak ada `camera.failed`, satu `camera.online` per
    kamera; validator 0 galat. Catat CPU proses engine saat cam01 dijeda (decode tetap jalan).
 
+9. Watchdog + auto-start (Windows, PowerShell Admin; isi `-Python` dengan path python.exe env engine):
+   a. Manual dulu: `.\deploy\laptop\engine-watchdog.ps1 -BindIp 127.0.0.1 -Config <profil> -Python <path>`.
+      Harap `logs\engine\heartbeat.json` diperbarui tiap 5 dtk. Matikan python.exe di Task Manager: log
+      `engine keluar ...`, hidup lagi ±5 dtk. Resource Monitor → klik kanan python.exe → Suspend: sesudah ±60 dtk
+      `detak basi ... engine macet`, lalu hidup lagi. Ctrl+C: engine berhenti rapi, tak ada python.exe tersisa.
+   b. Pasang: `.\deploy\laptop\install-engine-task.ps1 -BindIp <IP> -Config <profil> -Python <path> -StartNow`.
+      Restart laptop TANPA login: engine harus menjawab (`lag_probe.py` dari mesin lain / backend tersambung);
+      `nvidia-smi` harus menunjukkan python.exe memakai GPU. Bila tidak: pasang ulang dengan `-Trigger Logon`.
+   c. `-Stop` lalu `-Uninstall`: tugas hilang, tak ada python.exe/powershell.exe watchdog tersisa.
+
 ## Langkah berikutnya
 
 BE: `IdentitySource` reid/reid_retro + handler `identity.resolved` (SERAH-TERIMA-EA-K1 §2) sebelum ReID dinyalakan
 dengan backend; `EndReason.SCHEDULE_OFF` + keputusan stop operator vs jadwal sebelum `analysis_off_mode: pause`.
-EA: service Windows + watchdog, kalibrasi ambang dari crop lokasi, ukur waktu tempuh, `forget_person` → galeri ReID.
+EA: uji watchdog/tugas di Windows (langkah 9), kalibrasi ambang dari crop lokasi, ukur waktu tempuh,
+`forget_person` → galeri ReID, lalu uji operasional 3 hari (10–12 Nov) memakai tugas ini.

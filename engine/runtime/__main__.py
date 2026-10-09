@@ -73,6 +73,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--health-seconds", type=float, default=30.0,
         help="interval engine.health (default 30). Turunkan ke 2-5 untuk uji lag.",
     )
+    parser.add_argument(
+        "--heartbeat-file", default=os.environ.get("ENGINE_HEARTBEAT_FILE") or None,
+        help="tulis berkas detak JSON berkala untuk watchdog luar "
+             "(deploy/laptop/engine-watchdog.ps1). Default mati.",
+    )
+    parser.add_argument(
+        "--heartbeat-seconds", type=float, default=5.0,
+        help="interval berkas detak (default 5)",
+    )
+    parser.add_argument(
+        "--stop-file", default=os.environ.get("ENGINE_STOP_FILE") or None,
+        help="bila berkas ini muncul, engine berhenti rapi (cara watchdog Windows "
+             "menghentikan engine tanpa SIGTERM). Default mati.",
+    )
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument(
         "--allow-power-throttling", action="store_true",
@@ -127,10 +141,14 @@ def main(argv: Optional[list] = None) -> int:
             target_fps=args.target_fps,
             loop_files=args.loop_files,
             auth_key=_shared_key(tcp),
+            heartbeat_path=args.heartbeat_file,
+            heartbeat_interval_seconds=args.heartbeat_seconds,
+            stop_file=args.stop_file,
         )
     )
 
     stopper = _Stopper(runtime.close)
+    runtime.on_stop_file = lambda: stopper.request("berkas stop")
 
     def _on_signal(signum, _frame):
         stopper.request(f"sinyal {signum}")

@@ -118,6 +118,12 @@ class RuntimeOptions:
     # Kunci bersama handshake (P3). None = autentikasi mati. Diisi dari env
     # ENGINE_SHARED_KEY oleh __main__, tidak pernah dari argumen CLI.
     auth_key: Optional[str] = None
+    # Berkas detak untuk watchdog luar (runtime/heartbeat.py). None = mati.
+    heartbeat_path: Optional[str] = None
+    heartbeat_interval_seconds: float = 5.0
+    # Berkas stop: bila muncul, engine berhenti rapi (cara watchdog Windows
+    # menghentikan engine tanpa SIGTERM). None = mati. Diperiksa ticker.
+    stop_file: Optional[str] = None
 
 
 class EngineRuntime:
@@ -212,6 +218,22 @@ class EngineRuntime:
         self._state_lock = threading.RLock()
         self._stop = threading.Event()
         self._ticker: Optional[threading.Thread] = None
+        self._heartbeat = None
+        if self.options.heartbeat_path:
+            from .heartbeat import Heartbeat
+
+            self._heartbeat = Heartbeat(self.options.heartbeat_path,
+                                        self.options.heartbeat_interval_seconds)
+        # Dipanggil sekali saat berkas stop terlihat; __main__ memasang jalur berhenti rapinya.
+        self.on_stop_file: Optional[Callable[[], None]] = None
+        self._stop_file_seen = False
+        if self.options.stop_file and os.path.exists(self.options.stop_file):
+            # Sisa permintaan stop dari run sebelumnya, bukan untuk run ini.
+            logger.warning("berkas stop lama %s dihapus saat start", self.options.stop_file)
+            try:
+                os.remove(self.options.stop_file)
+            except OSError:
+                pass
 
         self.api.on_control("set_cameras", self._on_set_cameras)
         self.api.on_control("set_roster", self._on_set_roster)
@@ -504,6 +526,31 @@ class EngineRuntime:
             if self._reid is not None:
                 # Jadwal harian pengosongan cache ReID (reid.daily_purge_time).
                 self._reid.coordinator.maybe_purge(now)
+            if self._heartbeat is not None:
+                self._heartbeat.beat(now, self._heartbeat_cameras())
+            self._check_stop_file()
+
+    def _heartbeat_cameras(self) -> Dict[str, Any]:
+        with self._state_lock:
+            cameras = list(self._cameras.values())
+        return {camera.spec.camera_id: {"state": camera.state, "frames": camera.stats.frames}
+                for camera in cameras}
+
+    def _check_stop_file(self) -> None:
+        path = self.options.stop_file
+        if not path or self._stop_file_seen or not os.path.exists(path):
+            return
+        self._stop_file_seen = True
+        logger.info("berkas stop %s terlihat: berhenti rapi", path)
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        callback = self.on_stop_file
+        if callback is not None:
+            callback()
+        else:
+            threading.Thread(target=self.close, name="engine-stop-file", daemon=True).start()
 
     def _emit_snapshot(self, now: float) -> None:
         """Lets a backend realign without replaying the day (§4.5).
