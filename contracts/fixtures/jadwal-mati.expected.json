@@ -1,0 +1,87 @@
+{
+  "scenario": "jadwal-mati",
+  "description": "Jadwal operasional mematikan analisis r1; track yang hidup ditutup schedule_off (bukan pulang, bukan kamera putus), r2 tidak terpengaruh",
+  "what_this_file_is": "Ringkasan observasional dari rekaman, bukan kesimpulan kebijakan. Celah dilaporkan beserta bukti batasnya; bagaimana ia diperlakukan diputuskan backend.",
+  "counts": {
+    "events": 38,
+    "intervals": 3,
+    "tracks_started": 3,
+    "tracks_ended": 3,
+    "seq_first": 1,
+    "seq_last": 38
+  },
+  "cameras": [
+    "r1",
+    "r2"
+  ],
+  "people": {
+    "4471": {
+      "interval_count": 2,
+      "intervals": [
+        {
+          "interval_id": "iv_r1-0001",
+          "camera_id": "r1",
+          "start_at": "2025-09-19T00:00:05.000Z",
+          "end_at": "2025-09-19T00:30:00.000Z",
+          "start_zone": "door",
+          "end_zone": "interior",
+          "start_source": "face",
+          "end_source": "forced",
+          "end_reason": "schedule_off",
+          "prev_interval_id": null
+        },
+        {
+          "interval_id": "iv_r1-0002",
+          "camera_id": "r1",
+          "start_at": "2025-09-19T00:45:10.000Z",
+          "end_at": "2025-09-19T00:50:00.000Z",
+          "start_zone": "door",
+          "end_zone": "door",
+          "start_source": "face",
+          "end_source": "face",
+          "end_reason": "left_frame",
+          "prev_interval_id": null
+        }
+      ]
+    },
+    "4472": {
+      "interval_count": 1,
+      "intervals": [
+        {
+          "interval_id": "iv_r2-0001",
+          "camera_id": "r2",
+          "start_at": "2025-09-19T00:00:08.000Z",
+          "end_at": "2025-09-19T00:50:00.000Z",
+          "start_zone": "door",
+          "end_zone": "door",
+          "start_source": "face",
+          "end_source": "face",
+          "end_reason": "left_frame",
+          "prev_interval_id": null
+        }
+      ]
+    }
+  },
+  "gaps": [
+    {
+      "person_id": "4471",
+      "after_interval": "iv_r1-0001",
+      "before_interval": "iv_r1-0002",
+      "duration_seconds": 910.0,
+      "same_camera": true,
+      "closed_by_engine": false,
+      "evidence": {
+        "end_zone": "interior",
+        "end_reason": "schedule_off",
+        "end_source": "forced",
+        "next_start_zone": "door",
+        "next_start_source": "face"
+      }
+    }
+  ],
+  "asserts": {
+    "intervals": 3,
+    "schedule_off_intervals": 1,
+    "note": "Interval 4471 pertama berakhir schedule_off/forced di zona interior pada detik 1800, lalu ada celah 910 detik tanpa pengamatan (analisis mati) sebelum interval kedua. Itu bukan istirahat dan bukan kepergian: backend harus memperlakukan jendela jadwal-mati sebagai di luar jam operasional, bukan sebagai waktu di luar ruangan. 4472 di r2 tidak terganggu."
+  }
+}

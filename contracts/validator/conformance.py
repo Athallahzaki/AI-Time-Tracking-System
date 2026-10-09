@@ -88,6 +88,7 @@ class ConformanceChecker:
 
         tracks: Dict[str, _TrackInfo] = {}
         intervals: Dict[str, Dict[str, Any]] = {}
+        anon_groups: Dict[str, Dict[str, Any]] = {}
         camera_failed: Dict[str, bool] = {}
         camera_epoch: Dict[str, int] = {}
         camera_offset: Dict[str, Dict[int, float]] = {}
@@ -140,6 +141,7 @@ class ConformanceChecker:
                     line=line,
                     tracks=tracks,
                     intervals=intervals,
+                    anon_groups=anon_groups,
                     camera_failed=camera_failed,
                     camera_epoch=camera_epoch,
                     camera_offset=camera_offset,
@@ -156,6 +158,15 @@ class ConformanceChecker:
                     interval.get("_line"), "presence.interval", "prev_interval_id",
                     f"menunjuk `{prev}` yang tidak pernah dipancarkan. Rantai kehadiran "
                     "berkelanjutan jadi putus di backend.",
+                )
+
+        for anon_id, group in anon_groups.items():
+            if not group["resolved"] and group["interval_ids"]:
+                report.warn(
+                    group["line"], "presence.interval", "person_id",
+                    f"`{anon_id}` punya interval tapi tidak pernah `identity.resolved` di "
+                    "rekaman ini. Wajar bila rekaman dipotong; di hari penuh itu berarti "
+                    "kelompok tak dikenal yang harus sampai ke HR.",
                 )
 
         overlap = set(intervals) & set(tracks)
@@ -371,6 +382,14 @@ class ConformanceChecker:
 
         info.ended = True
 
+        if message["reason"] == "schedule_off" and info.camera_id and camera_failed.get(info.camera_id):
+            report.error(
+                line, "track.ended", "reason",
+                f"kamera `{info.camera_id}` sedang putus, jadi alasannya `camera_lost`, bukan "
+                "`schedule_off`. schedule_off hanya untuk kamera sehat yang analisisnya "
+                "dimatikan jadwal.",
+            )
+
         if info.camera_id and camera_failed.get(info.camera_id) and message["reason"] != "camera_lost":
             report.error(
                 line, "track.ended", "reason",
@@ -379,7 +398,7 @@ class ConformanceChecker:
                 "reason wajib `camera_lost`.",
             )
 
-    def _on_presence_interval(self, message, *, line, intervals, tracks, report, **_) -> None:
+    def _on_presence_interval(self, message, *, line, intervals, tracks, anon_groups, report, **_) -> None:
         interval_id = message["interval_id"]
 
         if interval_id in intervals:
@@ -415,7 +434,80 @@ class ConformanceChecker:
                 "menghitungnya sebagai kepergian nyata.",
             )
 
+        if message["end_reason"] == "schedule_off" and message["end_source"] != "forced":
+            report.error(
+                line, "presence.interval", "end_source",
+                "end_reason `schedule_off` adalah terminasi paksa, bukan pengamatan: "
+                "end_source wajib `forced`. Kalau tidak, backend membacanya sebagai orang "
+                "yang terlihat pergi.",
+            )
+
+        person_id = message["person_id"]
+        if person_id.startswith("ANON-"):
+            group = anon_groups.setdefault(
+                person_id, {"resolved": False, "interval_ids": [], "track_uuids": set(), "line": line}
+            )
+            if group["resolved"]:
+                report.error(
+                    line, "presence.interval", "person_id",
+                    f"`{person_id}` dipakai lagi sesudah `identity.resolved`. Interval baru "
+                    "dari kelompok yang sudah selesai wajib memakai person_id karyawan.",
+                )
+            group["interval_ids"].append(interval_id)
+            if track_uuid:
+                group["track_uuids"].add(track_uuid)
+
         intervals[interval_id] = message
+
+    def _on_identity_resolved(self, message, *, line, tracks, intervals, anon_groups, report, **_) -> None:
+        anon_id = message["anon_id"]
+        group = anon_groups.setdefault(
+            anon_id, {"resolved": False, "interval_ids": [], "track_uuids": set(), "line": line}
+        )
+
+        if group["resolved"]:
+            report.error(
+                line, "identity.resolved", "anon_id",
+                f"`{anon_id}` diselesaikan dua kali. Satu anon_id, satu penyelesaian.",
+            )
+        group["resolved"] = True
+
+        for track_uuid in message["track_uuids"]:
+            if track_uuid not in tracks:
+                report.error(
+                    line, "identity.resolved", "track_uuids",
+                    f"`{track_uuid}` tidak pernah dibuka oleh `track.started`.",
+                )
+
+        trigger = message.get("trigger_track_uuid")
+        if trigger and trigger not in message["track_uuids"]:
+            report.error(
+                line, "identity.resolved", "trigger_track_uuid",
+                "track pemicu harus anggota `track_uuids`.",
+            )
+
+        moved = message["moved_intervals"]
+        for interval_id in moved:
+            interval = intervals.get(interval_id)
+            if interval is None:
+                report.error(
+                    line, "identity.resolved", "moved_intervals",
+                    f"`{interval_id}` belum pernah dipancarkan sebagai presence.interval.",
+                )
+            elif interval["person_id"] != anon_id:
+                report.error(
+                    line, "identity.resolved", "moved_intervals",
+                    f"`{interval_id}` milik `{interval['person_id']}`, bukan `{anon_id}`. "
+                    "Hanya interval berlabel anon_id ini yang boleh dipindah.",
+                )
+
+        missed = [i for i in group["interval_ids"] if i not in set(moved)]
+        if missed:
+            report.error(
+                line, "identity.resolved", "moved_intervals",
+                f"interval {missed} berlabel `{anon_id}` tapi tidak ada di daftar. Backend "
+                "akan menyisakannya sebagai kehadiran tak bertuan.",
+            )
 
     def _on_snapshot(self, message, *, line, report, **_) -> None:
         offsets = message["pts_wallclock_offset"]

@@ -55,6 +55,7 @@ class _Track:
     evidence_count: int = 0
     ended: bool = False
     box_seed: int = 0
+    anon_id: Optional[str] = None
 
 
 @dataclass
@@ -64,6 +65,7 @@ class _Camera:
     epoch_started_at: float = 0.0
     online: bool = False
     offset: float = 0.0
+    analysis_enabled: bool = True
 
 
 class Emitter:
@@ -87,6 +89,10 @@ class Emitter:
         self._interval_counter: Dict[str, int] = {}
         self._last_interval_of_track: Dict[str, str] = {}
         self._pending_resume: Dict[str, str] = {}
+        # Kelompok ANON-xxxx (dok 12 §3.6): track anggota dan interval yang
+        # sudah dipancarkan atas namanya, supaya identity.resolved DITURUNKAN.
+        self._anon_tracks: Dict[str, List[str]] = {}
+        self._anon_intervals: Dict[str, List[str]] = {}
 
     # ---------------- waktu ----------------
 
@@ -388,6 +394,76 @@ class Emitter:
             end_source=step.get("end_source"),
         )
 
+    def _do_identity_pending(self, step: Step, when: float) -> List[Message]:
+        """Tubuh tanpa wajah masuk kelompok ANON-xxxx. Tidak ada pesan sendiri:
+        backend mengetahuinya dari person_id=ANON-xxxx di interval/heartbeat
+        (identity_source=reid)."""
+        uuid = self._track_uuid(step.get("track"))
+        track = self._tracks[uuid]
+        anon = str(step.get("anon"))
+        track.person_id = anon
+        track.anon_id = anon
+        track.identity_source = "reid"
+        track.interval_start_source = "tracking"
+        track.confidence = float(step.get("confidence", 0.7))
+        track.evidence_count = int(step.get("evidence_count", 2))
+        self._anon_tracks.setdefault(anon, []).append(uuid)
+        return []
+
+    def _do_identity_resolved(self, step: Step, when: float) -> List[Message]:
+        anon = str(step.get("anon"))
+        person = str(step.get("person"))
+        trigger = self._track_uuid(step.get("trigger")) if step.get("trigger") else None
+        members = list(self._anon_tracks.get(anon, []))
+        anchor = self._tracks[trigger if trigger else members[0]].camera_id
+
+        for uuid in members:
+            track = self._tracks[uuid]
+            if track.ended:
+                continue
+            track.person_id = person
+            track.identity_source = "face" if uuid == trigger else "reid_retro"
+            track.anon_id = None
+
+        payload = self._envelope("events", "identity.resolved", when, anchor)
+        payload.update(
+            anon_id=anon,
+            person_id=person,
+            at=self._at(anchor, when),
+            reason=step.get("reason", "face_confirmed"),
+            track_uuids=members,
+            moved_intervals=list(self._anon_intervals.get(anon, [])),
+        )
+        if trigger:
+            payload["trigger_track_uuid"] = trigger
+        return [("events", payload)]
+
+    def _do_analysis_off(self, step: Step, when: float) -> List[Message]:
+        """Jadwal operasional mematikan analisis kamera (set_cameras enabled=false).
+
+        Kamera tetap hidup; yang berhenti adalah analisisnya. Track yang masih
+        hidup ditutup `schedule_off` dan `forced`: ini bukan orang pulang dan
+        bukan kamera putus, jadi bukan `left_frame` dan bukan `camera_lost`.
+        """
+        camera_id = step.get("camera")
+        self._cameras[camera_id].analysis_enabled = False
+        out: List[Message] = []
+        for track in list(self._tracks.values()):
+            if track.camera_id != camera_id or track.ended:
+                continue
+            out.extend(
+                self._end_track(
+                    track, when, reason="schedule_off",
+                    exit_zone=track.start_zone if track.start_zone != "door" else "interior",
+                    end_source="forced",
+                )
+            )
+        return out
+
+    def _do_analysis_on(self, step: Step, when: float) -> List[Message]:
+        self._cameras[step.get("camera")].analysis_enabled = True
+        return []
+
     def _do_enrollment_needed(self, step: Step, when: float) -> List[Message]:
         camera_id = self._scenario.cameras[0].camera_id
         payload = self._envelope("events", "enrollment_needed", when, camera_id)
@@ -407,8 +483,8 @@ class Emitter:
         out: List[Message] = []
 
         if end_source is None:
-            end_source = "tracking" if track.identity_source == "tracking" else "face"
-        if reason in {"camera_lost", "engine_shutdown"}:
+            end_source = "face" if track.identity_source == "face" else "tracking"
+        if reason in {"camera_lost", "engine_shutdown", "schedule_off"}:
             end_source = "forced"
 
         if track.person_id is not None:
@@ -459,6 +535,8 @@ class Emitter:
             payload["prev_interval_id"] = track.prev_interval_id
 
         self._last_interval_of_track[track.uuid] = interval_id
+        if track.anon_id and track.person_id == track.anon_id:
+            self._anon_intervals.setdefault(track.anon_id, []).append(interval_id)
         return [("events", payload)]
 
     def _when_of(self, camera_id: str, pts: float) -> float:

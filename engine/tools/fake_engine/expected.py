@@ -79,7 +79,20 @@ def build_expected(scenario: Scenario, messages: List[Tuple[str, Dict[str, Any]]
 
     sequences = [event["seq"] for event in events if "seq" in event]
 
-    return {
+    resolutions = [
+        {
+            "anon_id": event["anon_id"],
+            "person_id": event["person_id"],
+            "at": event["at"],
+            "reason": event["reason"],
+            "track_uuids": event["track_uuids"],
+            "moved_intervals": event["moved_intervals"],
+        }
+        for event in events
+        if event["type"] == "identity.resolved"
+    ]
+
+    result = {
         "scenario": scenario.name,
         "description": scenario.description,
         "what_this_file_is": (
@@ -101,6 +114,10 @@ def build_expected(scenario: Scenario, messages: List[Tuple[str, Dict[str, Any]]
         # Klaim yang ditulis penulis skenario, apa adanya. Kosong kalau tidak ada.
         "asserts": scenario.expect,
     }
+    # Hanya skenario ReID yang punya kunci ini; fixture lama tidak berubah.
+    if resolutions:
+        result["resolutions"] = resolutions
+    return result
 
 
 def _seconds_between(earlier_at: str, later_at: str) -> float:

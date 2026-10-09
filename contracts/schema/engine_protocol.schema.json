@@ -24,6 +24,7 @@
     { "$ref": "#/$defs/track_heartbeat" },
     { "$ref": "#/$defs/track_resumed" },
     { "$ref": "#/$defs/track_identity_changed" },
+    { "$ref": "#/$defs/identity_resolved" },
     { "$ref": "#/$defs/track_ended" },
     { "$ref": "#/$defs/person_unidentified_present" },
     { "$ref": "#/$defs/camera_online" },
@@ -127,8 +128,21 @@
         "merged_into_other_track",
         "camera_lost",
         "engine_shutdown",
-        "identity_released"
-      ]
+        "identity_released",
+        "schedule_off"
+      ],
+      "description": "schedule_off (dok 12 §3.3) = analisis kamera dimatikan oleh jadwal operasional (set_cameras enabled=false). Track ditutup paksa (end_source=forced). BUKAN kepergian orang dan BUKAN kamera putus: kamera tetap hidup, hanya tidak dianalisis."
+    },
+
+    "identity_source": {
+      "enum": ["face", "tracking", "reid", "reid_retro"],
+      "description": "Asal identitas track saat ini (dok 12 §3.6). face = wajah terkonfirmasi. tracking = identitas dipegang tracker tanpa wajah. reid = identitas dari kecocokan penampilan tubuh dengan galeri harian (termasuk kelompok sementara ANON-xxxx). reid_retro = identitas yang baru diketahui lewat identity.resolved, yaitu diselesaikan mundur dari kelompok ANON ke karyawan. Enum ini TERPISAH dari boundary_source (batas interval)."
+    },
+
+    "anon_id": {
+      "type": "string",
+      "pattern": "^ANON-[A-Za-z0-9]{1,32}$",
+      "description": "ID sementara untuk tubuh tanpa wajah (dok 12 §3.6). Cocok dengan pola person_id, sehingga SELAMA belum diselesaikan ia dipakai apa adanya sebagai person_id di presence.interval, track.heartbeat, snapshot, dan view.frame (identity_source=reid). Awalan ANON- dicadangkan: backend tidak boleh menerimanya sebagai person_id karyawan di set_roster/enroll, dan tidak boleh menghitungnya sebagai kehadiran karyawan sebelum identity.resolved."
     },
 
     "unidentified_reason": {
@@ -521,7 +535,7 @@
         "person_id": { "oneOf": [{ "$ref": "#/$defs/person_id" }, { "type": "null" }] },
         "pts": { "$ref": "#/$defs/pts" },
         "at": { "$ref": "#/$defs/at" },
-        "identity_source": { "enum": ["face", "tracking"] },
+        "identity_source": { "$ref": "#/$defs/identity_source" },
         "confidence": { "$ref": "#/$defs/confidence01" }
       }
     },
@@ -558,6 +572,48 @@
         "pts": { "$ref": "#/$defs/pts" },
         "at": { "$ref": "#/$defs/at" }
       }
+    },
+
+    "identity_resolved": {
+      "x-channel": "events",
+      "allOf": [{ "$ref": "#/$defs/_envelope_event" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "seq", "anon_id", "person_id", "at", "reason", "track_uuids", "moved_intervals"],
+      "properties": {
+        "type": { "const": "identity.resolved" },
+        "anon_id": { "$ref": "#/$defs/anon_id" },
+        "person_id": {
+          "$ref": "#/$defs/person_id",
+          "not": { "pattern": "^ANON-" },
+          "description": "Karyawan tujuan. Tidak boleh berawalan ANON-."
+        },
+        "at": {
+          "$ref": "#/$defs/at",
+          "description": "Waktu kejadian penyelesaian (saat wajah terkonfirmasi). Sengaja tanpa pts/stream_epoch: kelompok bisa melintasi kamera, dan pts hanya sebanding di dalam satu (camera_id, stream_epoch)."
+        },
+        "reason": {
+          "enum": ["face_confirmed", "group_merged"],
+          "description": "face_confirmed = wajah salah satu track dalam kelompok terkonfirmasi (lihat trigger_track_uuid). group_merged = kelompok ANON ini digabung ke kelompok lain yang sudah terselesaikan atau yang wajahnya terkonfirmasi lebih dulu. ReID tidak pernah menjadi alasan sendiri: ia tidak menetapkan identitas dan tidak membatalkan hasil wajah."
+        },
+        "trigger_track_uuid": {
+          "$ref": "#/$defs/track_uuid",
+          "description": "Opsional. Track yang wajahnya memicu penyelesaian."
+        },
+        "track_uuids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/track_uuid" },
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "Seluruh track dalam kelompok ANON ini, hidup maupun sudah berakhir. Track yang masih hidup meneruskan person_id baru di event berikutnya (identity_source=reid_retro kecuali track pemicu: face)."
+        },
+        "moved_intervals": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/interval_id" },
+          "uniqueItems": true,
+          "description": "Interval yang SUDAH dipancarkan dengan person_id=anon_id dan kini milik person_id. Backend memindahkan semuanya (atribusi mundur) dan menandainya identity_source=reid_retro. Boleh kosong bila belum ada interval tertutup. Interval yang dipancarkan SESUDAH event ini langsung memakai person_id baru dan tidak masuk daftar."
+        }
+      },
+      "description": "Kelompok track tanpa wajah (ANON-xxxx) diselesaikan ke satu karyawan. Engine memancarkannya sekali per anon_id; sesudahnya anon_id tidak dipakai lagi."
     },
 
     "track_ended": {
@@ -809,7 +865,7 @@
               "camera_id": { "$ref": "#/$defs/camera_id" },
               "stream_epoch": { "$ref": "#/$defs/stream_epoch" },
               "person_id": { "oneOf": [{ "$ref": "#/$defs/person_id" }, { "type": "null" }] },
-              "identity_source": { "enum": ["face", "tracking"] },
+              "identity_source": { "$ref": "#/$defs/identity_source" },
               "since_pts": { "$ref": "#/$defs/pts" }
             }
           }
@@ -851,7 +907,7 @@
               "track_uuid": { "$ref": "#/$defs/track_uuid" },
               "bbox": { "$ref": "#/$defs/normalized_bbox" },
               "person_id": { "oneOf": [{ "$ref": "#/$defs/person_id" }, { "type": "null" }] },
-              "identity_source": { "enum": ["face", "tracking"] },
+              "identity_source": { "$ref": "#/$defs/identity_source" },
               "confidence": {
                 "type": "number", "minimum": 0, "maximum": 1,
                 "description": "Skor detector (bukan kemiripan wajah). Hanya untuk tampilan."
