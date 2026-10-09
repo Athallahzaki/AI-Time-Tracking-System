@@ -45,3 +45,5 @@ data/*.db-shm
 data/*.db-wal
 data/
 
+cameras.*.yaml
+
