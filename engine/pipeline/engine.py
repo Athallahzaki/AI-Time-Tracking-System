@@ -79,6 +79,11 @@ class VisionEngine:
         self._next_due_pts: Optional[float] = None
         self._last_read_pts: Optional[float] = None
         self._decimated_frames = 0
+        # Penjadwal berdetak (runtime/tick_scheduler.py) yang mengatur irama:
+        # setiap langkah memakai frame terbaru apa adanya, tanpa decimation PTS.
+        # Hanya dinyalakan untuk sumber live dengan slot frame terbaru; file
+        # tetap memakai decimation supaya tidak tertinggal dari waktu putar.
+        self.external_pacing = False
 
         # Known tracks are retained until the tracker stops returning them.
         # This lets us distinguish LOST from actual removal.
@@ -398,6 +403,8 @@ class VisionEngine:
         are never dropped.
         """
         target = self._config.target_fps
+        if self.external_pacing:
+            return self._source.read()
         while True:
             frame = self._source.read()
             if frame is None or not target or target <= 0:

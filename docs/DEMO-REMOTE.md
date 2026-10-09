@@ -291,6 +291,44 @@ Cara membaca:
 - **Semua LULUS:** tidak ada satu perubahan pun yang krusial sendirian. Pertahankan
   ketiganya untuk demo, karena biayanya nol.
 
+### 8.1 Penjadwal berdetak: free vs tick (paket r9)
+
+Paket r9 menambah penjadwal berdetak tahap 1 (dokumen 04 §14, `engine/runtime/tick_scheduler.py`).
+Default tetap `free` (perilaku lama); profil uji `engine/config/demo-4060-tick.yaml` menyalakannya
+(`core.scheduler: tick`, `core.tick_fps: 6`, `detector.batch_wait_ms: 15`).
+
+Uji ini bagian dari baseline 5 kamera (minggu 1) dan gerbang 23 Oktober. Kondisi sama dengan
+§8 (R0), tetapi **5 stream** (`cam01`..`cam05`, video yang sama boleh) dan dua profil:
+
+| Run | Profil | Target untuk ringkasan |
+|---|---|---|
+| T0 | `demo-4060.yaml` (free, 10 fps) | `--target-fps 10` |
+| T0-6 | `demo-4060.yaml` dengan `start-engine.ps1 -TargetFps 6` (free, 6 fps) | `--target-fps 6` |
+| T1 | `demo-4060-tick.yaml` (tick, 6 fps) | `--target-fps 6` |
+
+T0-6 perlu supaya perbandingannya adil: tick di 6 fps harus dibandingkan dengan free di 6 fps,
+bukan free di 10 fps.
+
+```powershell
+.\deploy\laptop\start-engine.ps1 -BindIp 127.0.0.1 -HealthSeconds 2 -AffinityMask 0xFFFF -Config engine/config/demo-4060-tick.yaml
+python scripts/lag_probe.py --camera cam01=rtsp://127.0.0.1:8554/cam01 --camera cam02=rtsp://127.0.0.1:8554/cam02 `
+  --camera cam03=rtsp://127.0.0.1:8554/cam03 --camera cam04=rtsp://127.0.0.1:8554/cam04 `
+  --camera cam05=rtsp://127.0.0.1:8554/cam05 --minutes 15 --out bench-out/ab-T1.csv
+python scripts/summarize_gladi.py --target-fps 6 bench-out/ab-T0-6.csv bench-out/ab-T1.csv
+```
+
+Log engine mode tick mencetak ringkasan tiap 60 detik: jumlah detak, detak telat (dan maksimum
+keterlambatannya), detak yang dilompati, dan detak terlewat per kamera. Kirim log itu bersama CSV.
+
+Cara membaca:
+- **T1 LULUS, T0-6 GAGAL:** penjadwal memperbaiki stabilitas; lanjut ke tahap 2 sesuai dokumen 14.
+- **Keduanya LULUS:** 6 fps saja sudah cukup cadangan; tick tetap dipakai karena memberi batch
+  serentak dan irama yang bisa diprediksi, tetapi tidak mendesak.
+- **Keduanya GAGAL:** masalahnya bukan irama. Lihat detak telat di log: bila banyak, satu langkah
+  lebih lama dari periode (GPU/CPU kurang) -- turunkan `tick_fps` atau ukur per tahap dengan py-spy.
+- **`missed_ticks` besar hanya di satu kamera:** kamera itu yang lambat (decode, sumber), bukan
+  penjadwalnya.
+
 ## 9. Checklist hari demo
 
 - [ ] GitOps update Portainer **mati**.

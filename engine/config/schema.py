@@ -400,6 +400,13 @@ class EngineConfig:
     # Batas thread torch/OpenCV/BLAS (engine/runtime/threads.py). 0 = biarkan
     # pustaka memakai semua core (perilaku lama).
     cpu_threads: int = 0
+    # Penjadwal (dokumen 04 §14). "free" = perilaku lama: thread tiap kamera
+    # berjalan secepat mungkin. "tick" = tahap 1 penjadwal berdetak: semua
+    # kamera dilepas bersamaan sekali per detak (runtime/tick_scheduler.py).
+    scheduler: str = "free"
+    # Detak per detik untuk scheduler "tick". None = pakai target_fps. Pilih DI
+    # BAWAH kapasitas terukur; cadangan itulah yang membuat fps tidak berayun.
+    tick_fps: Optional[float] = None
 
     ingest: IngestConfig = field(default_factory=IngestConfig)
     detector: DetectorConfig = field(default_factory=DetectorConfig)
@@ -421,6 +428,12 @@ class EngineConfig:
     def __post_init__(self) -> None:
         if self.cpu_threads < 0:
             raise ValueError("core.cpu_threads must be >= 0 (0 = tidak dibatasi).")
+        if self.scheduler not in ("free", "tick"):
+            raise ValueError("core.scheduler must be 'free' or 'tick'.")
+        if self.tick_fps is not None and self.tick_fps <= 0:
+            raise ValueError("core.tick_fps must be > 0.")
+        if self.scheduler == "tick" and not (self.tick_fps or self.target_fps):
+            raise ValueError("core.scheduler: tick butuh core.tick_fps atau core.target_fps.")
         if self.detection_interval < 1:
             raise ValueError(
                 f"detection_interval must be >= 1, got {self.detection_interval}."

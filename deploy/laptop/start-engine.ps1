@@ -23,13 +23,16 @@
 .EXAMPLE
   # Uji A/B (gladi A) tanpa server: hanya lag_probe di laptop yang bisa masuk.
   .\deploy\laptop\start-engine.ps1 -BindIp 127.0.0.1 -HealthSeconds 2 -AffinityMask 0xFFFF
+  .\deploy\laptop\start-engine.ps1 -BindIp 127.0.0.1 -HealthSeconds 2 -AffinityMask 0xFFFF -TargetFps 6
 #>
 param(
     [Parameter(Mandatory = $true)][Alias("NetBirdIp")][string]$BindIp,
     [string]$Config = "engine/config/demo-4060.yaml",
     [int]$Port = 8765,
     [int]$HealthSeconds = 10,
-    [string]$AffinityMask = ""
+    [string]$AffinityMask = "",
+    # Menimpa core.target_fps profil (mis. 6 untuk uji free vs tick, DEMO-REMOTE §8.1).
+    [double]$TargetFps = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -53,6 +56,10 @@ $engineArgs = @(
     "--tcp", "$($BindIp):$Port",
     "--health-seconds", "$HealthSeconds"
 )
+if ($TargetFps -gt 0) {
+    # InvariantCulture: locale Indonesia menulis 6,5 dan argparse menolaknya.
+    $engineArgs += @("--target-fps", $TargetFps.ToString([Globalization.CultureInfo]::InvariantCulture))
+}
 Write-Host "Engine : python $($engineArgs -join ' ')"
 
 $proc = Start-Process -FilePath $python -ArgumentList $engineArgs -NoNewWindow -PassThru

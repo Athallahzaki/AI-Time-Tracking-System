@@ -140,8 +140,12 @@ class CameraSupervisor:
         loop_files: bool = False,
         recognition_executor: Any = None,
         detector_provider: Optional[Callable[[str, EngineConfig], Any]] = None,
+        tick_gate: Any = None,
     ) -> None:
         self.spec = spec
+        # Penjadwal berdetak tahap 1 (runtime/tick_scheduler.py). None = loop
+        # bebas seperti semula.
+        self._tick_gate = tick_gate
         # Detector bersama milik runtime (handle per kamera); None = muat sendiri.
         self._detector_provider = detector_provider
         # P7: RecognitionWorker bersama milik runtime; None = rekognisi sinkron.
@@ -276,8 +280,13 @@ class CameraSupervisor:
         self.stats.error = None
         self.stats.started_wallclock = time.time()
         outcome = "stopped"
+        gate = self._tick_gate
+        if gate is not None:
+            gate.register(camera_id)
         try:
             while not self._stop.is_set():
+                if gate is not None and not gate.wait(camera_id, self._stop):
+                    break
                 frame, tracks = self._engine.step()
                 if frame is None:
                     outcome = "failed" if self._is_network else "finished"
@@ -297,6 +306,7 @@ class CameraSupervisor:
                     retry_in_seconds=RETRY_INITIAL_SECONDS,
                 )
             )
+            self._leave_gate()
             self._stop_engine()
             return "failed"
 
@@ -311,11 +321,17 @@ class CameraSupervisor:
                     retry_in_seconds=RETRY_INITIAL_SECONDS,
                 )
             )
+            self._leave_gate()
             self._stop_engine()
             return "failed"
 
+        self._leave_gate()
         self._shutdown()
         return outcome
+
+    def _leave_gate(self) -> None:
+        if self._tick_gate is not None:
+            self._tick_gate.unregister(self.spec.camera_id)
 
     @property
     def _is_network(self) -> bool:
@@ -410,6 +426,10 @@ class CameraSupervisor:
         self._engine = engine
         self._source = source
         self.stats.measured_fps = source_fps
+        # Dengan penjadwal berdetak, sumber live berslot "frame terbaru" tidak
+        # di-decimate lagi: detaknya yang menentukan irama (dokumen 04 §14.3).
+        if self._tick_gate is not None and getattr(source, "uses_reader_thread", False):
+            engine.external_pacing = True
         engine.start()
 
         self._announce(source_fps, wallclock=self._offset_of(source))

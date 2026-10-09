@@ -7,6 +7,62 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-10-09 · paket r9 — Kerangka penjadwal berdetak (restrukturisasi engine, tahap 1)
+
+Dasar: repo 8 Okt + paket r8 (r8 harus sudah dipasang). Keputusan: dokumen 12 §3.9,
+desain: dokumen 04 §14. **Default tidak berubah**: tanpa `core.scheduler: tick`
+engine berjalan persis seperti r7/r8.
+
+**Apa yang berubah**
+
+- `engine/runtime/tick_scheduler.py` (baru):
+  - `TickClock`: detak berperiode tetap, detak yang molor tidak dikejar, statistik
+    `late_ticks` / `skipped_ticks` / `max_lateness_seconds`.
+  - `TickGate` (**tahap 1, bisa dipakai**): thread kamera menunggu detak sebelum tiap
+    langkah; semua kamera dilepas bersamaan. Kamera yang masih sibuk saat detak lewat
+    tidak menjalankan dua langkah untuk satu detak; detak terlewat dihitung per kamera.
+    Ringkasan ke log tiap 60 detik.
+  - `TickScheduler` (**tahap 2, kerangka**): satu thread, satu batch per detak, kamera
+    tanpa frame dilewati, kesalahan satu kamera/batch terisolasi, sisa waktu untuk
+    rekognisi/ReID. Belum dirakit ke `service.py` (pekerjaan EB minggu 2).
+- `engine/ingest/mailbox.py` (baru): slot frame terbaru generik (`take()` tidak memblok)
+  untuk tahap 2 dan NVDEC. `PyAVSource` tetap memakai slotnya sendiri.
+- `engine/ingest/nvdec_source.py` (baru, kerangka): `nvdec_available()` dan
+  `NvdecSource` yang menolak dengan pesan menunjuk spike. Kontrak implementasinya
+  ditulis di docstring.
+- `scripts/spike_nvdec.py` (baru): spike 15–16 Okt; bandingkan PyAV CPU, PyAV
+  hwaccel cuda, dan PyNvVideoCodec (frame tetap di GPU, cek `torch.from_dlpack`).
+- `engine/config/schema.py`, `loader.py`: `core.scheduler` (`free` | `tick`,
+  default `free`) dan `core.tick_fps` (default ikut `target_fps`). Mode tick tanpa fps
+  ditolak saat load.
+- `engine/runtime/service.py`: mode tick membuat `TickGate`, menyamakan `target_fps`
+  dengan `tick_fps`, dan menyalakan `wait_for_all` di detector bersama.
+- `engine/runtime/camera.py`: satu tunggu detak sebelum `engine.step()`;
+  daftar/keluar gerbang saat kamera buka/tutup/gagal. Sumber live berslot frame terbaru
+  tidak di-decimate lagi di mode tick (`engine.external_pacing`).
+- `engine/pipeline/engine.py`: atribut `external_pacing` (default False).
+- `engine/perception/shared_detector.py`: opsi `wait_for_all` — dispatcher berhenti
+  menunggu begitu semua kamera terdaftar mengirim, paling lama `batch_wait_ms`.
+- `engine/config/demo-4060-tick.yaml` (baru): profil uji tick 6 fps, `batch_wait_ms` 15.
+- `deploy/laptop/start-engine.ps1`: parameter `-TargetFps` (untuk pembanding adil
+  free 6 fps).
+- `docs/DEMO-REMOTE.md` §8.1: protokol A/B free vs tick 5 stream.
+
+**Alasan.** Ketidakstabilan 4060 (fps 10 ↔ 6, stall 9 detik) berasal dari irama
+yang dipegang thread tiap kamera, bukan dari GPU penuh. Tahap 1 bisa diuji minggu ini
+tanpa merombak `camera.py`; tahap 2 dan NVDEC menyusul sesuai dokumen 14.
+
+**Yang belum.** Tahap 2 belum dirakit; `ports/frame.py` belum membawa data GPU
+(menunggu kesepakatan EA–EB 13 Okt); NVDEC menunggu vonis spike; ringkasan detak
+belum masuk `engine.health` (sengaja: perubahan wire menunggu kontrak).
+
+**Cara uji.**
+- `python -m pytest engine/tests/test_tick_scheduler.py` (22 tes) dan seluruh
+  `engine/tests` tetap lulus.
+- Di laptop: DEMO-REMOTE §8.1 (T0-6 vs T1, 15 menit, 5 stream), ringkas dengan
+  `summarize_gladi.py --target-fps 6`.
+- Spike: `python scripts/spike_nvdec.py --url rtsp://127.0.0.1:8554/cam01 --seconds 60`.
+
 ## 2026-10-08 · paket r8 — Restrukturisasi repo
 
 Dasar: repo 8 Okt (sudah berisi r7). Tidak ada perubahan kode aplikasi.
