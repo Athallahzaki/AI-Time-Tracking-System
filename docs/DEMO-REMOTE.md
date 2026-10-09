@@ -309,6 +309,16 @@ Uji ini bagian dari baseline 5 kamera (minggu 1) dan gerbang 23 Oktober. Kondisi
 T0-6 perlu supaya perbandingannya adil: tick di 6 fps harus dibandingkan dengan free di 6 fps,
 bukan free di 10 fps.
 
+Publish lima stream sekaligus dari satu video (satu proses ffmpeg per path, encode sama dengan
+§3.3) di terminal terpisah, dan biarkan jalan selama semua run:
+
+```powershell
+.\scripts\publish_test_video.ps1 -Video ongame.mp4 -Fps 25 -Count 5
+```
+
+Skrip berhenti sendiri (dan menghentikan semua proses) bila satu stream mati; run yang terjadi
+sesudahnya tidak valid. Lalu per run, ganti profil engine dan nama CSV:
+
 ```powershell
 .\deploy\laptop\start-engine.ps1 -BindIp 127.0.0.1 -HealthSeconds 2 -AffinityMask 0xFFFF -Config engine/config/demo-4060-tick.yaml
 python scripts/lag_probe.py --camera cam01=rtsp://127.0.0.1:8554/cam01 --camera cam02=rtsp://127.0.0.1:8554/cam02 `
@@ -316,6 +326,10 @@ python scripts/lag_probe.py --camera cam01=rtsp://127.0.0.1:8554/cam01 --camera 
   --camera cam05=rtsp://127.0.0.1:8554/cam05 --minutes 15 --out bench-out/ab-T1.csv
 python scripts/summarize_gladi.py --target-fps 6 bench-out/ab-T0-6.csv bench-out/ab-T1.csv
 ```
+
+Ringkasan menampilkan satu baris per kamera (cam01..cam05) dan satu baris gabungan per file.
+Vonis tetap satu per file: LULUS hanya bila kelima kamera LULUS. Kamera yang gagal terlihat dari
+barisnya; bila hanya satu kamera yang menyimpang, itu masalah sumber/decode kamera itu, bukan irama.
 
 Log engine mode tick mencetak ringkasan tiap 60 detik: jumlah detak, detak telat (dan maksimum
 keterlambatannya), detak yang dilompati, dan detak terlewat per kamera. Kirim log itu bersama CSV.

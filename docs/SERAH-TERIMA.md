@@ -1,50 +1,44 @@
 # Serah Terima
 
-Ditulis ulang di akhir setiap sesi. Terakhir: 9 Oktober 2026, sesi EA (paket ea-r2).
+Ditulis ulang di akhir setiap sesi. Terakhir: 9 Oktober 2026, sesi EB (paket eb-r10).
 
 ## Selesai
 
-- ea-k1: kontrak `identity.resolved`, `ANON-xxxx`, `schedule_off` (`docs/SERAH-TERIMA-EA-K1.md`).
-- ea-r1: logika ReID `engine/identity/reid/` (39 tes), belum dirakit ke runtime, tanpa model.
-- ea-r2: kit latih OSNet `tools/reid_train/` (prepare RandPerson → latih → ONNX → eval crop tim);
-  7 tes CPU lulus di venv bersih (ujung-ke-ujung 40 gambar palsu). `engine/` tidak disentuh.
-  Belum pernah jalan dengan data/bobot asli atau GPU (sesi ini dilarang mengunduhnya).
+- eb-r10: alat baseline 5 kamera. `publish_test_video.ps1 -Count N` (satu ffmpeg per path cam01..camN),
+  `summarize_gladi.py` per kamera + baris gabungan (vonis per file, 1 kamera tidak berubah),
+  DEMO-REMOTE §8.1 memakai `-Count 5`. 10 tes `test_summarize_gladi.py` lulus. `engine/runtime/`
+  dan profil tidak disentuh.
+- Dari sesi EA (tetap berlaku): ea-k1 kontrak identitas, ea-r1 logika ReID, ea-r2 kit latih OSNet
+  (`tools/reid_train/`, belum dijalankan dengan data/bobot asli). Rincian di CHANGELOG.
 
 ## Belum
 
-1. Latihan nyata di laptop; angka mAP dan ambang asli belum ada.
-2. Worker embedding tubuh di engine (memuat ONNX kit, interval 15 dtk), perakitan ReID ke
-   `runtime/camera.py`/presence (EB tahap 2), blok `reid:` di `config/schema.py`.
-3. Fitur dokumen 12 §3 untuk BE/FE.
+1. Baseline 5 kamera nyata (T0, T0-6, T1) belum dijalankan; angka belum ada.
+2. `publish_test_video.ps1 -Count` belum pernah dijalankan (cloud tanpa PowerShell). Hanya dibaca ulang.
+3. ReID: latihan nyata, worker embedding, perakitan ke presence (EA, lihat CHANGELOG ea-r2).
 
 ## Keputusan yang perlu disetujui
 
-- Angka default ReID (0,80 / margin 0,05 / 30 dtk) tetap usulan; ambang dari `eval_reid.py` pada
-  crop tim menggantikannya hanya setelah EA setuju. Cannot-link juga di kamera sama; koreksi
-  interval ANON yang sudah terpancar belum ada di kontrak (EA–BE).
-- **Lisensi bobot ImageNet torchreid dan bobot MSMT17 pembanding belum diverifikasi**; varian
-  `scratch` ada untuk jalur bersih. Putuskan varian mana yang boleh ke produksi.
-- **mAP val RandPerson (sintetis) tidak memprediksi kinerja di CCTV klien.** Keputusan model hanya
-  dari `eval_reid.py` pada crop berlabel tim; siapa yang melabel, berapa orang/kamera?
-- Random erasing p 0,5 sesuai permintaan, tetapi torchreid memperingatkan itu bisa merugikan
-  generalisasi; bandingkan `--erase-prob 0`. torchreid dipin ke f8cd150; Python 3.13 tidak didukung.
-- Terbuka dari sesi lalu: timeline dokumen 14, `* text=auto`, data GPU di `engine/ports/frame.py`.
+- Vonis multi-kamera: LULUS hanya bila SEMUA kamera lulus. Ambang tidak diubah, tetapi sekarang
+  satu kamera buruk menggagalkan file; sebelumnya median campuran bisa menutupinya. Setuju?
+- Line ending: CLAUDE.md minta CRLF, tetapi seluruh repo (index git) LF dan tidak ada `* text=auto`.
+  File paket ini mengikuti LF agar diff tidak membengkak. Putuskan (butir lama "* text=auto").
+- Terbuka: timeline dokumen 14, data GPU di `engine/ports/frame.py`, keputusan ReID ea-r2.
 
-## Uji manual di laptop (urutan; rincian + PowerShell di `tools/reid_train/README.md`)
+## Uji manual di laptop 4060 (PowerShell, dari root repo)
 
-1. venv Python 3.11, torch CUDA (`torch.cuda.is_available()` harus `True`).
-2. `pip install -r requirements-train-deps.txt`, lalu `pip install --no-build-isolation -r requirements-train.txt`
-   (Cython gagal → fallback README §3). `python -m pytest tests -q` di `tools\reid_train` harus lulus.
-3. Unduh subset RandPerson manual → `prepare_randperson.py` → cek tabel id/gambar/kamera.
-4. Bobot ImageNet manual bila `gdown` gagal (`osnet_ain_x1_0_imagenet.pth`, README §6).
-5. Latih `--init imagenet` dan `--init scratch` (`--amp`); catat lama epoch dan VRAM (OOM → `--batch 48`).
-6. `export_onnx.py` kedua varian (selisih < 1e-3), catat SHA-256.
-7. Crop berlabel tim + MSMT17 dari huggingface.co/kaiyangzhou/osnet sebagai `PEMBANDING-msmt17.onnx`;
-   `eval_reid.py` ketiganya; isi `MODEL-CARD.md`.
-8. Belum diuji di Windows: perintah PowerShell README, DataLoader `spawn` (Linux sudah), kecukupan
-   8 GB VRAM pada batch 64.
+1. Uji publish pendek: `.\scripts\publish_test_video.ps1 -Video ongame.mp4 -Fps 25 -Count 5`
+   (MediaMTX sudah jalan). Harap: lima proses `ffmpeg` di Task Manager; `ffplay rtsp://127.0.0.1:8554/cam03`
+   menampilkan gambar. Matikan satu proses ffmpeg: skrip harus menyebut `camNN (kode ...)`,
+   menghentikan sisanya, dan keluar dengan galat. Ctrl+C: tak ada ffmpeg yatim tersisa.
+2. `-Count 1` tanpa `-Count`: perilaku lama (satu stream `cam01`). `-Count 3 -Path x`: ditolak.
+3. Catat CPU laptop saat 5 publish tanpa engine (biaya encode 5 x x264 veryfast ikut baseline).
+   Bila CPU sudah tinggi, pakai `-Width 1280` dan catat di hasil.
+4. Jalankan T0, T0-6, T1 sesuai DEMO-REMOTE §8.1 (15 menit tiap run). Publish tidak boleh
+   dimatikan di antara run. Ringkas: `python scripts/summarize_gladi.py --target-fps 6 bench-out/ab-T0-6.csv bench-out/ab-T1.csv`.
+5. Periksa: tabel punya baris cam01..cam05 + baris `[5 kam]` per file; kirim CSV dan log engine.
 
 ## Langkah berikutnya
 
-Kontrak antrean EA–EB 13 Okt (`messages.py`), lalu worker embedding tubuh dengan `reid_common.py`
-sebagai definisi pra-proses, lalu perakitan ke presence. Hasil uji laptop menentukan model dan ambang.
+Jalankan baseline di laptop dan kirim CSV; hasilnya menentukan gerbang 23 Oktober (dokumen 14).
+EA: kontrak antrean EA-EB 13 Okt, worker embedding tubuh.
