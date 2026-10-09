@@ -1,9 +1,0 @@
-Package: AI Time Tracking System
-Build: 2026.09.23-audit-fixes
-
-Lihat CHANGES.md untuk daftar perbaikan dan keputusan yang dipakai.
-
-Runtime profiles:
-  python scripts/run_demo.py --mode mock --frontend
-  python scripts/run_demo.py --mode direct --model m --frontend
-  python scripts/run_demo.py --mode mediamtx --model s --frontend

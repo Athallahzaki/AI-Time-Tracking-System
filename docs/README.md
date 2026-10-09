@@ -11,7 +11,6 @@
 | `DEMO-1060.md` | Profil demo GTX 1060 |
 | `DEMO-REMOTE.md` | Deploy terpisah lewat NetBird + Portainer; uji A/B 4060 |
 | `UJI-LAG.md` | Cara mengukur lag kamera dan umur kotak |
-| `arsip/` | Catatan lama, disimpan apa adanya; jangan diedit |
 
 Bila dokumen acuan dan implementasi berbeda, jangan memindahkan kebijakan bisnis
 ke engine dan jangan membuat import langsung antara engine dan backend.
