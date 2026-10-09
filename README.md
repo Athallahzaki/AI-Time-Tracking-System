@@ -4,6 +4,25 @@ Sistem pemantauan kehadiran berbasis CCTV dengan proses engine visi, backend
 FastAPI, dan frontend Vue yang terpisah. Engine mengirim NDJSON sesuai kontrak;
 backend menyimpan event mentah dan menurunkan sesi/gap.
 
+## Dokumen
+
+| Dokumen | Isi |
+| --- | --- |
+| `docs/CHANGELOG.md` | Semua perubahan per paket, terbaru di atas. Catatan perubahan baru ditulis di sini |
+| `docs/ARCHITECTURE.md` | Batas tanggung jawab engine, backend, frontend |
+| `docs/ENGINE_PROTOCOL.md` | Kontrak TCP NDJSON engine ↔ backend |
+| `docs/PROJECT_STRUCTURE.md` | Struktur folder yang dituju |
+| `docs/WORKPLAN.md` | Urutan implementasi dan milestone awal |
+| `docs/SETUP-GPU.md` | Requirements per GPU dan pemeriksaan environment |
+| `docs/DEMO-1060.md` | Profil demo GTX 1060 |
+| `docs/DEMO-REMOTE.md` | Deploy terpisah: engine + MediaMTX di laptop, backend + frontend di Portainer lewat NetBird; uji A/B 4060 |
+| `docs/UJI-LAG.md` | Cara mengukur lag kamera dan umur kotak |
+| `deploy/README.md` | Topologi deployment dan compose |
+| `docs/arsip/` | Catatan perubahan lama dan dokumen status basi, disimpan apa adanya |
+
+Kesepakatan lingkup prototype, target, dan timeline ada di dokumen tim
+(dokumen 12–14), di luar repo ini.
+
 ## Persyaratan dan instalasi
 
 - Python 3.11/3.12, Node.js 20+, npm, dan Docker untuk CCTV live
@@ -99,7 +118,7 @@ Endpoint utama: `/api/system/status`, `/api/cameras`,
 Proyek belum siap produksi penuh: benchmark rekaman representatif, kebijakan HRD,
 autentikasi, TLS, dan hardening deployment masih perlu diselesaikan. Setup MediaMTX
 lokal/lapangan dasar tersedia di `deploy/`.
-Lihat `WORKPLAN_STATUS.md`.
+Status terkini: `docs/CHANGELOG.md` dan dokumen kesepakatan tim (dokumen 12).
 
 Detector nyata adalah D-FINE lewat **LibreYOLO** (MIT), bukan
 Ultralytics/YOLO. Ukuran dipilih lewat config engine:

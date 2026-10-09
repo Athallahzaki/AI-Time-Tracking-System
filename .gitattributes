@@ -1,0 +1,20 @@
+# Line ending. Lihat docs/CHANGELOG.md (paket r8).
+# Skrip shell harus LF, kalau tidak `sh` di Linux gagal ($'\r': command not found).
+*.sh    text eol=lf
+
+# Berkas biner: jangan pernah diubah line ending-nya dan jangan di-diff sebagai teks.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.pdf   binary
+*.zip   binary
+*.xlsx  binary
+*.mp4   binary
+*.onnx  binary
+*.pt    binary
+*.pth   binary
+*.sqlite3 binary
+*.db    binary

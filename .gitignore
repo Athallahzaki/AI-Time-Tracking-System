@@ -25,3 +25,19 @@ venv/
 weights/
 
 bench-out/
+
+# Bobot model (paket r8). model_path dan path model rekognisi relatif ke root,
+# jadi aturan di engine/.gitignore tidak cukup.
+*.pt
+*.pth
+*.onnx
+*.engine
+*.safetensors
+
+# Database lokal, termasuk database referensi wajah (references.sqlite3).
+# Data biometrik karyawan: tidak pernah di-commit.
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-shm
+*.db-wal
