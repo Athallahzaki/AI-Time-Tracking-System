@@ -1,6 +1,7 @@
-# Serah terima EA — paket ea-r3 s.d. ea-r6: ReID, `schedule_off`, engine sebagai tugas Windows
+# Serah terima EA — paket ea-r3 s.d. ea-r7: ReID, `schedule_off`, engine sebagai tugas Windows
 
-9 Oktober 2026 · Jalur EA · Rincian: `docs/CHANGELOG.md` (ea-r3 s.d. ea-r6). File ini **tidak** menggantikan
+9 Oktober 2026 · Jalur EA · Rincian: `docs/CHANGELOG.md` (ea-r3 s.d. ea-r7). Akhir sesi: semua paket
+di branch `claude/youthful-euler-eka234` dan zip `EA_2026-10-09-r3..r7_*.zip` (pasang berurutan). File ini **tidak** menggantikan
 `docs/SERAH-TERIMA.md` (status EB, paket eb-r10); keduanya berlaku.
 
 ## Selesai
@@ -15,7 +16,8 @@
   Jeda analisis: track ditutup `schedule_off` + forced, kamera tetap hidup, tanpa `camera.failed`/`camera.online` baru.
 - ea-r6: `engine-watchdog.ps1` (hidup ulang bila keluar/macet via berkas detak, berhenti rapi via berkas stop)
   dan `install-engine-task.ps1` (Task Scheduler, auto-start saat boot). Engine: `--heartbeat-file`, `--stop-file`.
-- Tes: 632 lulus / 7 dilewati (sama seperti sebelumnya) di `engine/tests`; 47 ReID + 5 `schedule_off` + 10 detak + 1 probe.
+- ea-r7: `forget_person` ikut menghapus prototipe tubuh (diblokir sampai purge) dan mencabut klaim ReID.
+- Tes: 635 lulus / 7 dilewati (sama seperti sebelumnya) di `engine/tests`; 50 ReID + 5 `schedule_off` + 10 detak + 1 probe.
   Watchdog diuji di PowerShell 7 Linux (mati, macet, berhenti rapi); Task Scheduler belum pernah dijalankan.
   `policy_grep` bersih. **Default tidak berubah** (`reid.enabled: false`).
 
@@ -26,14 +28,13 @@
 2. **Backend belum siap**: `backend/schemas/protocol.py` hanya mengenal `identity_source` face/tracking dan tidak
    punya handler `identity.resolved` (tugas BE dari ea-k1). **Jangan nyalakan ReID dengan backend sungguhan**:
    heartbeat/snapshot `reid` akan gagal validasi, dan interval `ANON-…` bisa terhitung sebagai kehadiran.
-3. `forget_person` belum menghapus prototipe tubuh orang itu dari galeri harian (hilang pada purge harian berikutnya).
-4. Waktu tempuh antar lokasi belum diukur (`travel_time_seconds: {}`, default ketat 30 dtk).
-5. Mode `pause` belum aman dengan backend sungguhan: `EndReason` backend belum punya `schedule_off`, dan tombol
+3. Waktu tempuh antar lokasi belum diukur (`travel_time_seconds: {}`, default ketat 30 dtk).
+4. Mode `pause` belum aman dengan backend sungguhan: `EndReason` backend belum punya `schedule_off`, dan tombol
    start/stop operator memakai `enabled=false` yang sama (dengan `pause`, "stop" operator berarti stream tetap dibaca).
    BE perlu memutuskan: jadwal vs stop operator dibedakan, atau stop operator ikut berarti jeda.
-6. Watchdog + tugas Windows belum pernah dijalankan di Windows (langkah 9). Belum diketahui apakah GPU/CUDA
+5. Watchdog + tugas Windows belum pernah dijalankan di Windows (langkah 9). Belum diketahui apakah GPU/CUDA
    jalan dari tugas S4U (sesi 0) di laptop tim; bila tidak, pakai `-Trigger Logon` + login otomatis.
-7. MediaMTX belum diawasi watchdog (hanya engine). Untuk kamera RTSP langsung tidak perlu.
+6. MediaMTX belum diawasi watchdog (hanya engine). Untuk kamera RTSP langsung tidak perlu.
 
 ## Keputusan
 
@@ -102,5 +103,6 @@ Masih perlu disetujui:
 
 BE: `IdentitySource` reid/reid_retro + handler `identity.resolved` (SERAH-TERIMA-EA-K1 §2) sebelum ReID dinyalakan
 dengan backend; `EndReason.SCHEDULE_OFF` + keputusan stop operator vs jadwal sebelum `analysis_off_mode: pause`.
-EA: uji watchdog/tugas di Windows (langkah 9), kalibrasi ambang dari crop lokasi, ukur waktu tempuh,
-`forget_person` → galeri ReID, lalu uji operasional 3 hari (10–12 Nov) memakai tugas ini.
+EA: uji laptop langkah 1–9 (mulai dari watchdog dan ReID dengan model pembanding), latih model ReID, kalibrasi
+ambang dari crop lokasi, ukur waktu tempuh, sepakati antrean EA–EB (13 Okt), lalu uji operasional 3 hari
+(10–12 Nov) memakai tugas Windows ini. Kode EA yang tersisa menunggu penjadwal tahap 2 EB (integrasi 23 Okt).

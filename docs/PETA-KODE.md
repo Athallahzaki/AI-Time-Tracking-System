@@ -1,7 +1,7 @@
 # Peta Kode
 
 Untuk menemukan file tanpa menjelajah repo. Perbarui saat menambah/memindah modul.
-Per 9 Oktober 2026 (paket ea-r6).
+Per 9 Oktober 2026 (paket ea-r7).
 
 ## Alur data
 

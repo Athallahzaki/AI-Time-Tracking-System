@@ -143,6 +143,20 @@ class ReidCoordinator:
             if self._core is not None:
                 self._core.close(msg)
 
+    def forget_person(self, person_id: str) -> Tuple[int, int]:
+        """Hapus data tubuh orang ini (galeri + klaim ReID di track tanpa wajah).
+
+        Dipanggil dari handler `forget_person` runtime. (prototipe, track dicabut).
+        """
+        with self._lock:
+            if self._core is None:
+                return 0, 0
+            removed, revoked = self._core.forget_person(person_id)
+            for uuid in revoked:
+                self.metrics.revoked += 1
+                self._push(self._owner.get(uuid), (KIND_LABEL, uuid, None, None))
+            return removed, len(revoked)
+
     def maybe_purge(self, now: float) -> bool:
         """Dipanggil berkala oleh ticker runtime. True = cache baru saja dikosongkan."""
         with self._lock:

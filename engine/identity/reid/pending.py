@@ -343,6 +343,27 @@ class PendingIdentities:
             return track.anon_id, SOURCE_REID
         return None, None
 
+    # ---------------------------------------------------------- hapus orang
+
+    def forget_person(self, person_id: str) -> Tuple[int, Tuple[str, ...]]:
+        """`forget_person`: buang data penampilan orang ini dari ReID hari ini.
+
+        Prototipe galerinya dihapus (dan tidak diisi lagi sampai purge harian),
+        dan klaim ReID ke orang ini dicabut dari track TANPA wajah. Track yang
+        identitasnya dari wajah tidak disentuh: itu urusan arbiter, yang
+        melepasnya saat verifikasi ulang terhadap matriks tanpa orang itu.
+        Kelompok ANON yang SUDAH diselesaikan ke orang ini tidak dibatalkan:
+        `identity.resolved` sudah terkirim, dan menarik kembali interval adalah
+        keputusan backend. Mengembalikan (jumlah prototipe, track yang dicabut).
+        """
+        removed = self.gallery.forget(person_id)
+        revoked: List[str] = []
+        for track in list(self._tracks.values()):
+            if track.person_id == person_id and not track.from_face:
+                self._revoke(track)
+                revoked.append(track.span.track_uuid)
+        return removed, tuple(sorted(revoked))
+
     # ---------------------------------------------------------------- harian
 
     def purge_day(self, new_day: str) -> PurgeReport:

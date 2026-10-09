@@ -504,6 +504,12 @@ class EngineRuntime:
                 if self._matcher is not None:
                     self._matcher.rebuild()
         logger.info("forget_person %s: %d referensi dihapus", person_id, removed)
+        if self._reid is not None and person_id:
+            # Data penampilan tubuh hari ini ikut dihapus (paket ea-r7). Tidak masuk
+            # `removed_references`: field itu kontraknya referensi wajah.
+            prototypes, revoked = self._reid.coordinator.forget_person(person_id)
+            logger.info("forget_person %s: ReID %d prototipe tubuh dihapus, %d klaim dicabut",
+                        person_id, prototypes, revoked)
         return {
             "type": "forget_result", "v": 1, "ts": events.rfc3339(time.time()),
             "request_id": request_id, "person_id": person_id,

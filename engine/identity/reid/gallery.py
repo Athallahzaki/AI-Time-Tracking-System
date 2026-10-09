@@ -108,6 +108,9 @@ class DailyGallery:
         self._merge = merge_similarity
         self._people: Dict[str, PrototypeSet] = {}
         self.rejected = 0  # embedding yang ditolak karena bukan berjangkar wajah
+        # Orang yang dihapus (`forget_person`) hari ini: tidak diisi lagi sampai
+        # purge harian, walau track yang masih memegang wajahnya terus mengirim.
+        self._blocked: set = set()
 
     @property
     def day(self) -> str:
@@ -133,6 +136,8 @@ class DailyGallery:
         """Tambahkan embedding. Hanya `source="face"` yang diterima."""
         if source != "face":
             self.rejected += 1
+            return False
+        if person_id in self._blocked:
             return False
         protos = self._people.get(person_id)
         if protos is None:
@@ -162,10 +167,17 @@ class DailyGallery:
         out.sort(key=lambda item: item[1], reverse=True)
         return out
 
+    def forget(self, person_id: str) -> int:
+        """Hapus prototipe orang ini dan blokir sampai purge; kembalikan jumlah prototipe."""
+        self._blocked.add(person_id)
+        protos = self._people.pop(person_id, None)
+        return len(protos) if protos is not None else 0
+
     def purge_day(self, new_day: Optional[str] = None) -> int:
         """Kosongkan galeri; kembalikan jumlah orang yang dibuang."""
         purged = len(self._people)
         self._people.clear()
+        self._blocked.clear()
         self.rejected = 0
         if new_day is not None:
             self._day = _check_day(new_day)

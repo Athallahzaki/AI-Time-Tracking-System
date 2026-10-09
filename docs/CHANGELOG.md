@@ -7,6 +7,31 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-10-09 · paket ea-r7 — `forget_person` ikut menghapus data tubuh ReID
+
+Dasar: ea-r6. Hanya berpengaruh bila `reid.enabled: true` (default mati).
+
+**Apa yang berubah**
+
+- `identity/reid/gallery.py`: `DailyGallery.forget(person_id)` menghapus prototipe tubuh orang itu dan
+  memblokirnya sampai purge harian (track yang masih memegang wajahnya tidak mengisi galeri lagi
+  sebelum arbiter melepasnya).
+- `identity/reid/pending.py`: `PendingIdentities.forget_person` = galeri + cabut klaim ReID
+  (`reid`/`reid_retro`) di track tanpa wajah. Track berwajah tidak disentuh (urusan arbiter);
+  `identity.resolved` yang sudah terkirim tidak dibatalkan (keputusan backend).
+- `pipeline/reid_coordinator.py`: `forget_person` di bawah kunci, label dicabut di kamera pemiliknya
+  (presence tanpa interval atas nama orang itu; embedding berikutnya = ANON baru).
+- `runtime/service.py`: handler `forget_person` memanggilnya dan mencatat jumlahnya di log.
+  `forget_result.removed_references` tetap jumlah referensi wajah (kontrak tidak berubah).
+
+**Alasan.** Penghapusan orang (P14, E13) harus mencakup data penampilan tubuh hari itu, bukan menunggu
+purge tengah malam.
+
+**Cara uji.** `python -m pytest engine/tests -q` (635 lulus, 7 dilewati seperti sebelumnya); +3 di
+`test_reid_runtime.py` (galeri lupa + blokir sampai purge; klaim ReID dicabut, embedding ulang jadi
+ANON, interval bukan atas nama orang yang dihapus, conformance lulus; handler runtime + balasan lolos
+skema). `policy_grep` bersih.
+
 ## 2026-10-09 · paket ea-r6 — Engine sebagai tugas Windows + watchdog + auto-start
 
 Dasar: ea-r5. Dokumen 12 §2.4 (stabil 3 hari tanpa intervensi, pulih sendiri) dan timeline

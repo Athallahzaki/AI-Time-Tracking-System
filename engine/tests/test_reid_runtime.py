@@ -551,3 +551,69 @@ def test_ticker_runtime_memanggil_jadwal_purge(monkeypatch):
     finally:
         runtime.close()
     assert calls, "ticker tidak pernah memeriksa jadwal purge ReID"
+
+
+# --------------------------------------------------------------------------
+# forget_person -> data tubuh ikut dihapus (paket ea-r7)
+# --------------------------------------------------------------------------
+
+def test_galeri_lupa_orang_dan_diblokir_sampai_purge():
+    from engine.identity.reid import DailyGallery
+
+    gallery = DailyGallery("2026-10-09")
+    assert gallery.add("4471", np.eye(1, 8)[0], source="face")
+    assert gallery.forget("4471") == 1
+    assert "4471" not in gallery
+    assert not gallery.add("4471", np.eye(1, 8)[0], source="face"), "diisi lagi sebelum purge"
+    assert gallery.forget("tidak-ada") == 0
+    gallery.purge_day("2026-10-10")
+    assert gallery.add("4471", np.eye(1, 8)[0], source="face"), "blokir harus hilang saat purge"
+
+
+def test_lupa_orang_mencabut_klaim_reid_tetapi_tidak_klaim_wajah():
+    runtime, messages, emit = _runtime()
+    r1 = _Kamera("r1", runtime, emit)
+    r1.masuk("tr_r1-a", 1, 3, 0.0)
+    r1.wajah("tr_r1-a", "4471", 0.0)
+    _jalan([r1], 0.0, 2.0, runtime)
+    r1.keluar("tr_r1-a", 2.0)
+    r1.masuk("tr_r1-b", 2, 3, 40.0)              # tubuh sama tanpa wajah -> reid 4471
+    _jalan([r1], 40.0, 42.0, runtime)
+    assert r1.tap.label_of("tr_r1-b") == ("4471", "reid")
+
+    prototypes, revoked = runtime.coordinator.forget_person("4471")
+    assert prototypes >= 1 and revoked == 1
+    _jalan([r1], 42.5, 50.0, runtime)
+    assert r1.tap.label_of("tr_r1-b") is None, "klaim ReID ke orang yang dihapus masih menempel"
+    _jalan([r1], 50.5, 56.0, runtime)            # embedding ulang dtk 55: galeri kosong + diblokir
+    label = r1.tap.label_of("tr_r1-b")
+    assert label is not None and label[0].startswith("ANON-"), label
+    assert runtime.coordinator.core.gallery.persons() == []
+    r1.keluar("tr_r1-b", 56.0)
+    owners = [m["person_id"] for m in messages if m["type"] == "presence.interval"
+              and m.get("track_uuid") == "tr_r1-b"]
+    assert owners == [label[0]], "interval harus atas nama ANON, bukan orang yang dihapus"
+    assert ConformanceChecker().check(messages).ok
+
+
+def test_handler_forget_person_runtime_ikut_menghapus_reid():
+    from engine.runtime import EngineRuntime, RuntimeOptions
+
+    base = dataclasses.replace(load_config(), source_type="mock", auto_warmup=False)
+    config = dataclasses.replace(
+        base,
+        recognition=dataclasses.replace(base.recognition, enabled=True, recognizer="onnx_face",
+                                        face_detector_model="det.onnx", face_embedder_model="emb.onnx"),
+        reid=ReidSettings(enabled=True),
+    )
+    runtime = EngineRuntime(config=config, options=RuntimeOptions(tcp=("127.0.0.1", 0)),
+                            recognize=lambda track, frame: None, reid_embed=_embed_warna)
+    try:
+        _isi_galeri(runtime._reid.coordinator, T0)
+        reply = runtime._on_forget_person({"type": "forget_person", "request_id": "rq1",
+                                           "person_id": "4471"})
+        assert runtime._reid.coordinator.core.gallery.persons() == []
+        assert set(reply) == {"type", "v", "ts", "request_id", "person_id", "removed_references"}
+        assert not SchemaValidator().validate_message(reply, expected_channel="control")
+    finally:
+        runtime.close()
