@@ -156,6 +156,7 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
         cpu_threads=int(core.get("cpu_threads", 0) or 0),
         scheduler=str(core.get("scheduler", "free")),
         tick_fps=(float(core["tick_fps"]) if core.get("tick_fps") is not None else None),
+        analysis_off_mode=str(core.get("analysis_off_mode", "stop")),
         ingest=IngestConfig(
             backend=str(ing.get("backend", "pyav")),
             rtsp_transport=str(ing.get("rtsp_transport", "tcp")),

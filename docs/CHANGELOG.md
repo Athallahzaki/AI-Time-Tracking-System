@@ -7,6 +7,37 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-10-09 · paket ea-r5 — `schedule_off` di engine asli (di belakang flag)
+
+Dasar: ea-r4. Kontrak ea-k1 (`schedule_off`) kini bisa dipancarkan engine sungguhan, bukan hanya
+`fake_engine`. **Default tidak berubah**: `core.analysis_off_mode: "stop"`.
+
+**Apa yang berubah**
+
+- `config/schema.py` + `loader.py`: `core.analysis_off_mode` = `"stop"` (default, perilaku lama:
+  `enabled=false` menutup kamera, track `engine_shutdown`, menyala lagi = `camera.online` baru) atau
+  `"pause"` (kontrak ea-k1).
+- Mode `pause`: `runtime/service.py` (`_reconcile`) tidak menutup kamera yang URI-nya sama, tetapi
+  memanggil `CameraSupervisor.set_analysis_enabled`. Di thread kamera (`_apply_analysis_switch`):
+  track hidup ditutup `track.ended reason=schedule_off`, interval `end_reason=schedule_off`,
+  `end_source=forced` (zona `door` dicatat `interior`: jadwal bukan orang keluar pintu); ReID ikut
+  menutup track-nya. Stream tetap dibaca (epoch, lag, offset tetap dipantau; reconnect sungguhan
+  saat jeda tetap `camera.failed` + `camera.online`), tanpa detector, overlay, heartbeat. Menyala
+  lagi: tanpa `camera.online` baru; tracker dikosongkan saat jeda, jadi orangnya track baru.
+  Kamera yang dihapus dari daftar atau ganti URI tetap ditutup seperti biasa.
+- `pipeline/engine.py`: `set_analysis_paused()` (reset tracker, lewati detector).
+- `api/events.py`: `schedule_off` di `END_REASONS` (sebelumnya engine bahkan tidak bisa memancarkannya).
+- `runtime/camera.py`: `analysis_paused` di `health()` kamera.
+
+**Alasan.** Dokumen 12 §3.3 (jadwal analisis) dan timeline dokumen 14 (EA 26–30 Okt). Default tetap
+`stop` karena backend belum mengenal `end_reason: schedule_off` (`backend/schemas/protocol.py`) dan
+tombol start/stop operator di backend memakai `enabled=false` yang sama.
+
+**Cara uji.** `python -m pytest engine/tests -q` (622 lulus, 7 dilewati seperti sebelumnya); baru
+`test_schedule_off.py` (5: event, config, jeda-lanjut pada kamera mock dengan orang dikenali lolos
+skema + `ConformanceChecker` dengan tepat satu `camera.online` dan tanpa `camera.failed`,
+rekonsiliasi `pause` dan `stop`). `policy_grep` bersih.
+
 ## 2026-10-09 · paket ea-r4 — Cache ReID dikosongkan terjadwal tiap hari
 
 Dasar: ea-r3. Default tetap mati (`reid.enabled: false`). Keputusan ea-r3 (ANON tanpa

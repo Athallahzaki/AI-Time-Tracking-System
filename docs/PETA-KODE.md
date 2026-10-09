@@ -1,7 +1,7 @@
 # Peta Kode
 
 Untuk menemukan file tanpa menjelajah repo. Perbarui saat menambah/memindah modul.
-Per 9 Oktober 2026 (paket ea-r2).
+Per 9 Oktober 2026 (paket ea-r5).
 
 ## Alur data
 
@@ -20,7 +20,7 @@ frontend (Vue + Vite): dashboard, overlay kotak, enrollment, pengaturan
 |---|---|
 | Entry point, argumen CLI | `runtime/__main__.py` |
 | Rakit kamera, `set_cameras`, health, detector bersama, gerbang detak | `runtime/service.py` |
-| Loop per kamera, event presence, overlay `view.frame` (`_maybe_view`) | `runtime/camera.py` |
+| Loop per kamera, event presence, overlay `view.frame` (`_maybe_view`), jeda jadwal analisis `schedule_off` (`_apply_analysis_switch`, `core.analysis_off_mode`) | `runtime/camera.py` |
 | Penjadwal berdetak (TickClock, TickGate, kerangka TickScheduler) | `runtime/tick_scheduler.py` |
 | Langkah pipeline per frame, decimation PTS | `pipeline/engine.py` |
 | Worker rekognisi asinkron | `pipeline/recognition_worker.py` |
@@ -35,7 +35,9 @@ frontend (Vue + Vite): dashboard, overlay kotak, enrollment, pengaturan
 | Crop orang/kepala | `perception/person_cropper.py` |
 | Wajah (SCRFD + AuraFace ONNX) | `identity/face_onnx.py` |
 | Matcher, arbiter identitas, admission, enrollment | `identity/matcher.py`, `identity/arbiter.py`, `identity/admission.py`, `identity/enrollment.py` |
-| ReID berjangkar wajah (logika, belum dirakit ke runtime): pesan antrean, galeri harian, aturan gabung, ANON-xxxx | `identity/reid/messages.py`, `identity/reid/gallery.py`, `identity/reid/merge.py`, `identity/reid/pending.py` (tes `test_reid_*.py`) |
+| ReID berjangkar wajah (logika): pesan antrean, galeri harian, aturan gabung, ANON-xxxx | `identity/reid/messages.py`, `identity/reid/gallery.py`, `identity/reid/merge.py`, `identity/reid/pending.py` (tes `test_reid_*.py`) |
+| ReID model + gerbang crop (dimuat hanya bila `reid.enabled`): OSNet ONNX, pra-proses = kit latih, SHA-256 | `identity/reid/embedder_onnx.py`, `identity/reid/quality.py` (tes `test_reid_embedder.py`) |
+| ReID dirakit ke kamera (default mati): koordinator + `identity.resolved`, worker embedding, sisi kamera | `pipeline/reid_coordinator.py`, `pipeline/reid_worker.py`, `pipeline/reid_tap.py` (tes `test_reid_runtime.py`); model di `engine/models/reid/` (di-ignore) |
 | Binding track ↔ identitas, interval presence | `presence/binding.py`, `presence/assembler.py` |
 | Server NDJSON, pembuat event, outbox SQLite | `api/server.py`, `api/events.py`, `api/outbox.py` |
 | Referensi wajah tersimpan | `store/references.py` (data: `engine/data/references.sqlite3`, di-ignore) |
@@ -85,7 +87,7 @@ generator `.xlsx`, halaman report, penyaringan per peran di semua endpoint.
 | nginx frontend (proxy API, HLS, WHEP) | `deploy/frontend/nginx/` |
 | Laptop engine (Windows) | `deploy/laptop/start-engine.ps1`, `start-mediamtx.ps1`, `firewall.ps1` |
 | VPS WebRTC | `deploy/vps/nginx-stream-webrtc.conf` |
-| Uji lag/gladi, ringkasan | `scripts/lag_probe.py`, `scripts/summarize_gladi.py` |
+| Uji lag/gladi, ringkasan (`lag_probe.py --events-out` = rekam event NDJSON untuk validator) | `scripts/lag_probe.py`, `scripts/summarize_gladi.py` |
 | Spike NVDEC | `scripts/spike_nvdec.py` |
 | Zip ramping untuk sesi Claude | `scripts/pack_for_claude.py` |
 | Kit latih ReID OSNet dari RandPerson (laptop; torch di luar runtime engine) | `tools/reid_train/` — `README.md` (langkah dari nol), `prepare_randperson.py`, `randperson_dataset.py`, `train_osnet.py`, `export_onnx.py`, `eval_reid.py`, `reid_common.py`, `MODEL-CARD.md`, `requirements-train*.txt`, tes di `tests/` (jalankan terpisah: `python -m pytest tools/reid_train/tests -q`) |
@@ -96,6 +98,7 @@ generator `.xlsx`, halaman report, penyaringan per peran di semua endpoint.
 |---|---|
 | Aturan untuk Claude | `CLAUDE.md` |
 | Status kerja terakhir | `docs/SERAH-TERIMA.md` |
+| Serah terima per paket EA (berlaku bersama SERAH-TERIMA.md) | `docs/SERAH-TERIMA-EA-K1.md`, `docs/SERAH-TERIMA-EA-R3.md` |
 | Riwayat perubahan (entri teratas cukup) | `docs/CHANGELOG.md` |
 | Runbook demo jarak jauh + uji A/B | `docs/DEMO-REMOTE.md` |
 | Protokol (rinci) | `docs/ENGINE_PROTOCOL.md` |

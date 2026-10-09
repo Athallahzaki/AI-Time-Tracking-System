@@ -1,6 +1,6 @@
-# Serah terima EA — paket ea-r3 + ea-r4: model ReID OSNet ONNX dirakit ke engine
+# Serah terima EA — paket ea-r3 s.d. ea-r5: ReID dirakit ke engine, `schedule_off`
 
-9 Oktober 2026 · Jalur EA · Rincian: `docs/CHANGELOG.md` (ea-r3, ea-r4). File ini **tidak** menggantikan
+9 Oktober 2026 · Jalur EA · Rincian: `docs/CHANGELOG.md` (ea-r3, ea-r4, ea-r5). File ini **tidak** menggantikan
 `docs/SERAH-TERIMA.md` (status EB, paket eb-r10); keduanya berlaku.
 
 ## Selesai
@@ -11,7 +11,9 @@
   demo-4060-tick, dan demo-1060. `lag_probe.py --events-out` untuk memeriksa aliran tanpa backend.
 - ea-r4: cache ReID (galeri tubuh, kelompok ANON, rentang) dikosongkan **terjadwal tiap hari** pada
   `reid.daily_purge_time` (jam lokal, default `"00:00"`), lewat ticker runtime, walau tidak ada orang terlihat.
-- Tes: 617 lulus / 7 dilewati (sama seperti sebelumnya) di `engine/tests`; 47 tes ReID baru + 1 tes probe.
+- ea-r5: `schedule_off` di engine asli, di belakang `core.analysis_off_mode: "pause"` (default `"stop"` = lama).
+  Jeda analisis: track ditutup `schedule_off` + forced, kamera tetap hidup, tanpa `camera.failed`/`camera.online` baru.
+- Tes: 622 lulus / 7 dilewati (sama seperti sebelumnya) di `engine/tests`; 47 tes ReID + 5 `schedule_off` + 1 probe.
   `policy_grep` bersih. **Default tidak berubah** (`reid.enabled: false`).
 
 ## Belum
@@ -23,6 +25,10 @@
    heartbeat/snapshot `reid` akan gagal validasi, dan interval `ANON-…` bisa terhitung sebagai kehadiran.
 3. `forget_person` belum menghapus prototipe tubuh orang itu dari galeri harian (hilang pada purge harian berikutnya).
 4. Waktu tempuh antar lokasi belum diukur (`travel_time_seconds: {}`, default ketat 30 dtk).
+5. Mode `pause` belum aman dengan backend sungguhan: `EndReason` backend belum punya `schedule_off`, dan tombol
+   start/stop operator memakai `enabled=false` yang sama (dengan `pause`, "stop" operator berarti stream tetap dibaca).
+   BE perlu memutuskan: jadwal vs stop operator dibedakan, atau stop operator ikut berarti jeda.
+6. Engine sebagai service Windows + watchdog + auto-start (EA, dok 14: 26–30 Okt) belum dikerjakan.
 
 ## Keputusan
 
@@ -42,6 +48,8 @@ Masih perlu disetujui:
   tidak hilang); ia dinilai ulang dari galeri kosong pada embedding berikutnya. Bila operasional melewati tengah
   malam, pindahkan jam purge ke luar jam operasional.
 - Line ending: file baru mengikuti LF seperti seluruh repo (butir lama `* text=auto` di SERAH-TERIMA EB).
+- ea-r5: jadwal analisis di belakang flag (default lama) sampai BE siap. Saat jeda, stream tetap di-decode (CPU)
+  supaya kamera "tetap hidup" sesuai kontrak; biayanya perlu diukur di laptop (langkah 8).
 
 ## Catatan untuk dokumen tim (belum diubah; tidak ada di repo)
 
@@ -70,7 +78,13 @@ Masih perlu disetujui:
    Harap di log tepat pada jam itu: `ReID: cache hari ... dikosongkan (...)`, sekali saja; sesudahnya `kelompok ANON-...`
    baru bertanggal hari berikutnya. Orang yang masih terlihat tetap berlabel (tidak ada interval yang hilang).
 
+8. `schedule_off` (tanpa backend): profil lokal dengan `core.analysis_off_mode: pause`; jalankan engine, sambung
+   `lag_probe.py --events-out`, dan dari klien kirim `set_cameras` dengan `enabled: false` untuk cam01 lalu `true`.
+   Harap: `track.ended reason schedule_off` hanya di cam01, tidak ada `camera.failed`, satu `camera.online` per
+   kamera; validator 0 galat. Catat CPU proses engine saat cam01 dijeda (decode tetap jalan).
+
 ## Langkah berikutnya
 
 BE: `IdentitySource` reid/reid_retro + handler `identity.resolved` (SERAH-TERIMA-EA-K1 §2) sebelum ReID dinyalakan
-dengan backend. EA: kalibrasi ambang dari crop lokasi, ukur waktu tempuh, `forget_person` → galeri ReID.
+dengan backend; `EndReason.SCHEDULE_OFF` + keputusan stop operator vs jadwal sebelum `analysis_off_mode: pause`.
+EA: service Windows + watchdog, kalibrasi ambang dari crop lokasi, ukur waktu tempuh, `forget_person` → galeri ReID.

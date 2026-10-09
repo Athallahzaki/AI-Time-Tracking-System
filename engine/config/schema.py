@@ -506,6 +506,14 @@ class EngineConfig:
     # Detak per detik untuk scheduler "tick". None = pakai target_fps. Pilih DI
     # BAWAH kapasitas terukur; cadangan itulah yang membuat fps tidak berayun.
     tick_fps: Optional[float] = None
+    # Arti `set_cameras enabled=false` untuk kamera yang sedang jalan.
+    # "stop" (default, perilaku lama): kamera ditutup, track berakhir engine_shutdown,
+    #   menyala lagi = stream dibuka ulang + camera.online baru.
+    # "pause" (kontrak ea-k1, jadwal analisis dok 12 §3.3): stream tetap dibaca tanpa
+    #   detector, track ditutup `schedule_off` + forced, tanpa camera.failed; menyala
+    #   lagi tanpa camera.online baru dan orangnya jadi track baru. Butuh backend yang
+    #   mengenal end_reason schedule_off.
+    analysis_off_mode: str = "stop"
 
     ingest: IngestConfig = field(default_factory=IngestConfig)
     detector: DetectorConfig = field(default_factory=DetectorConfig)
@@ -528,6 +536,8 @@ class EngineConfig:
     def __post_init__(self) -> None:
         if self.cpu_threads < 0:
             raise ValueError("core.cpu_threads must be >= 0 (0 = tidak dibatasi).")
+        if self.analysis_off_mode not in ("stop", "pause"):
+            raise ValueError("core.analysis_off_mode must be 'stop' or 'pause'.")
         if self.scheduler not in ("free", "tick"):
             raise ValueError("core.scheduler must be 'free' or 'tick'.")
         if self.tick_fps is not None and self.tick_fps <= 0:

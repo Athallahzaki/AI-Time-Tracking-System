@@ -84,10 +84,28 @@ class VisionEngine:
         # Hanya dinyalakan untuk sumber live dengan slot frame terbaru; file
         # tetap memakai decimation supaya tidak tertinggal dari waktu putar.
         self.external_pacing = False
+        # Analisis dijeda jadwal (core.analysis_off_mode: pause, kontrak ea-k1
+        # `schedule_off`): frame tetap dibaca supaya stream tetap hidup, tetapi
+        # detector dilewati dan tracker hanya menerima nol deteksi.
+        self.analysis_paused = False
 
         # Known tracks are retained until the tracker stops returning them.
         # This lets us distinguish LOST from actual removal.
         self._known_tracks: dict[int, Track] = {}
+
+    def set_analysis_paused(self, paused: bool) -> None:
+        """Jeda/lanjutkan analisis tanpa menutup sumber.
+
+        Saat mulai jeda tracker dikosongkan, jadi track lama berakhir (REMOVED)
+        di langkah berikutnya, dan orang yang sama sesudah analisis menyala lagi
+        adalah track baru, bukan lanjutan track sebelum jeda.
+        """
+        if paused and not self.analysis_paused:
+            reset = getattr(self._tracker, "reset", None)
+            if callable(reset):
+                reset()
+            self._cached_detections = []
+        self.analysis_paused = bool(paused)
 
     def add_listener(self, listener: TrackListener) -> VisionEngine:
         """Subscribes a track listener."""
@@ -186,7 +204,9 @@ class VisionEngine:
         self._frame_count += 1
 
         # 2. Detection cadence
-        if (
+        if self.analysis_paused:
+            detections = []
+        elif (
             self._frame_count % self._config.detection_interval == 0
             or not self._cached_detections
         ):

@@ -141,8 +141,17 @@ class CameraSupervisor:
         recognition_executor: Any = None,
         detector_provider: Optional[Callable[[str, EngineConfig], Any]] = None,
         tick_gate: Any = None,
+        reid: Any = None,
     ) -> None:
         self.spec = spec
+        # ReID (pipeline/reid_coordinator.ReidRuntime) milik runtime; None =
+        # mati, dan tidak satu baris pun di bawah berperilaku beda.
+        self._reid = reid
+        self._reid_tap: Any = None
+        # Jadwal analisis (core.analysis_off_mode: pause). `_analysis_wanted` ditulis
+        # thread rekonsiliasi; peralihannya dijalankan di thread kamera ini.
+        self._analysis_wanted = True
+        self._analysis_on = True
         # Penjadwal berdetak tahap 1 (runtime/tick_scheduler.py). None = loop
         # bebas seperti semula.
         self._tick_gate = tick_gate
@@ -213,6 +222,23 @@ class CameraSupervisor:
     @property
     def state(self) -> str:
         return self.stats.state
+
+    @property
+    def analysis_paused(self) -> bool:
+        return not self._analysis_on
+
+    def set_analysis_enabled(self, enabled: bool) -> None:
+        """Jadwal analisis (kontrak ea-k1): kamera tetap hidup, analisisnya dijeda.
+
+        Diterapkan oleh thread kamera di langkah berikutnya: track yang hidup
+        ditutup `schedule_off` (forced), tanpa camera.failed; saat menyala lagi
+        tidak ada camera.online baru dan orangnya menjadi track baru.
+        """
+        if enabled != self._analysis_wanted:
+            logger.info("[%s] analisis %s oleh jadwal", self.spec.camera_id,
+                        "dinyalakan" if enabled else "dimatikan")
+        self._analysis_wanted = bool(enabled)
+        self.spec = CameraSpec(self.spec.camera_id, self.spec.uri, self.spec.door_region, bool(enabled))
 
     def set_door_region(self, region: Optional[Sequence[float]]) -> None:
         """Applied to a running camera: a zone is a label, not a stream."""
@@ -287,6 +313,7 @@ class CameraSupervisor:
             while not self._stop.is_set():
                 if gate is not None and not gate.wait(camera_id, self._stop):
                     break
+                self._apply_analysis_switch()
                 frame, tracks = self._engine.step()
                 if frame is None:
                     outcome = "failed" if self._is_network else "finished"
@@ -364,7 +391,10 @@ class CameraSupervisor:
         self._assembler = PresenceAssembler(
             emit=self._emit_event, zones=self._zoner.labeller,
             interval_prefix=f"iv_{nonce}",
+            interval_gate=self._reid.coordinator.interval_gate if self._reid is not None else None,
         )
+        if self._reid is not None:
+            self._reid_tap = self._reid.tap_for(camera_id, self._assembler)
         self._binding = EngineBinding(
             arbiter=IdentityArbiter(matcher=self._matcher or _empty_matcher()),
             assembler=self._assembler,
@@ -425,6 +455,9 @@ class CameraSupervisor:
 
         self._engine = engine
         self._source = source
+        # Engine baru selalu mulai menganalisis; jeda (bila diminta) diterapkan
+        # di langkah pertama oleh `_apply_analysis_switch`.
+        self._analysis_on = True
         self.stats.measured_fps = source_fps
         # Dengan penjadwal berdetak, sumber live berslot "frame terbaru" tidak
         # di-decimate lagi: detaknya yang menentukan irama (dokumen 04 §14.3).
@@ -471,6 +504,12 @@ class CameraSupervisor:
 
         self._observe_lag(frame, pts)
         self._correct_offset()
+        if not self._analysis_on:
+            # Analisis dijeda jadwal: stream, epoch, lag, dan offset tetap dipantau;
+            # tidak ada track, overlay, heartbeat, atau ReID.
+            return
+        if self._reid_tap is not None:
+            self._reid_tap.step(frame, tracks, pts)
         self._remember_live(frame, tracks, pts)
         self._heartbeats(pts)
         self._unidentified(pts)
@@ -491,6 +530,8 @@ class CameraSupervisor:
             camera_id, wallclock_now=time.time(),
             pts=self.stats.last_pts, reason="stream_reconnected", retry_in_seconds=0.0,
         )
+        if self._reid_tap is not None:
+            self._reid_tap.close_all()
         self._live.clear()
         self._last_heartbeat.clear()
         self._track_born_pts.clear()
@@ -515,13 +556,22 @@ class CameraSupervisor:
             seen.add(uuid)
             self._track_born_pts.setdefault(uuid, pts)
             identity = track.attributes.get("identity_state")
+            person_id = getattr(identity, "person_id", None)
+            source = getattr(identity, "identity_source", None)
+            face_person_id = person_id
+            if person_id is None and self._reid_tap is not None:
+                # Label ReID (ANON-xxxx / reid / reid_retro) hanya untuk track tanpa wajah.
+                label = self._reid_tap.label_of(uuid)
+                if label is not None:
+                    person_id, source = label
             self._live[uuid] = {
                 "track_uuid": uuid,
                 "camera_id": self.spec.camera_id,
                 "stream_epoch": frame.metadata.stream_epoch,
                 "identity_state": identity,
-                "person_id": getattr(identity, "person_id", None),
-                "identity_source": getattr(identity, "identity_source", None),
+                "person_id": person_id,
+                "face_person_id": face_person_id,
+                "identity_source": source,
                 "since_pts": self._track_born_pts[uuid],
                 "zone": track.attributes.get("zone", ZONE_INTERIOR),
                 "bbox": _normalized(track, frame),
@@ -564,7 +614,8 @@ class CameraSupervisor:
         and probably the one the backend currently believes is on a break.
         """
         for uuid, entry in self._live.items():
-            if entry["person_id"] is not None or uuid in self._unidentified_reported:
+            # Berdasarkan WAJAH: track berlabel ANON tetap orang yang belum dikenali.
+            if entry["face_person_id"] is not None or uuid in self._unidentified_reported:
                 continue
             duration = pts - self._track_born_pts.get(uuid, pts)
             if duration < self._unidentified_after:
@@ -611,10 +662,16 @@ class CameraSupervisor:
             if not uuid:
                 continue
             identity = track.attributes.get("identity_state")
+            person_id = getattr(identity, "person_id", None)
+            source = getattr(identity, "identity_source", None)
+            if person_id is None and self._reid_tap is not None:
+                label = self._reid_tap.label_of(uuid)
+                if label is not None:
+                    person_id, source = label
             box: Dict[str, Any] = {
                 "track_uuid": uuid,
                 "bbox": list(_normalized(track, frame)),
-                "person_id": getattr(identity, "person_id", None),
+                "person_id": person_id,
                 # Relative media time lets a direct MP4 player select the box
                 # belonging to video.currentTime, even when inference is faster
                 # than realtime.
@@ -622,7 +679,6 @@ class CameraSupervisor:
                     0.0, pts - self._track_born_pts.get(uuid, pts)
                 ),
             }
-            source = getattr(identity, "identity_source", None)
             if source:
                 box["identity_source"] = source
             # Detector score of the detection this track was last matched to.
@@ -636,6 +692,25 @@ class CameraSupervisor:
         # previous person's box over later frames that contain nobody.
         clock = self._assembler.clock_for(self.spec.camera_id)
         self._emit_view(events.view_frame(clock, pts, boxes))
+
+    # -- jadwal analisis --------------------------------------------------
+
+    def _apply_analysis_switch(self) -> None:
+        wanted = self._analysis_wanted
+        if wanted == self._analysis_on or self._engine is None:
+            return
+        if not wanted:
+            self._close_open_tracks(reason="schedule_off")
+            self._last_heartbeat.clear()
+            self._track_born_pts.clear()
+            self._unidentified_reported.clear()
+            self._engine.set_analysis_paused(True)
+            self._analysis_on = False
+            logger.info("[%s] analisis dijeda (schedule_off); stream tetap dibaca", self.spec.camera_id)
+        else:
+            self._engine.set_analysis_paused(False)
+            self._analysis_on = True
+            logger.info("[%s] analisis dilanjutkan", self.spec.camera_id)
 
     # -- recognition bookkeeping -----------------------------------------
 
@@ -678,11 +753,22 @@ class CameraSupervisor:
         never finished, and the backend would carry it forward for ever."""
         if self._assembler is None:
             return
+        try:
+            self._close_tracks_assembler(reason)
+        finally:
+            if self._reid_tap is not None:
+                self._reid_tap.close_all()
+
+    def _close_tracks_assembler(self, reason: str) -> None:
         for uuid, entry in list(self._live.items()):
+            zone = entry.get("zone", ZONE_INTERIOR)
+            if reason == "schedule_off" and zone == "door":
+                # Jadwal yang mematikan analisis bukan orang yang keluar lewat pintu.
+                zone = ZONE_INTERIOR
             try:
                 self._assembler.track_ended(
                     uuid, pts=self.stats.last_pts, reason=reason,
-                    zone=entry.get("zone", ZONE_INTERIOR), end_source="forced",
+                    zone=zone, end_source="forced",
                 )
             except Exception:  # noqa: BLE001
                 logger.exception("[%s] gagal menutup %s", self.spec.camera_id, uuid)
@@ -784,6 +870,7 @@ class CameraSupervisor:
             "reopen_attempts": self.stats.attempts,
             "last_pts": round(self.stats.last_pts, 3),
             "error": self.stats.error,
+            "analysis_paused": not self._analysis_on,
             **binding,
         }
 

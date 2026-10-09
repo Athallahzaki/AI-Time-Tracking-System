@@ -28,9 +28,14 @@ PROTOCOL_VERSION = 1
 
 ZONES = {"door", "interior", "frame_edge"}
 BOUNDARY_SOURCES = {"face", "tracking", "forced"}
+# $defs.identity_source (kontrak ea-k1). Terpisah dari BOUNDARY_SOURCES.
+IDENTITY_SOURCES = {"face", "tracking", "reid", "reid_retro"}
+RESOLVE_REASONS = {"face_confirmed", "group_merged"}
 END_REASONS = {
     "left_frame", "occluded_timeout", "merged_into_other_track",
     "camera_lost", "engine_shutdown", "identity_released",
+    # Analisis kamera dimatikan jadwal (kontrak ea-k1); selalu end_source forced.
+    "schedule_off",
 }
 
 
@@ -125,7 +130,7 @@ def track_heartbeat(
     clock: PtsClock, track_uuid: str, pts: float,
     identity_source: str, confidence: float, person_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    _require(identity_source in {"face", "tracking"}, f"identity_source tidak dikenal: {identity_source}")
+    _require(identity_source in IDENTITY_SOURCES, f"identity_source tidak dikenal: {identity_source}")
     message = _envelope("track.heartbeat", clock.offset + pts)
     message.update(
         track_uuid=track_uuid, person_id=person_id, pts=pts, at=clock.at(pts),
@@ -157,6 +162,42 @@ def track_identity_changed(
         track_uuid=track_uuid, from_person_id=from_person_id, to_person_id=to_person_id,
         reason=reason, disagreement_count=disagreement_count, pts=pts, at=clock.at(pts),
     )
+    return message
+
+
+def identity_resolved(
+    now_wallclock: float,
+    anon_id: str,
+    person_id: str,
+    at: float,
+    reason: str,
+    track_uuids: Iterable[str],
+    moved_intervals: Iterable[str],
+    trigger_track_uuid: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Kelompok ANON diselesaikan ke karyawan (kontrak ea-k1).
+
+    Sengaja tanpa pts/stream_epoch: kelompok bisa melintasi kamera, jadi waktu
+    kejadian hanya `at` (jam dinding). `moved_intervals` wajib lengkap: setiap
+    interval yang SUDAH dipancarkan dengan person_id=anon_id.
+    """
+    tracks = list(dict.fromkeys(track_uuids))
+    moved = list(dict.fromkeys(moved_intervals))
+    _require(anon_id.startswith("ANON-"), f"anon_id wajib berawalan ANON-: {anon_id}")
+    _require(not person_id.upper().startswith("ANON-"), "person_id tujuan tidak boleh ANON-")
+    _require(reason in RESOLVE_REASONS, f"reason tidak dikenal: {reason}")
+    _require(len(tracks) >= 1, "identity.resolved tanpa track")
+    _require(all(t.startswith("tr_") for t in tracks), "track_uuid wajib berawalan tr_")
+    _require(all(i.startswith("iv_") for i in moved), "interval_id wajib berawalan iv_")
+    _require(trigger_track_uuid is None or trigger_track_uuid in tracks,
+             "track pemicu harus anggota track_uuids")
+    message = _envelope("identity.resolved", now_wallclock)
+    message.update(
+        anon_id=anon_id, person_id=person_id, at=rfc3339(at), reason=reason,
+        track_uuids=tracks, moved_intervals=moved,
+    )
+    if trigger_track_uuid is not None:
+        message["trigger_track_uuid"] = trigger_track_uuid
     return message
 
 

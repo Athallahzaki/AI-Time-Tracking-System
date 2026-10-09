@@ -318,8 +318,14 @@ class EngineRuntime:
         with self._state_lock:
             current = dict(self._cameras)
 
+            pause_mode = self.config.analysis_off_mode == "pause"
             for camera_id, camera in current.items():
                 spec = desired.get(camera_id)
+                if pause_mode and spec is not None and spec.uri == camera.spec.uri:
+                    # Kontrak ea-k1: enabled=false menjeda analisis, kamera tetap hidup.
+                    camera.set_door_region(spec.door_region)
+                    camera.set_analysis_enabled(spec.enabled)
+                    continue
                 if spec is None or not spec.enabled:
                     logger.info("[%s] tidak ada di daftar; ditutup", camera_id)
                     camera.stop()
