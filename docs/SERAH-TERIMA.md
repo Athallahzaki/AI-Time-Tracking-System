@@ -1,42 +1,47 @@
 # Serah Terima
 
-Ditulis ulang di akhir setiap sesi. Terakhir: 9 Oktober 2026, sesi EA (paket r7–r10).
+Ditulis ulang di akhir setiap sesi. Terakhir: 9 Oktober 2026, sesi EA (paket ea-r1).
 
-## Kondisi repo
+## Selesai
 
-- r7: overlay hanya track aktif + LOST ≤ 0,3 dtk; deploy Portainer (engine di laptop
-  lewat NetBird); `summarize_gladi.py`; protokol uji A/B 4060.
-- r8: restrukturisasi repo (`docs/CHANGELOG.md`, `docs/arsip/`, `.gitattributes`
-  `*.sh` LF, `.gitignore` model/SQLite). Pastikan skrip `restrukturisasi-r8` sudah
-  dijalankan dan di-commit.
-- r9: penjadwal berdetak tahap 1 (`core.scheduler: tick`, default `free`), kerangka
-  tahap 2, mailbox, stub NVDEC, `scripts/spike_nvdec.py`. 22 tes baru; engine +
-  contracts lulus. Tes backend tidak dijalankan di sesi itu (FastAPI tidak terpasang).
+- ea-k1 (sesi sebelumnya): kontrak `identity.resolved`, `ANON-xxxx`, `identity_source`,
+  `schedule_off`; rincian untuk BE/EB di `docs/SERAH-TERIMA-EA-K1.md`.
+- ea-r1: logika ReID di `engine/identity/reid/` (messages, gallery, merge, pending) +
+  39 tes `test_reid_*.py`. Seluruh `engine/tests` lulus, `policy_grep` bersih. Belum
+  dirakit ke runtime; tanpa model (embedding = vektor numpy).
 
-## Belum dikerjakan (urut prioritas, lihat dokumen 14)
+## Belum
 
-1. Fitur dokumen 12 §3 untuk BE/FE: data master karyawan, pengguna dan peran, pengaturan
-   dari web, email per pelanggaran + rekap harian, `.xlsx`, report, pengetatan akses.
-2. ReID (EA): logika di usulan `engine/identity/reid/`, kontrak `identity.resolved`,
-   `ANON-xxxx`, `identity_source`, alasan `schedule_off` di skema.
-3. Penjadwal tahap 2 (EB): rakit `TickScheduler` ke `service.py`, `camera.py` jadi
-   state per kamera.
-4. r10: `CLAUDE.md`, `docs/PETA-KODE.md`, `scripts/pack_for_claude.py` baru dibuat; belum
-   dipakai di sesi nyata. Koreksi peta bila ada yang meleset.
+1. Rakit ReID ke `runtime/camera.py`/penjadwal (EB tahap 2) dan ke presence: perakit event
+   mengisi `moved_intervals` dari `Resolution.track_uuids`, lalu memancarkan
+   `identity.resolved`. Pengirim pesan wajib mengisi `face_person_id` hanya dari wajah.
+2. Model + worker embedding tubuh (EA), interval embedding 15 dtk dari config (§3.6 butir 5).
+3. Blok `reid:` di `config/schema.py` (sekarang `ReidConfig.from_mapping` sudah siap, belum
+   dibaca loader; default tetap mati karena belum dirakit).
+4. Fitur dokumen 12 §3 untuk BE/FE; penjadwal tahap 2 (EB).
 
-## Keputusan yang perlu disetujui tim
+## Keputusan yang perlu disetujui
 
-- Timeline dokumen 14 masih **usulan**.
-- Model + worker ReID pindah dari EB ke EA (dokumen 12 §7 v1.1).
-- `* text=auto` ditunda (dokumen 12 §10.3).
-- Cara frame membawa data GPU di `engine/ports/frame.py`: diputuskan di kontrak 13 Okt.
+- **Angka default** (usulan, perlu rekaman multi-kamera): ambang 0,80, margin 0,05, waktu
+  tempuh pasangan tak tercantum 30 dtk, toleransi tumpang-tindih 0. Waktu tempuh nyata
+  antar 5 lokasi diukur di lokasi klien.
+- **Cannot-link berlaku juga di kamera yang sama** (dua track hidup bersamaan = dua orang).
+- **Klaim yang dicabut belakangan** (rentang hidup memanjang lalu bertabrakan): track
+  dikeluarkan dari kelompok/orang dan dinilai ulang. Interval yang sudah terpancar dengan
+  ANON lama belum punya mekanisme koreksi di kontrak; perlu dibahas EA–BE.
+- **Resolusi seluruh kelompok** tidak memeriksa ulang tabrakan dengan track wajah orang
+  tujuan (sesuai §3.6 butir 3); tabrakan sesudahnya ditangani lewat pencabutan.
+- Masih terbuka dari sesi lalu: timeline dokumen 14, `* text=auto`, data GPU di
+  `engine/ports/frame.py` (13 Okt).
 
-## Uji manual di laptop (tidak bisa di cloud)
+## Uji manual di laptop
 
-- A/B 4060 R0–R3 (`docs/DEMO-REMOTE.md` §8) dan free vs tick T0-6/T1 5 stream (§8.1).
-- Spike NVDEC 15–16 Okt: `python scripts/spike_nvdec.py --url rtsp://127.0.0.1:8554/cam01 --seconds 60`.
+- Belum ada untuk ea-r1 (logika murni). Sesudah dirakit: evaluasi dengan rekaman
+  multi-kamera (persentase sambungan benar, menit bersumber ReID).
+- Dari sesi lalu: A/B 4060 dan free vs tick (`docs/DEMO-REMOTE.md` §8, §8.1); spike NVDEC
+  15–16 Okt.
 
 ## Langkah berikutnya
 
-Sesuai dokumen 14 minggu 1 (mulai 12 Okt): kontrak protokol + antarmuka antrean
-internal (13 Okt), baseline 5 kamera + spike (16 Okt), data master BE/FE.
+Kontrak antrean internal EA–EB 13 Okt: `messages.py` diusulkan sebagai bentuk pesan
+per-kamera → inti identitas. Lalu worker embedding tubuh dan perakitan ke presence.

@@ -35,7 +35,7 @@ frontend (Vue + Vite): dashboard, overlay kotak, enrollment, pengaturan
 | Crop orang/kepala | `perception/person_cropper.py` |
 | Wajah (SCRFD + AuraFace ONNX) | `identity/face_onnx.py` |
 | Matcher, arbiter identitas, admission, enrollment | `identity/matcher.py`, `identity/arbiter.py`, `identity/admission.py`, `identity/enrollment.py` |
-| ReID (belum ada; usulan lokasi) | `identity/reid/` |
+| ReID berjangkar wajah (logika, belum dirakit ke runtime): pesan antrean, galeri harian, aturan gabung, ANON-xxxx | `identity/reid/messages.py`, `identity/reid/gallery.py`, `identity/reid/merge.py`, `identity/reid/pending.py` (tes `test_reid_*.py`) |
 | Binding track ↔ identitas, interval presence | `presence/binding.py`, `presence/assembler.py` |
 | Server NDJSON, pembuat event, outbox SQLite | `api/server.py`, `api/events.py`, `api/outbox.py` |
 | Referensi wajah tersimpan | `store/references.py` (data: `engine/data/references.sqlite3`, di-ignore) |

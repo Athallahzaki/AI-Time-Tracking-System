@@ -7,6 +7,40 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-10-09 · paket ea-r1 — Logika ReID berjangkar wajah (`engine/identity/reid/`)
+
+Dasar: repo 9 Okt (sudah berisi ea-k1). Keputusan: dokumen 12 §3.6. **Hanya logika, tanpa
+model**: embedding tubuh diterima sebagai vektor numpy. Belum dirakit ke `runtime/camera.py`
+(menunggu penjadwal tahap 2 EB); `engine/ports/` dan kontrak tidak disentuh.
+
+**Apa yang berubah** (semua file baru)
+
+- `identity/reid/messages.py`: `BodyObservation` (camera_id, track_id, track_uuid, at,
+  embedding opsional, `face_person_id` hanya bila identitas track dari wajah, zone) dan
+  `TrackClosed`. Dataclass + numpy saja, tanpa import `runtime/`. Validasi pola `tr_…`,
+  menolak `face_person_id` berawalan `ANON-`, embedding dinormalisasi L2.
+- `identity/reid/gallery.py`: `PrototypeSet` (beberapa prototipe per orang, dilebur bila
+  sudutnya sama, menjaga keragaman saat penuh) dan `DailyGallery` (hanya menerima sumber
+  wajah, skor = maksimum atas prototipe, `purge_day()`).
+- `identity/reid/merge.py`: `ReidConfig` (+ `from_mapping` untuk blok YAML kelak), aturan
+  murni `check_pair`/`check_group` (cannot-link bila rentang hidup tumpang-tindih; waktu
+  tempuh minimum antar lokasi, pasangan tak tercantum = 30 dtk) dan `pick_best` (ambang 0,80
+  + margin 0,05 atas skor mentah).
+- `identity/reid/pending.py`: `PendingIdentities` — galeri → kelompok ANON → ANON baru;
+  wajah menyelesaikan seluruh kelompok (`face_confirmed`) lalu menyapu kelompok lain yang
+  cocok (`group_merged`); klaim ReID yang belakangan bertabrakan waktu dicabut (wajah tidak
+  pernah dicabut); `Resolution.event_fields()` = isi `identity.resolved` tanpa amplop dan
+  tanpa `moved_intervals` (milik presence); `purge_day()` melaporkan ANON yang belum selesai.
+- Tes: `engine/tests/test_reid_messages_gallery.py`, `test_reid_merge.py`,
+  `test_reid_pending.py` (39 tes).
+
+**Alasan.** Dokumen 12 §3.6: ReID adalah referensi berjangkar wajah, bukan pengenal
+mandiri; aturan condong ke "lebih baik terpecah daripada tertukar".
+
+**Cara uji.** `python -m pytest engine/tests -q -k reid`; seluruh `engine/tests` lulus;
+`python contracts/tools/policy_grep.py engine/` bersih. Keluaran `event_fields()` dicek
+manual terhadap `$defs.identity_resolved` dengan jsonschema (lulus).
+
 ## 2026-10-09 · paket ea-k1 — Kontrak ReID dan jadwal analisis (`identity.resolved`, `schedule_off`, `reid`/`reid_retro`)
 
 Dasar: repo 9 Okt (sudah berisi r9). Keputusan: dokumen 12 §3.3 (jadwal engine) dan §3.6
