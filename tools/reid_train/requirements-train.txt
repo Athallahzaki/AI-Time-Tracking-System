@@ -1,0 +1,16 @@
+# Dependensi KIT LATIH ReID (laptop pelatihan). BUKAN dependensi runtime engine.
+# Pasang berurutan (README langkah 2-3):
+#   1) torch + torchvision CUDA dari https://pytorch.org/get-started/locally/
+#   2) pip install -r requirements-train-deps.txt
+#   3) pip install --no-build-isolation -r requirements-train.txt
+# Python 3.10-3.12. Python 3.13 TIDAK didukung setup.py torchreid.
+-r requirements-train-deps.txt
+
+gdown
+onnx
+onnxruntime
+opencv-python-headless
+tensorboard
+
+# torchreid dipin ke commit yang dipakai saat kit ini diuji (HEAD per 9 Okt 2026).
+git+https://github.com/KaiyangZhou/deep-person-reid.git@f8cd150fdf77e8d9e1ed143b7f308c2c609ded50

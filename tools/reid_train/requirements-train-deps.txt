@@ -1,0 +1,17 @@
+# Tahap 1: dependensi yang HARUS ada sebelum torchreid dipasang (setup.py torchreid
+# mengimpor paketnya sendiri saat membangun metadata, jadi harus --no-build-isolation).
+# torch dan torchvision TIDAK ada di sini: pasang dulu dari indeks CUDA (README langkah 2).
+numpy
+scipy
+cython
+setuptools
+wheel
+h5py
+six
+matplotlib
+future
+yacs
+pillow
+opencv-python-headless
+gdown
+tensorboard

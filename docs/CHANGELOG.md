@@ -7,6 +7,43 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-10-09 · paket ea-r2 — Kit latih OSNet ReID dari RandPerson (`tools/reid_train/`)
+
+Dasar: repo 9 Okt (sudah berisi ea-r1). **Hanya alat latih di laptop**; `engine/`, `engine/ports/`,
+kontrak, dan `pytest.ini` tidak disentuh. torch/torchreid bukan dependensi runtime engine.
+Tidak ada dataset, bobot, atau ONNX yang diunduh/ditambahkan (`tools/reid_train/.gitignore`
+menolak `runs/`, `*.pth`, `*.pt`, `*.onnx`).
+
+**Apa yang berubah** (semua file baru)
+
+- `prepare_randperson.py`: pindai subset (`<pid>_s<scene>_c<cam>_f<frame>.jpg`), resize 256x128, JPG
+  q95, `camid` = indeks (scene, kamera); split per IDENTITAS (±90/10, seed), di val satu gambar per
+  (pid, kamera) jadi query dan sisanya gallery; tulis `manifest.csv` + `summary.json`. Bisa dilanjutkan.
+- `randperson_dataset.py`: `ImageDataset` torchreid dari manifest, terdaftar sebagai `randperson`.
+- `train_osnet.py`: `--init imagenet|scratch`, `--arch osnet_ain_x1_0|osnet_x1_0|osnet_ain_x0_25`,
+  softmax+label smoothing + triplet batch-hard 1:1, amsgrad lr 0,0015 cosine (+pemanasan), AMP,
+  augmentasi kuat, `best.pth` (mAP val kosinus) + `last.pth`, `log.csv`, TensorBoard, `config.json`
+  (termasuk SHA-256 bobot ImageNet), `--resume`. Bobot ImageNet dimuat sendiri (`weights_only=True`),
+  bukan lewat `pretrained=True`, agar bisa dicatat SHA-nya dan gagal dengan petunjuk unduh manual.
+- `export_onnx.py`: embedding saja, 1x3x256x128 batch dinamis, opset 17, verifikasi PyTorch vs
+  onnxruntime (< 1e-3, batch 8 dan 1), SHA-256; menerima checkpoint torchreid eksternal (pembanding).
+- `eval_reid.py`: mAP/rank-1/rank-5 + kurva ambang kosinus (sambungan benar vs salah gabung) +
+  ambang rekomendasi (salah gabung ≤ 1%), banyak ONNX sekaligus, tanpa torch.
+- `reid_common.py`, `MODEL-CARD.md`, `README.md`, `requirements-train.txt`, `requirements-train-deps.txt`.
+- Tes: `tools/reid_train/tests/` (7 tes; ujung-ke-ujung CPU 40 gambar palsu: prepare → latih 1 epoch
+  → export → eval; dilewati bila torch tidak terpasang).
+
+**Alasan.** Menyiapkan model ReID tubuh yang bisa dilatih tanpa data klien dan dibandingkan secara
+adil pada crop berlabel tim (SERAH-TERIMA ea-r1, butir "model + worker embedding tubuh").
+
+**Temuan saat menguji.** (1) `setup.py` torchreid gagal di Python 3.13 → pakai 3.10–3.12.
+(2) Pasang torchreid harus dua tahap + `--no-build-isolation` (metadata-nya mengimpor torch,
+scipy, cv2): karena itu ada `requirements-train-deps.txt`. (3) torchreid dipin ke commit f8cd150.
+
+**Cara uji.** `python -m pytest tools/reid_train/tests -q` (venv Python 3.11 + `requirements-train*.txt`;
+7 lulus di venv bersih tanpa ekstensi Cython, ±8 dtk). Tanpa torchreid: hanya tes prepare yang jalan,
+sisanya dilewati. `python contracts/tools/policy_grep.py engine/` bersih.
+
 ## 2026-10-09 · paket ea-r1 — Logika ReID berjangkar wajah (`engine/identity/reid/`)
 
 Dasar: repo 9 Okt (sudah berisi ea-k1). Keputusan: dokumen 12 §3.6. **Hanya logika, tanpa

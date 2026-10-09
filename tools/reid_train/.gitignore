@@ -1,0 +1,7 @@
+# Keluaran latihan: jangan pernah masuk repo (bobot model, dataset, log besar).
+runs/
+*.pth
+*.pt
+*.pth.tar
+*.onnx
+__pycache__/

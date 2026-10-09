@@ -1,7 +1,7 @@
 # Peta Kode
 
 Untuk menemukan file tanpa menjelajah repo. Perbarui saat menambah/memindah modul.
-Per 9 Oktober 2026 (paket r9).
+Per 9 Oktober 2026 (paket ea-r2).
 
 ## Alur data
 
@@ -88,6 +88,7 @@ generator `.xlsx`, halaman report, penyaringan per peran di semua endpoint.
 | Uji lag/gladi, ringkasan | `scripts/lag_probe.py`, `scripts/summarize_gladi.py` |
 | Spike NVDEC | `scripts/spike_nvdec.py` |
 | Zip ramping untuk sesi Claude | `scripts/pack_for_claude.py` |
+| Kit latih ReID OSNet dari RandPerson (laptop; torch di luar runtime engine) | `tools/reid_train/` — `README.md` (langkah dari nol), `prepare_randperson.py`, `randperson_dataset.py`, `train_osnet.py`, `export_onnx.py`, `eval_reid.py`, `reid_common.py`, `MODEL-CARD.md`, `requirements-train*.txt`, tes di `tests/` (jalankan terpisah: `python -m pytest tools/reid_train/tests -q`) |
 
 ## Dokumen
 
