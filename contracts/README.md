@@ -173,3 +173,18 @@ dibuat sendiri adalah hal terakhir yang kalian inginkan.
 disusun. Engine dan backend mengimpornya; jangan menulis ulang formatnya di sisi
 mana pun. Vektor uji di `tests/test_protocol_phase1.py` berlaku untuk
 implementasi di bahasa lain. Rincian alur ada di `docs/ENGINE_PROTOCOL.md` §8.
+
+## ReID dan jadwal analisis (paket ea-k1)
+
+Ditambahkan sesuai dokumen 12 §3.3 dan §3.6; rincian per tim di
+`docs/SERAH-TERIMA-EA-K1.md`.
+
+- `identity.resolved`: kelompok track tanpa wajah (`ANON-xxxx`) diselesaikan ke satu
+  karyawan; `moved_intervals` adalah interval yang dipancarkan atas nama ANON dan kini
+  dipindah (atribusi mundur). Sebelum event ini, `ANON-xxxx` bukan kehadiran siapa pun.
+- `identity_source`: `face | tracking | reid | reid_retro` (`$defs.identity_source`).
+  Terpisah dari `boundary_source`.
+- `end_reason: schedule_off`: analisis kamera dimatikan jadwal (`set_cameras
+  enabled=false`). Selalu `end_source: forced`.
+- Aturan evolusi dijaga `contracts/tests/required_baseline.json`: event lama tidak boleh
+  mendapat field wajib baru.

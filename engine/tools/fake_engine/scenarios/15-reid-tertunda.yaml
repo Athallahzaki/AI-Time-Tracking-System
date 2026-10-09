@@ -1,0 +1,40 @@
+name: reid-tertunda
+description: Tubuh tanpa wajah jadi ANON-0001 di dua ruangan, lalu wajahnya terbaca dan seluruh kelompok diselesaikan ke 4471 (identity.resolved)
+protocol_version: 1
+heartbeat_interval: 30.0
+snapshot_interval: 60.0
+health_interval: 120.0
+
+cameras:
+  - id: r1
+    pts_offset: 1758240000.0
+  - id: r2
+    pts_offset: 1758240000.0
+
+persons: ["4471"]
+
+timeline:
+  - { at: 0.0,   emit: camera.online, camera: r1 }
+  - { at: 0.0,   emit: camera.online, camera: r2 }
+  # Masuk membelakangi kamera: tidak ada wajah, tapi penampilannya dikelompokkan.
+  - { at: 10.0,  emit: track.started, track: r1-t1, camera: r1, zone: door }
+  - { at: 11.0,  emit: identity.pending, track: r1-t1, anon: ANON-0001 }
+  - { at: 70.0,  emit: track.ended, track: r1-t1, reason: left_frame, zone: door }
+  # Pindah ruangan; ReID mencocokkan tubuhnya ke kelompok yang sama.
+  - { at: 80.0,  emit: track.started, track: r2-t2, camera: r2, zone: door }
+  - { at: 81.0,  emit: identity.pending, track: r2-t2, anon: ANON-0001 }
+  # Wajahnya akhirnya terbaca di r2. Seluruh kelompok diselesaikan ke 4471.
+  - { at: 150.0, emit: track.identified, track: r2-t2, person: "4471", similarity: 0.90, margin: 0.17 }
+  - { at: 150.2, emit: identity.resolved, anon: ANON-0001, person: "4471", trigger: r2-t2, reason: face_confirmed }
+  - { at: 300.0, emit: track.ended, track: r2-t2, reason: left_frame, zone: door }
+
+expect:
+  resolutions: 1
+  moved_intervals: 1
+  note: >-
+    Interval r1 dipancarkan atas nama ANON-0001 (identity_source reid, tanpa
+    karyawan). Baru di identity.resolved ia dipindah ke 4471 oleh backend
+    (atribusi mundur, identity_source reid_retro). Interval r2 dipancarkan
+    SESUDAH resolusi, jadi langsung memakai person_id 4471 dan tidak masuk
+    daftar moved_intervals. Sebelum identity.resolved, ANON-0001 BUKAN kehadiran
+    karyawan mana pun.

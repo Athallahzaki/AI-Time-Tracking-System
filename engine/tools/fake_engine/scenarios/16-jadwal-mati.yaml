@@ -1,0 +1,41 @@
+name: jadwal-mati
+description: Jadwal operasional mematikan analisis r1; track yang hidup ditutup schedule_off (bukan pulang, bukan kamera putus), r2 tidak terpengaruh
+protocol_version: 1
+heartbeat_interval: 300.0
+snapshot_interval: 600.0
+health_interval: 600.0
+
+cameras:
+  - id: r1
+    pts_offset: 1758240000.0
+  - id: r2
+    pts_offset: 1758240000.0
+
+persons: ["4471", "4472"]
+
+timeline:
+  - { at: 0.0,    emit: camera.online, camera: r1 }
+  - { at: 0.0,    emit: camera.online, camera: r2 }
+  - { at: 5.0,    emit: track.started, track: r1-t1, camera: r1, zone: door }
+  - { at: 6.0,    emit: track.identified, track: r1-t1, person: "4471", similarity: 0.91, margin: 0.18 }
+  - { at: 8.0,    emit: track.started, track: r2-t1, camera: r2, zone: door }
+  - { at: 9.0,    emit: track.identified, track: r2-t1, person: "4472", similarity: 0.89, margin: 0.15 }
+  # Backend mengirim set_cameras enabled=false untuk r1 saja. Kamera tetap
+  # hidup; 4471 bukan pulang dan r1 bukan putus.
+  - { at: 1800.0, emit: analysis.off, camera: r1 }
+  # Jadwal menyala lagi. Tidak ada camera.online: koneksi kamera tidak pernah putus.
+  - { at: 2700.0, emit: analysis.on, camera: r1 }
+  - { at: 2710.0, emit: track.started, track: r1-t2, camera: r1, zone: door }
+  - { at: 2711.0, emit: track.identified, track: r1-t2, person: "4471", similarity: 0.92, margin: 0.2 }
+  - { at: 3000.0, emit: track.ended, track: r1-t2, reason: left_frame, zone: door }
+  - { at: 3000.0, emit: track.ended, track: r2-t1, reason: left_frame, zone: door }
+
+expect:
+  intervals: 3
+  schedule_off_intervals: 1
+  note: >-
+    Interval 4471 pertama berakhir schedule_off/forced di zona interior pada
+    detik 1800, lalu ada celah 910 detik tanpa pengamatan (analisis mati)
+    sebelum interval kedua. Itu bukan istirahat dan bukan kepergian: backend
+    harus memperlakukan jendela jadwal-mati sebagai di luar jam operasional,
+    bukan sebagai waktu di luar ruangan. 4472 di r2 tidak terganggu.

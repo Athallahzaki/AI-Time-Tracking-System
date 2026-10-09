@@ -14,6 +14,7 @@ dan sama untuk keempat belas skenario.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -34,6 +35,17 @@ EMITTABLE = {
     "camera.degraded",
     "camera.coverage",
     "enrollment_needed",
+    # ReID (dok 12 §3.6). `identity.pending` bukan pesan: ia menandai track
+    # sebagai bagian dari kelompok ANON-xxxx (yang tampil lewat person_id di
+    # interval/heartbeat). `identity.resolved` adalah pesan, tapi daftar
+    # interval yang dipindah DITURUNKAN emitter, bukan ditulis tangan.
+    "identity.pending",
+    "identity.resolved",
+    # Jadwal operasional (dok 12 §3.3): setara `set_cameras enabled=false/true`
+    # dari backend. Bukan pesan engine; akibatnya (track ditutup schedule_off)
+    # yang tampil di aliran.
+    "analysis.off",
+    "analysis.on",
     # Bukan pesan, tapi instruksi ke harness:
     "client.disconnect",
     "engine.trim_outbox",
@@ -161,6 +173,9 @@ def _validate(scenario: Scenario) -> None:
     known_persons = set(scenario.persons)
     open_tracks: Dict[str, str] = {}
     ended_tracks: set = set()
+    analysis_off: set = set()
+    pending_anon: Dict[str, set] = {}
+    resolved_anon: set = set()
 
     for step in scenario.timeline:
         if step.emit in DERIVED:
@@ -184,11 +199,52 @@ def _validate(scenario: Scenario) -> None:
 
         track = step.get("track")
 
-        if step.emit == "track.started":
+        if step.emit in {"analysis.off", "analysis.on"}:
+            if camera_id is None:
+                raise ScenarioError(f"`{step.emit}` tanpa `camera`")
+            if step.emit == "analysis.off":
+                analysis_off.add(camera_id)
+                for label in [t for t, cam in open_tracks.items() if cam == camera_id]:
+                    ended_tracks.add(label)
+                    open_tracks.pop(label)
+            else:
+                if camera_id not in analysis_off:
+                    raise ScenarioError(f"`analysis.on` untuk `{camera_id}` yang analisisnya tidak mati")
+                analysis_off.discard(camera_id)
+
+        elif step.emit == "identity.pending":
+            anon = str(step.get("anon", ""))
+            if not re.fullmatch(r"ANON-[A-Za-z0-9]{1,32}", anon):
+                raise ScenarioError(f"`identity.pending` butuh `anon` berpola ANON-xxxx, dapat `{anon}`")
+            if track not in open_tracks:
+                raise ScenarioError(f"`identity.pending` untuk track `{track}` yang belum dibuka")
+            if anon in resolved_anon:
+                raise ScenarioError(f"`{anon}` sudah diselesaikan; kelompok baru butuh anon baru")
+            pending_anon.setdefault(anon, set()).add(track)
+
+        elif step.emit == "identity.resolved":
+            anon = str(step.get("anon", ""))
+            if anon not in pending_anon:
+                raise ScenarioError(f"`identity.resolved` untuk `{anon}` yang tidak pernah `identity.pending`")
+            if anon in resolved_anon:
+                raise ScenarioError(f"`{anon}` diselesaikan dua kali")
+            if person is None:
+                raise ScenarioError("`identity.resolved` butuh `person`")
+            trigger = step.get("trigger")
+            if trigger is not None and trigger not in pending_anon[anon]:
+                raise ScenarioError(f"`trigger` `{trigger}` bukan anggota kelompok `{anon}`")
+            resolved_anon.add(anon)
+
+        elif step.emit == "track.started":
             if track in open_tracks:
                 raise ScenarioError(f"track `{track}` dibuka dua kali")
             if camera_id is None:
                 raise ScenarioError(f"`track.started` untuk `{track}` tanpa `camera`")
+            if camera_id in analysis_off:
+                raise ScenarioError(
+                    f"`track.started` di `{camera_id}` saat analisisnya mati. Engine tidak "
+                    "melacak apa pun di kamera yang dimatikan jadwal."
+                )
             open_tracks[track] = camera_id
 
         elif step.emit == "track.resumed":

@@ -1,0 +1,74 @@
+{
+  "scenario": "reid-tertunda",
+  "description": "Tubuh tanpa wajah jadi ANON-0001 di dua ruangan, lalu wajahnya terbaca dan seluruh kelompok diselesaikan ke 4471 (identity.resolved)",
+  "what_this_file_is": "Ringkasan observasional dari rekaman, bukan kesimpulan kebijakan. Celah dilaporkan beserta bukti batasnya; bagaimana ia diperlakukan diputuskan backend.",
+  "counts": {
+    "events": 26,
+    "intervals": 2,
+    "tracks_started": 2,
+    "tracks_ended": 2,
+    "seq_first": 1,
+    "seq_last": 26
+  },
+  "cameras": [
+    "r1",
+    "r2"
+  ],
+  "people": {
+    "4471": {
+      "interval_count": 1,
+      "intervals": [
+        {
+          "interval_id": "iv_r2-0001",
+          "camera_id": "r2",
+          "start_at": "2025-09-19T00:01:20.000Z",
+          "end_at": "2025-09-19T00:05:00.000Z",
+          "start_zone": "door",
+          "end_zone": "door",
+          "start_source": "tracking",
+          "end_source": "face",
+          "end_reason": "left_frame",
+          "prev_interval_id": null
+        }
+      ]
+    },
+    "ANON-0001": {
+      "interval_count": 1,
+      "intervals": [
+        {
+          "interval_id": "iv_r1-0001",
+          "camera_id": "r1",
+          "start_at": "2025-09-19T00:00:10.000Z",
+          "end_at": "2025-09-19T00:01:10.000Z",
+          "start_zone": "door",
+          "end_zone": "door",
+          "start_source": "tracking",
+          "end_source": "tracking",
+          "end_reason": "left_frame",
+          "prev_interval_id": null
+        }
+      ]
+    }
+  },
+  "gaps": [],
+  "asserts": {
+    "resolutions": 1,
+    "moved_intervals": 1,
+    "note": "Interval r1 dipancarkan atas nama ANON-0001 (identity_source reid, tanpa karyawan). Baru di identity.resolved ia dipindah ke 4471 oleh backend (atribusi mundur, identity_source reid_retro). Interval r2 dipancarkan SESUDAH resolusi, jadi langsung memakai person_id 4471 dan tidak masuk daftar moved_intervals. Sebelum identity.resolved, ANON-0001 BUKAN kehadiran karyawan mana pun."
+  },
+  "resolutions": [
+    {
+      "anon_id": "ANON-0001",
+      "person_id": "4471",
+      "at": "2025-09-19T00:02:30.200Z",
+      "reason": "face_confirmed",
+      "track_uuids": [
+        "tr_r1-t1",
+        "tr_r2-t2"
+      ],
+      "moved_intervals": [
+        "iv_r1-0001"
+      ]
+    }
+  ]
+}

@@ -3,7 +3,7 @@
 Tes paling penting di berkas ini bukan yang memeriksa satu skenario, tapi dua
 yang memeriksa keseluruhannya:
 
-- `test_setiap_skenario_lolos_kontrak` menjalankan keempat belas skenario lewat
+- `test_setiap_skenario_lolos_kontrak` menjalankan seluruh skenario lewat
   validator yang sama dengan yang akan dipakai untuk engine sungguhan. Engine
   palsu yang memancarkan sesuatu yang engine asli tidak boleh memancarkan
   adalah engine palsu yang mengajari backend hal yang salah.
@@ -56,14 +56,16 @@ def check(messages, channel):
 # --------------------------------------------------------------------------
 
 
-def test_keempat_belas_skenario_wajib_ada():
-    """ENGINE_PROTOCOL §6.3 mendaftar empat belas. Kurang satu berarti ada
+def test_keenam_belas_skenario_wajib_ada():
+    """ENGINE_PROTOCOL §6.3 mendaftar empat belas; dokumen 12 §3.3 dan §3.6
+    menambah `reid-tertunda` dan `jadwal-mati`. Kurang satu berarti ada
     kegagalan integrasi yang tidak punya tempat untuk ketahuan."""
     wajib = {
         "happy-path", "berbalik-lama", "istirahat-asli", "kamera-mati",
         "identitas-tertukar", "reconnect-replay", "replay-gap",
         "orang-tak-dikenal", "dua-orang-mirip", "enrollment-ditolak",
         "roster-berubah", "stitching", "kamera-reconnect", "lintas-ruangan",
+        "reid-tertunda", "jadwal-mati",
     }
     assert {load(path).name for path in SCENARIOS} == wajib
 
@@ -207,6 +209,102 @@ def test_orang_tak_dikenal_tidak_menghasilkan_interval():
     assert intervals_of(messages) == []
     alerts = [p for c, p in messages if p["type"] == "person.unidentified_present"]
     assert len(alerts) == 2
+
+
+def events_of(messages, mtype):
+    return [p for c, p in messages if c == "events" and p["type"] == mtype]
+
+
+def test_reid_tertunda_anon_lalu_resolved():
+    """Dok 12 §3.6: interval ANON dipancarkan lebih dulu, baru dipindah."""
+    _, messages = emit(SCENARIO_DIR / "15-reid-tertunda.yaml")
+    events = [p for c, p in messages if c == "events"]
+    intervals = intervals_of(messages)
+    resolved = events_of(messages, "identity.resolved")
+
+    assert len(resolved) == 1
+    r = resolved[0]
+    assert r["anon_id"] == "ANON-0001" and r["person_id"] == "4471"
+    assert r["reason"] == "face_confirmed"
+    assert r["trigger_track_uuid"] == "tr_r2-t2"
+    assert r["track_uuids"] == ["tr_r1-t1", "tr_r2-t2"]
+
+    anon = [i for i in intervals if i["person_id"] == "ANON-0001"]
+    nyata = [i for i in intervals if i["person_id"] == "4471"]
+    assert len(anon) == 1 and len(nyata) == 1
+    assert r["moved_intervals"] == [anon[0]["interval_id"]]
+    assert nyata[0]["interval_id"] not in r["moved_intervals"], (
+        "interval sesudah resolusi langsung berlabel karyawan; tidak dipindah"
+    )
+
+    # Urutan: interval ANON mendahului resolusi, interval karyawan menyusul.
+    assert anon[0]["seq"] < r["seq"] < nyata[0]["seq"]
+    # Tanpa wajah, sumber heartbeat-nya reid; sesudah resolusi track pemicu: face.
+    sources = {(h["person_id"], h["identity_source"]) for h in events_of(messages, "track.heartbeat")}
+    assert ("ANON-0001", "reid") in sources and ("4471", "face") in sources
+    assert not any(i["start_source"] == "face" for i in anon), "ANON tidak punya batas berbasis wajah"
+
+
+def test_reid_tertunda_ringkasan_expected_memuat_resolusi():
+    scenario, messages = emit(SCENARIO_DIR / "15-reid-tertunda.yaml")
+    expected = build_expected(scenario, messages)
+    assert expected["resolutions"][0]["moved_intervals"] == ["iv_r1-0001"]
+
+
+def test_skenario_lama_tidak_punya_kunci_resolutions():
+    """Fixture expected lama tidak boleh berubah bentuk."""
+    scenario, messages = emit(SCENARIO_DIR / "01-happy-path.yaml")
+    assert "resolutions" not in build_expected(scenario, messages)
+
+
+def test_jadwal_mati_bukan_pulang_dan_bukan_kamera_putus():
+    _, messages = emit(SCENARIO_DIR / "16-jadwal-mati.yaml")
+    ends = {e["track_uuid"]: e for e in events_of(messages, "track.ended")}
+    off = ends["tr_r1-t1"]
+    assert off["reason"] == "schedule_off"
+    assert ends["tr_r2-t1"]["reason"] == "left_frame", "r2 tidak ikut dimatikan jadwal r1"
+
+    iv = {i["track_uuid"]: i for i in intervals_of(messages)}
+    assert iv["tr_r1-t1"]["end_reason"] == "schedule_off"
+    assert iv["tr_r1-t1"]["end_source"] == "forced"
+    assert iv["tr_r1-t1"]["end_zone"] == "interior"
+
+    # Kamera tidak putus: tidak ada camera.failed, dan camera.online tidak diulang.
+    assert events_of(messages, "camera.failed") == []
+    assert len([o for o in events_of(messages, "camera.online") if o["camera_id"] == "r1"]) == 1
+
+
+def test_jadwal_mati_tidak_ada_heartbeat_dari_kamera_mati():
+    _, messages = emit(SCENARIO_DIR / "16-jadwal-mati.yaml")
+    for hb in events_of(messages, "track.heartbeat"):
+        assert hb["track_uuid"] != "tr_r1-t1" or hb["at"] < "2025-09-19T00:30:00.000Z"
+
+
+def test_skenario_menolak_track_baru_saat_analisis_mati():
+    with pytest.raises(ScenarioError) as excinfo:
+        from_mapping({
+            "cameras": [{"id": "r1"}],
+            "persons": ["1"],
+            "timeline": [
+                {"at": 0.0, "emit": "camera.online", "camera": "r1"},
+                {"at": 1.0, "emit": "analysis.off", "camera": "r1"},
+                {"at": 2.0, "emit": "track.started", "track": "t1", "camera": "r1"},
+            ],
+        })
+    assert "analisisnya mati" in str(excinfo.value)
+
+
+def test_skenario_menolak_resolusi_tanpa_pending_dan_anon_salah_bentuk():
+    base = {"cameras": [{"id": "r1"}], "persons": ["1"]}
+    with pytest.raises(ScenarioError):
+        from_mapping({**base, "timeline": [
+            {"at": 0.0, "emit": "identity.resolved", "anon": "ANON-1", "person": "1"},
+        ]})
+    with pytest.raises(ScenarioError):
+        from_mapping({**base, "timeline": [
+            {"at": 0.0, "emit": "track.started", "track": "t1", "camera": "r1"},
+            {"at": 1.0, "emit": "identity.pending", "track": "t1", "anon": "anon-1"},
+        ]})
 
 
 # --------------------------------------------------------------------------

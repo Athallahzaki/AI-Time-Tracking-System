@@ -7,6 +7,54 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-10-09 · paket ea-k1 — Kontrak ReID dan jadwal analisis (`identity.resolved`, `schedule_off`, `reid`/`reid_retro`)
+
+Dasar: repo 9 Okt (sudah berisi r9). Keputusan: dokumen 12 §3.3 (jadwal engine) dan §3.6
+(ReID). Hanya kontrak dan `fake_engine`; **`backend/` dan `engine/` (selain
+`tools/fake_engine`) tidak disentuh** — BE/EB menyesuaikan dari `SERAH-TERIMA-EA-K1.md`.
+
+**Apa yang berubah**
+
+- `contracts/schema/engine_protocol.schema.json`:
+  - Event baru `identity.resolved` (kanal events): `anon_id` (`ANON-xxxx`) → `person_id`,
+    `at`, `reason` (`face_confirmed` | `group_merged`), `track_uuids`, `moved_intervals`,
+    opsional `trigger_track_uuid`.
+  - `$defs.anon_id` (baru): pola `^ANON-[A-Za-z0-9]{1,32}$`, cocok dengan pola `person_id`
+    sehingga dipakai apa adanya sebagai `person_id` selama belum diselesaikan.
+  - `$defs.identity_source` (baru, satu sumber): `face | tracking | reid | reid_retro`.
+    Menggantikan tiga enum inline (`track.heartbeat`, `snapshot.live[]`,
+    `view.frame.boxes[]`). `boundary_source` (batas interval) **tidak diubah**.
+  - `end_reason` + `schedule_off` (dipakai `track.ended` dan `presence.interval`).
+  - **Tidak ada field wajib baru di event lama.**
+- `contracts/validator/conformance.py`: aturan baru — `identity.resolved` (interval
+  yang dipindah harus pernah dipancarkan dan berlabel `anon_id` itu; semua interval ANON
+  harus terdaftar; tidak boleh dua kali; track harus dikenal; ANON tidak dipakai lagi
+  sesudah resolusi); `schedule_off` wajib `end_source=forced` dan tidak boleh saat
+  kamera putus (itu `camera_lost`); ANON yang tak pernah diselesaikan = peringatan.
+- `engine/tools/fake_engine/`: directive `identity.pending`, `identity.resolved`
+  (daftar interval dan anggota kelompok **diturunkan**, bukan ditulis tangan),
+  `analysis.off`, `analysis.on`; skenario `15-reid-tertunda` dan `16-jadwal-mati`;
+  `expected.json` memuat `resolutions` hanya bila ada resolusi. Perbaikan kecil:
+  `end_source` bawaan untuk track berumber `reid` kini `tracking` (sebelumnya `face`).
+- `contracts/fixtures/`: `reid-tertunda.*`, `jadwal-mati.*` (baru). **Fixture 14 skenario
+  lama tidak berubah satu byte pun.**
+- `contracts/tests/`: tes baru (skenario, enum, `identity.resolved`, conformance) dan
+  `required_baseline.json` yang mengunci "tidak ada field wajib baru di event lama".
+
+**Alasan.** Dokumen 12 menetapkan atribusi mundur dan penutupan track saat jadwal mati
+sebagai bagian protokol; tanpa kontrak, EB/BE/FE menebak bentuknya masing-masing.
+`schedule_off` dibedakan dari `left_frame` (orang pulang) dan `camera_lost` (kamera
+putus) supaya jadwal mati tidak terbaca "semua orang pulang".
+
+**Yang belum / terbuka** (rinci di SERAH-TERIMA): dokumen 07 dan `ENGINE_PROTOCOL.md`
+belum diperbarui; `engine.health.cameras` belum punya status "analisis mati".
+
+**Cara uji.**
+- `python -m pytest contracts/tests -q` (151 tes) dan `python -m pytest -q` (seluruh repo: 731 lulus, 7 skip).
+- `python -m engine.tools.fake_engine --all --record contracts/fixtures && git status`
+  tidak boleh menunjukkan perubahan pada fixture lama.
+- `python -m engine.tools.fake_engine --scenario reid-tertunda --stdout --channel events`
+
 ## 2026-10-09 · paket r9 — Kerangka penjadwal berdetak (restrukturisasi engine, tahap 1)
 
 Dasar: repo 8 Okt + paket r8 (r8 harus sudah dipasang). Keputusan: dokumen 12 §3.9,

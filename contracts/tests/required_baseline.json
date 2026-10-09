@@ -1,0 +1,275 @@
+{
+  "ack": [
+    "ts",
+    "type",
+    "v"
+  ],
+  "auth_challenge": [
+    "algorithm",
+    "nonce",
+    "ts",
+    "type",
+    "v"
+  ],
+  "camera.coverage": [
+    "camera_id",
+    "never_observed",
+    "observed_regions",
+    "seq",
+    "ts",
+    "type",
+    "v"
+  ],
+  "camera.degraded": [
+    "camera_id",
+    "reason",
+    "seq",
+    "ts",
+    "type",
+    "v"
+  ],
+  "camera.failed": [
+    "camera_id",
+    "reason",
+    "retry_in_seconds",
+    "seq",
+    "ts",
+    "type",
+    "v"
+  ],
+  "camera.online": [
+    "camera_id",
+    "fps",
+    "pts_wallclock_offset",
+    "seq",
+    "stream_epoch",
+    "ts",
+    "type",
+    "v"
+  ],
+  "camera.recovered": [
+    "camera_id",
+    "seq",
+    "ts",
+    "type",
+    "until_at",
+    "v"
+  ],
+  "engine.health": [
+    "cameras",
+    "drop_rate",
+    "models_loaded",
+    "queue_depth",
+    "seq",
+    "ts",
+    "type",
+    "v"
+  ],
+  "enroll": [
+    "enrollment_version",
+    "images",
+    "person_id",
+    "request_id",
+    "ts",
+    "type",
+    "v"
+  ],
+  "enroll_from_track": [
+    "enrollment_version",
+    "person_id",
+    "request_id",
+    "track_uuid",
+    "ts",
+    "type",
+    "v"
+  ],
+  "enroll_result": [
+    "accepted",
+    "images",
+    "reason",
+    "request_id",
+    "ts",
+    "type",
+    "v"
+  ],
+  "enrollment_needed": [
+    "person_ids",
+    "seq",
+    "ts",
+    "type",
+    "v"
+  ],
+  "forget_person": [
+    "person_id",
+    "request_id",
+    "ts",
+    "type",
+    "v"
+  ],
+  "forget_result": [
+    "person_id",
+    "removed_references",
+    "request_id",
+    "ts",
+    "type",
+    "v"
+  ],
+  "hello": [
+    "client",
+    "last_event_seq",
+    "protocol_version",
+    "ts",
+    "type",
+    "v"
+  ],
+  "hello_ack": [
+    "engine_version",
+    "models",
+    "oldest_available_seq",
+    "protocol_version",
+    "ts",
+    "type",
+    "v"
+  ],
+  "person.unidentified_present": [
+    "attempts",
+    "camera_id",
+    "duration_seconds",
+    "reason",
+    "seq",
+    "track_uuid",
+    "ts",
+    "type",
+    "v"
+  ],
+  "presence.interval": [
+    "camera_id",
+    "end_at",
+    "end_pts",
+    "end_reason",
+    "end_source",
+    "end_zone",
+    "evidence_count",
+    "identity_confidence",
+    "interval_id",
+    "person_id",
+    "seq",
+    "start_at",
+    "start_pts",
+    "start_source",
+    "start_zone",
+    "stream_epoch",
+    "ts",
+    "type",
+    "v"
+  ],
+  "replay_gap": [
+    "from_seq",
+    "to_seq",
+    "ts",
+    "type",
+    "v"
+  ],
+  "set_cameras": [
+    "cameras",
+    "ts",
+    "type",
+    "v"
+  ],
+  "set_roster": [
+    "persons",
+    "ts",
+    "type",
+    "v"
+  ],
+  "snapshot": [
+    "live",
+    "pts_wallclock_offset",
+    "seq",
+    "ts",
+    "type",
+    "v"
+  ],
+  "track.ended": [
+    "at",
+    "exit_zone",
+    "pts",
+    "reason",
+    "seq",
+    "track_uuid",
+    "ts",
+    "type",
+    "v"
+  ],
+  "track.heartbeat": [
+    "at",
+    "confidence",
+    "identity_source",
+    "pts",
+    "seq",
+    "track_uuid",
+    "ts",
+    "type",
+    "v"
+  ],
+  "track.identified": [
+    "at",
+    "evidence_count",
+    "margin",
+    "person_id",
+    "pts",
+    "seq",
+    "similarity",
+    "track_started_pts",
+    "track_uuid",
+    "ts",
+    "type",
+    "v"
+  ],
+  "track.identity_changed": [
+    "at",
+    "disagreement_count",
+    "pts",
+    "reason",
+    "seq",
+    "to_person_id",
+    "track_uuid",
+    "ts",
+    "type",
+    "v"
+  ],
+  "track.resumed": [
+    "at",
+    "gap_seconds",
+    "person_id",
+    "prev_track_uuid",
+    "pts",
+    "seq",
+    "track_uuid",
+    "ts",
+    "type",
+    "v"
+  ],
+  "track.started": [
+    "at",
+    "camera_id",
+    "pts",
+    "seq",
+    "stream_epoch",
+    "track_uuid",
+    "ts",
+    "type",
+    "v",
+    "zone"
+  ],
+  "view.frame": [
+    "at",
+    "boxes",
+    "camera_id",
+    "pts",
+    "stream_epoch",
+    "ts",
+    "type",
+    "v"
+  ]
+}

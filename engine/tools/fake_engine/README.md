@@ -52,7 +52,7 @@ Pembagian itu ditegakkan — menulis `presence.interval` di timeline adalah erro
 saat memuat, bukan peringatan. Alasannya: skenario yang mengisi intervalnya
 sendiri akan mengisinya dengan apa yang penulisnya *kira* engine hitung, dan
 berhenti menguji apa pun. Dengan diturunkan, aturan penurunannya ada di satu
-tempat dan sama untuk keempat belas skenario.
+tempat dan sama untuk keenam belas skenario.
 
 Loader juga menolak track yang ditutup sebelum dibuka, orang yang tidak ada di
 `persons`, dan kamera yang tidak dideklarasikan. Skenario yang salah harus
@@ -78,7 +78,7 @@ interval kedua LEBIH KECIL dari `pts` interval pertama sementara `at`-nya lebih
 besar. Backend yang membandingkan `pts` lintas epoch akan menyimpulkan waktu
 berjalan mundur.
 
-## Keempat belas skenario
+## Keenam belas skenario
 
 Ini sekaligus daftar uji integrasi (`ENGINE_PROTOCOL.md` §6.3). Tanpa semuanya
 hijau, jangan anggap backend selesai.
@@ -99,6 +99,14 @@ hijau, jangan anggap backend selesai.
 | `12-stitching` | Teroklusi 3 detik: `prev_interval_id`, bukan celah |
 | `13-kamera-reconnect` | `stream_epoch` naik, `pts` mundur, `at` maju |
 | `14-lintas-ruangan` | Handoff: engine TIDAK menyambung, itu milik backend |
+| `15-reid-tertunda` | Tubuh tanpa wajah jadi `ANON-0001` di dua ruangan, lalu `identity.resolved` memindahkan intervalnya (dok 12 §3.6) |
+| `16-jadwal-mati` | Jadwal mematikan analisis satu kamera: track ditutup `schedule_off`, bukan pulang, bukan kamera putus (dok 12 §3.3) |
+
+Directive tambahan untuk dua skenario terakhir: `identity.pending` (track masuk
+kelompok `ANON-xxxx`; tidak ada pesan sendiri, terlihat lewat `person_id` dan
+`identity_source: reid`), `identity.resolved` (pesan; `moved_intervals` dan
+`track_uuids` diturunkan emitter) dan `analysis.off` / `analysis.on` (setara
+`set_cameras enabled=false/true` dari backend; bukan pesan engine).
 
 Dua skenario kanal control (10 dan 11) hanya berarti terhadap socket. Balasan
 `enroll` deterministik dari isi permintaannya: id gambar yang memuat `blurry`,
