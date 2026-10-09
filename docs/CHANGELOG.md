@@ -7,6 +7,129 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-10-09 · paket ea-r4 — Cache ReID dikosongkan terjadwal tiap hari
+
+Dasar: ea-r3. Default tetap mati (`reid.enabled: false`). Keputusan ea-r3 (ANON tanpa
+`track.identified`, ReID wajib rekognisi wajah, hook di `camera.py`) disetujui EA.
+
+**Apa yang berubah**
+
+- `config/schema.py` + `loader.py`: `reid.daily_purge_time` ("HH:MM" lokal, default `"00:00"`;
+  format salah ditolak; `03:30` tanpa kutip di YAML juga diterima).
+- `pipeline/reid_coordinator.py`: `maybe_purge(now)` mengosongkan galeri tubuh, kelompok ANON, dan
+  rentang begitu jam purge lewat (sekali per hari). "Hari" ReID = tanggal lokal dari (waktu − jam
+  purge), dipakai juga oleh pengamatan, sehingga jadwal dan data selalu sepakat. Log INFO saat purge.
+  Label hanya dikirim ke kamera bila ada; pencabutan selalu lewat `revoked`. Akibatnya track yang
+  hidup melintasi purge tidak kehilangan label (dan waktu kehadirannya).
+- `runtime/service.py`: ticker runtime (tiap 0,5 dtk) memanggil `maybe_purge`; sebelumnya galeri
+  hanya dikosongkan saat pengamatan pertama sesudah tengah malam, jadi data penampilan tertinggal
+  semalaman bila kamera sepi.
+- Profil `demo-4060.yaml`, `demo-4060-tick.yaml`, `demo-1060.yaml`: `daily_purge_time: "00:00"`.
+
+**Alasan.** Dokumen 12 §3.6 butir 7 (hapus cache harian): pakaian berganti antar hari, dan data
+penampilan tubuh tidak boleh disimpan lebih lama dari perlu.
+
+**Cara uji.** `python -m pytest engine/tests -q` (617 lulus, 7 dilewati seperti sebelumnya); +10 di
+`test_reid_runtime.py` (jam purge dari config/ditolak, purge terjadwal tanpa pengamatan dan sekali per
+hari, label track hidup tidak dicabut, ticker memanggil jadwal). `policy_grep` bersih. Uji laptop:
+langkah 7 di `docs/SERAH-TERIMA-EA-R3.md`.
+
+## 2026-10-09 · paket ea-r3 — Model ReID OSNet ONNX dirakit ke engine (default mati)
+
+Dasar: repo 9 Okt (sesudah eb-r10). Jalur EA. Menyambungkan model hasil kit ea-r2
+(`tools/reid_train/`) ke logika ReID ea-r1 (`engine/identity/reid/`) dan memancarkan
+`identity.resolved` sesuai kontrak ea-k1. **`reid.enabled: false` di semua profil**: tanpa itu
+tidak ada model dimuat, tidak ada worker, dan tidak ada event yang berubah. `engine/ports/`,
+`contracts/`, dan `backend/` tidak disentuh. Tidak ada berkas ONNX di repo.
+
+**Apa yang berubah**
+
+- Baru `engine/identity/reid/embedder_onnx.py`: OSNet ONNX lewat onnxruntime (memakai ulang
+  `_session` dari `face_onnx.py`: CUDA diminta tapi aktif CPU = ditolak). Pra-proses identik
+  `tools/reid_train/reid_common.py` (BGR→RGB, resize langsung 256x128 dengan aturan interpolasi
+  yang sama, /255, mean/std ImageNet), batch per `max_batch`, keluaran L2. SHA-256 berkas
+  diverifikasi terhadap `reid.model_sha256` (salah = start ditolak; kosong = peringatan).
+- Baru `engine/identity/reid/quality.py`: gerbang crop badan (tinggi minimum, rasio aspek,
+  terpotong tepi frame = kualitas rendah, tidak di-embed).
+- Baru `engine/pipeline/reid_worker.py`: worker embedding satu untuk semua kamera, pola
+  `recognition_worker.py` (antrean terbatas, tolak seketika bila penuh, buang crop basi), tetapi
+  crop beberapa kamera digabung jadi satu batch.
+- Baru `engine/pipeline/reid_coordinator.py`: satu `PendingIdentities` untuk semua kamera di bawah
+  satu kunci; label per track dikirim ke kotak masuk kamera; `identity.resolved` dipancarkan di
+  bawah kunci yang sama dengan gerbang interval, sehingga interval ANON selalu terbit sebelum
+  penyelesaiannya dan masuk `moved_intervals`. ID ANON memuat nonce per proses (restart engine
+  di tengah hari tidak menerbitkan ID yang sama lagi). Hari baru (lokal) = galeri dikosongkan.
+- Baru `engine/pipeline/reid_tap.py`: sisi kamera. Embedding berbasis kejadian (track baru, wajah
+  baru terkonfirmasi, lalu tiap `embed_interval_seconds`), pembaruan rentang ±1 dtk tanpa
+  embedding, `TrackClosed` saat track hilang. Track berwajah tidak pernah dilabeli ReID.
+- `config/schema.py` + `loader.py`: section `reid` (`enabled`, `model_path`, `model_sha256`,
+  `match_threshold`, `match_margin`, `min_crop_height_px`, `min_aspect`, `max_aspect`,
+  `edge_margin_px`, `embed_interval_seconds`, `max_batch`, `worker_queue`, `max_age_seconds`,
+  `onnx_providers`, `onnx_gpu_mem_limit_mb`, `travel_time_seconds`, `default_travel_time_seconds`).
+  `reid.enabled` tanpa `recognition.recognizer: onnx_face` ditolak. `match_threshold: null` = usulan
+  0,80 yang belum dikalibrasi (peringatan di log). Blok `reid` (mati) di `demo-4060.yaml`,
+  `demo-4060-tick.yaml`, dan `demo-1060.yaml` (1060: `onnx_gpu_mem_limit_mb: 512`).
+- `runtime/service.py`: ReID dimuat di konstruktor (gagal = engine menolak start), dioper ke
+  kamera, dihentikan saat tutup; metrik ReID di log health; `reid_worker_stopped` di
+  `degraded_components`.
+- `runtime/camera.py`: tap dipanggil per frame; label ReID mengisi `person_id`/`identity_source`
+  di heartbeat, snapshot, dan `view.frame` hanya untuk track tanpa wajah;
+  `person.unidentified_present` tetap berdasarkan wajah (ANON = belum dikenali).
+- `presence/assembler.py`: `reid_assigned`/`reid_cleared` (tanpa `track.identified`), gerbang
+  interval opsional. Tanpa gerbang (ReID mati) jalurnya sama dengan sebelumnya.
+- `api/events.py`: `identity_resolved(...)`; `track.heartbeat` menerima `reid`/`reid_retro`.
+- `face_onnx._session`: parameter pesan galat (`purpose`, `providers_key`); perilaku sama.
+- `.gitignore`: `engine/models/`.
+- `scripts/lag_probe.py`: opsi `--events-out NDJSON` (default mati) merekam event kanal `events`
+  untuk `python -m contracts.validator`, supaya aliran ReID bisa diperiksa di laptop tanpa backend.
+- Dokumen: `docs/PETA-KODE.md`, `docs/SERAH-TERIMA-EA-R3.md` (baru; `SERAH-TERIMA.md` EB tidak diganti).
+
+**Belum aman dengan backend sungguhan**: `backend/schemas/protocol.py` belum mengenal `reid`/`reid_retro`
+dan `identity.resolved` (tugas BE dari ea-k1). Lihat SERAH-TERIMA-EA-R3.
+
+**Alasan.** Dokumen 12 §3.6 dan timeline dokumen 14 (EA 20–23 Okt): model ReID ke ONNX, quality
+gate, worker, integrasi. Ambang ditahan (belum ada crop berlabel dari kamera lokasi), jadi
+semuanya terpasang tetapi mati, dan ambang masih usulan.
+
+**Cara uji.** `python -m pytest engine/tests -q` (607 lulus, 7 dilewati seperti sebelumnya);
+baru: `test_reid_embedder.py` (11, termasuk model ONNX mini ujung ke ujung, dilewati tanpa `onnx`)
+dan `test_reid_runtime.py` (26, embedder palsu: gerbang, config, interval, worker, dua kamera
+ANON → `identity.resolved` lolos skema + `ConformanceChecker`, kamera mock), +1 di `test_lag_probe.py`
+(engine ReID menyala → NDJSON lolos validator). `python
+contracts/tools/policy_grep.py engine/` bersih; `contracts/tests` lulus. Uji di laptop: lihat
+`docs/SERAH-TERIMA-EA-R3.md`.
+
+## 2026-10-09 · paket eb-r10 — Alat baseline 5 kamera (`-Count`, ringkasan multi-kamera)
+
+Dasar: repo 9 Okt (sesudah ea-r2). **Hanya alat ukur di laptop**; `engine/runtime/`, profil
+`engine/config/`, `engine/ports/`, dan kontrak tidak disentuh. Eksekusi baseline dilakukan nanti di
+laptop 4060 (dokumen 04 §14, DEMO-REMOTE §8.1).
+
+**Apa yang berubah**
+
+- `scripts/publish_test_video.ps1`: parameter `-Count N` (1..99, default 1). `-Count 1` memakai jalur
+  lama (satu `ffmpeg`, `-Path` dihormati). `-Count > 1`: satu proses ffmpeg per path `cam01..camN`,
+  daftar argumen encode sama (satu array dipakai kedua jalur), jeda 0,5 dtk antar start; bila satu
+  proses mati, semua dihentikan dan skrip gagal (baseline yang kehilangan stream diam-diam tidak
+  valid); `-Path` bersama `-Count > 1` ditolak.
+- `scripts/summarize_gladi.py`: CSV dengan beberapa `camera_id` dihitung **per kamera** lalu digabung.
+  Tabel: satu baris per kamera + satu baris gabungan per file (`<file> [N kam]`). Vonis tetap per file:
+  LULUS hanya bila semua kamera LULUS (kamera tanpa sampel box = GAGAL). Gabungan: fps/lambat/umur box
+  dari semua sampel, ganti dan stall dijumlahkan, drop/s = jumlah median per kamera. CSV satu kamera
+  atau tanpa `camera_id` menghasilkan angka dan tabel yang sama seperti sebelumnya.
+- `docs/DEMO-REMOTE.md` §8.1: perintah publish `-Count 5` dan cara membaca tabel multi-kamera.
+- `engine/tests/test_summarize_gladi.py`: +6 tes (1 kamera ber-id = tanpa id, 5 kamera bersih,
+  satu kamera macet menggagalkan file, irama per kamera bukan deret campuran, kamera tanpa box,
+  `main` per file).
+
+**Alasan.** Skrip lama mencampur semua baris `health` dari lima kamera dalam satu deret: "ganti fase"
+dan laju drop jadi tak bermakna (selisih `dropped` antar kamera berbeda), dan satu kamera macet bisa
+tertutup median kamera lain. Publish lima stream tadinya butuh lima terminal manual.
+
+**Cara uji.** `python -m pytest engine/tests/test_summarize_gladi.py -q` (10 lulus).
+`publish_test_video.ps1` tidak bisa diuji di cloud (tanpa PowerShell/MediaMTX): langkah di
+SERAH-TERIMA.
+
 ## 2026-10-09 · paket ea-r2 — Kit latih OSNet ReID dari RandPerson (`tools/reid_train/`)
 
 Dasar: repo 9 Okt (sudah berisi ea-r1). **Hanya alat latih di laptop**; `engine/`, `engine/ports/`,

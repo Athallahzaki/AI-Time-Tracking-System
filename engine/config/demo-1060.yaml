@@ -113,6 +113,32 @@ recognition:
   face_detector_input_size: 640
   min_face_px: 40
 
+# ReID berjangkar wajah (paket ea-r3, dokumen 12 §3.6, dokumen 04 §11). MATI secara
+# default: tidak ada model yang dimuat dan tidak ada event yang berubah. Menyalakannya:
+#   1. salin ONNX hasil tools/reid_train/export_onnx.py ke model_path (TIDAK di-commit);
+#   2. isi model_sha256 dari MODEL-CARD (salah = engine menolak start);
+#   3. match_threshold: null = usulan 0,80 yang BELUM dikalibrasi (masih ditahan sampai
+#      ada crop berlabel dari kamera lokasi); isi dari MODEL-CARD setelah EA setuju;
+#   4. enabled: true. Butuh recognition.recognizer onnx_face (galeri diisi dari wajah).
+# Model hilang/rusak/SHA salah atau CUDA diminta tapi jatuh ke CPU = engine menolak start.
+reid:
+  enabled: false
+  model_path: "engine/models/reid/osnet_reid.onnx"
+  model_sha256: null
+  match_threshold: null           # ditahan: belum ada kalibrasi di kamera lokasi
+  min_crop_height_px: 96          # crop badan lebih pendek tidak di-embed
+  embed_interval_seconds: 15      # per track; plus saat track baru & wajah baru terkonfirmasi
+  max_batch: 8
+  onnx_providers: ["CUDAExecutionProvider", "CPUExecutionProvider"]
+  onnx_gpu_mem_limit_mb: 512       # 1060 6 GB: VRAM dibagi D-FINE + SCRFD + AuraFace
+  # Waktu tempuh minimum antar lokasi (detik, simetris). Pasangan yang tidak ditulis
+  # memakai default_travel_time_seconds yang sengaja ketat. Isi setelah diukur di lokasi.
+  travel_time_seconds: {}
+  default_travel_time_seconds: 30
+  # Jam lokal galeri tubuh + kelompok ANON dikosongkan tiap hari (terjadwal, walau kamera
+  # sepi). Pilih jam di luar jam operasional.
+  daily_purge_time: "00:00"
+
 detector:
   model_path: "LibreDFINEs.pt"   # DEMO 1060: S. M 70-75 ms, S 48 ms dengan cuda_graph.
   confidence_threshold: 0.50

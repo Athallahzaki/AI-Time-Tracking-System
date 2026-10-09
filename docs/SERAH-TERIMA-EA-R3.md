@@ -1,6 +1,6 @@
-# Serah terima EA — paket ea-r3: model ReID OSNet ONNX dirakit ke engine
+# Serah terima EA — paket ea-r3 + ea-r4: model ReID OSNet ONNX dirakit ke engine
 
-9 Oktober 2026 · Jalur EA · Rincian: `docs/CHANGELOG.md` (ea-r3). File ini **tidak** menggantikan
+9 Oktober 2026 · Jalur EA · Rincian: `docs/CHANGELOG.md` (ea-r3, ea-r4). File ini **tidak** menggantikan
 `docs/SERAH-TERIMA.md` (status EB, paket eb-r10); keduanya berlaku.
 
 ## Selesai
@@ -9,7 +9,9 @@
   worker batch (`pipeline/reid_worker.py`), koordinator + `identity.resolved` (`pipeline/reid_coordinator.py`),
   sisi kamera (`pipeline/reid_tap.py`), section config `reid`, blok `reid` (mati) di demo-4060,
   demo-4060-tick, dan demo-1060. `lag_probe.py --events-out` untuk memeriksa aliran tanpa backend.
-- Tes: 607 lulus / 7 dilewati (sama seperti sebelumnya) di `engine/tests`; 37 tes ReID baru + 1 tes probe.
+- ea-r4: cache ReID (galeri tubuh, kelompok ANON, rentang) dikosongkan **terjadwal tiap hari** pada
+  `reid.daily_purge_time` (jam lokal, default `"00:00"`), lewat ticker runtime, walau tidak ada orang terlihat.
+- Tes: 617 lulus / 7 dilewati (sama seperti sebelumnya) di `engine/tests`; 47 tes ReID baru + 1 tes probe.
   `policy_grep` bersih. **Default tidak berubah** (`reid.enabled: false`).
 
 ## Belum
@@ -19,17 +21,26 @@
 2. **Backend belum siap**: `backend/schemas/protocol.py` hanya mengenal `identity_source` face/tracking dan tidak
    punya handler `identity.resolved` (tugas BE dari ea-k1). **Jangan nyalakan ReID dengan backend sungguhan**:
    heartbeat/snapshot `reid` akan gagal validasi, dan interval `ANON-…` bisa terhitung sebagai kehadiran.
-3. `forget_person` belum menghapus prototipe tubuh orang itu dari galeri harian (hilang sendiri tengah malam).
+3. `forget_person` belum menghapus prototipe tubuh orang itu dari galeri harian (hilang pada purge harian berikutnya).
 4. Waktu tempuh antar lokasi belum diukur (`travel_time_seconds: {}`, default ketat 30 dtk).
 
-## Keputusan yang perlu disetujui
+## Keputusan
 
+Disetujui EA (9 Okt):
 - ANON di presence tanpa `track.identified` (event itu tetap milik bukti wajah). Interval ReID: `start_source tracking`,
   `identity_confidence 0`. Yang membedakan ReID bagi BE: `identity_source` di heartbeat/snapshot dan `identity.resolved`.
-- ID ANON kini `ANON-<YYYYMMDD><nonce 4 heksa><n>` (masih cocok pola kontrak), agar restart engine tidak mengulang ID.
-- `reid.enabled` mewajibkan rekognisi wajah. Crop terpotong tepi frame tidak di-embed.
+- `reid.enabled` mewajibkan rekognisi wajah (`recognition.recognizer: onnx_face`).
 - `runtime/camera.py` disentuh (hook kecil, mati bila `reid` None). EB merombak file ini 19–23 Okt: rebase di pihak EB
   cukup memindah tiga titik panggil (`_build`, `_on_frame`, `_close_open_tracks`/`_on_reconnect`).
+- Cache ReID dikosongkan terjadwal tiap hari (ea-r4).
+
+Masih perlu disetujui:
+- ID ANON `ANON-<YYYYMMDD><nonce 4 heksa><n>` (cocok pola kontrak), agar restart engine tidak mengulang ID.
+- Crop terpotong tepi frame tidak di-embed.
+- Jam purge default `00:00`. "Hari" ReID = tanggal lokal dari (waktu − jam purge): dengan purge 03:00, orang yang
+  terlihat 01:00 masih masuk galeri hari sebelumnya. Track yang hidup saat purge tidak dicabut labelnya (kehadiran
+  tidak hilang); ia dinilai ulang dari galeri kosong pada embedding berikutnya. Bila operasional melewati tengah
+  malam, pindahkan jam purge ke luar jam operasional.
 - Line ending: file baru mengikuti LF seperti seluruh repo (butir lama `* text=auto` di SERAH-TERIMA EB).
 
 ## Catatan untuk dokumen tim (belum diubah; tidak ada di repo)
@@ -55,6 +66,9 @@
    sama (cannot-link); `identity.resolved` muncul saat wajah terbaca pada track yang sudah ANON.
 6. Biaya: ulangi langkah 4 dengan `enabled: false`, bandingkan fps/umur kotak (`summarize_gladi.py`) dan VRAM
    (`nvidia-smi`). Di 1060 jalankan juga dengan 1 kamera bila 5 kamera sudah di bawah target tanpa ReID.
+7. Purge terjadwal: set `daily_purge_time` ±2 menit dari jam laptop, jalankan engine dengan orang di depan kamera.
+   Harap di log tepat pada jam itu: `ReID: cache hari ... dikosongkan (...)`, sekali saja; sesudahnya `kelompok ANON-...`
+   baru bertanggal hari berikutnya. Orang yang masih terlihat tetap berlabel (tidak ada interval yang hilang).
 
 ## Langkah berikutnya
 

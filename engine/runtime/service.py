@@ -131,6 +131,7 @@ class EngineRuntime:
         matcher: Any = None,
         recognize: Optional[Callable[..., Any]] = None,
         reference_store: Any = None,
+        reid_embed: Optional[Callable[..., Any]] = None,
     ) -> None:
         self.options = options or RuntimeOptions()
         self.config = config or load_config(self.options.config_path)
@@ -174,6 +175,16 @@ class EngineRuntime:
         self._matcher = matcher
         self._recognize = recognize
         self._store = reference_store
+
+        # ReID berjangkar wajah (dokumen 12 §3.6). Mati = None, tidak ada yang
+        # dimuat. Menyala tapi model tidak bisa dimuat = ReidModelUnavailable
+        # di sini, jadi engine menolak start (sama seperti recognizer wajah).
+        # `reid_embed` hanya untuk tes (embedder palsu tanpa ONNX). Dimuat
+        # sebelum worker wajah, supaya start yang ditolak tidak meninggalkan thread.
+        from ..pipeline.reid_coordinator import build_reid_runtime
+
+        self._reid = build_reid_runtime(self.config.reid, self.emit_event, embed=reid_embed)
+
         # P7: satu worker rekognisi untuk semua kamera (satu GPU). Loop frame
         # hanya menitipkan pekerjaan; lihat pipeline/recognition_worker.py.
         self._worker = None
@@ -274,6 +285,8 @@ class EngineRuntime:
                 camera.stop()
             if self._worker is not None:
                 self._worker.stop()
+            if self._reid is not None:
+                self._reid.stop()
             if self._shared_detector is not None:
                 self._shared_detector.stop()
             self.api.close()
@@ -342,6 +355,7 @@ class EngineRuntime:
             recognition_executor=self._worker,
             detector_provider=self._detector_for,
             tick_gate=self._tick_gate,
+            reid=self._reid,
         )
         if self._tick_gate is not None and not self._tick_gate.running:
             self._tick_gate.start()
@@ -481,6 +495,9 @@ class EngineRuntime:
             if now - last_health >= self.options.health_interval_seconds:
                 last_health = now
                 self._emit_health(now)
+            if self._reid is not None:
+                # Jadwal harian pengosongan cache ReID (reid.daily_purge_time).
+                self._reid.coordinator.maybe_purge(now)
 
     def _emit_snapshot(self, now: float) -> None:
         """Lets a backend realign without replaying the day (§4.5).
@@ -528,6 +545,18 @@ class EngineRuntime:
                 "rekognisi: diproses %d, ditolak-penuh %d, basi %d, gagal %d, rata2 %.0f ms, antre %d",
                 int(worker["processed"]), int(worker["rejected_full"]), int(worker["dropped_stale"]),
                 int(worker["failed"]), worker["avg_recognize_ms"], int(worker["queue_depth"]),
+            )
+        if self._reid is not None:
+            if not self._reid.worker.running:
+                degraded.append("reid_worker_stopped")
+            core = self._reid.coordinator.snapshot_metrics()
+            rw = self._reid.worker.snapshot_metrics()
+            logger.info(
+                "ReID: embedding %d (gagal %d), ANON %d, cocok galeri %d, selesai %d, dicabut %d; "
+                "worker %d crop/%d batch, basi %d, ditolak-penuh %d, rata2 %.0f ms/batch",
+                core["embeddings"], core["embed_failed"], core["anon_groups"], core["reid_matches"],
+                core["resolutions"], core["revoked"], int(rw["processed"]), int(rw["batches"]),
+                int(rw["dropped_stale"]), int(rw["rejected_full"]), rw["avg_batch_ms"],
             )
         shared = self._shared_detector
         if shared is not None:

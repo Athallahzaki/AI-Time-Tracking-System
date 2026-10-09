@@ -15,7 +15,7 @@ and it was right to.
 
 What replaced it is an **allowlist derived from the schema itself**. The engine
 accepts the sections its dataclasses declare — `core`, `ingest`, `detector`,
-`tracker`, and since B5 `zones` and `recognition` — and within each, only the
+`tracker`, since B5 `zones` and `recognition`, and since ea-r3 `reid` — and within each, only the
 fields that dataclass declares. The list is computed, not written down, so a new
 section cannot be added to the schema and forgotten here. Everything else is refused by name at load
 time. No list of forbidden words exists anywhere in this package; the offending
@@ -47,6 +47,7 @@ from .schema import (
     EngineConfig,
     IngestConfig,
     RecognitionConfig,
+    ReidSettings,
     TrackerConfig,
     ZoneConfig,
     resolve_engine_path,
@@ -74,7 +75,7 @@ def _field_names(cls: type) -> Set[str]:
 # Derived from the dataclasses, so the schema cannot drift from what the loader
 # accepts. These are nested objects on EngineConfig and sections in the file,
 # not keys inside `core`.
-_NESTED = {"ingest", "detector", "tracker", "zones", "recognition"}
+_NESTED = {"ingest", "detector", "tracker", "zones", "recognition", "reid"}
 _CORE_KEYS = _field_names(EngineConfig) - _NESTED
 _SECTIONS: Dict[str, Set[str]] = {
     "core": _CORE_KEYS,
@@ -83,6 +84,7 @@ _SECTIONS: Dict[str, Set[str]] = {
     "tracker": _field_names(TrackerConfig),
     "zones": _field_names(ZoneConfig),
     "recognition": _field_names(RecognitionConfig),
+    "reid": _field_names(ReidSettings),
 }
 
 
@@ -142,6 +144,7 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
     trk = raw.get("tracker", {}) or {}
     zon = raw.get("zones", {}) or {}
     rec = raw.get("recognition", {}) or {}
+    rid = raw.get("reid", {}) or {}
 
     return EngineConfig(
         source_uri=str(core.get("source_uri", "0")),
@@ -229,7 +232,45 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
             match_threshold=_optional_float(rec.get("match_threshold")),
             match_margin=_optional_float(rec.get("match_margin")),
         ),
+        reid=_reid_settings(rid),
     )
+
+
+def _reid_settings(rid: Dict[str, Any]) -> ReidSettings:
+    """Blok `reid`. Kunci yang tidak ditulis memakai default dataclass."""
+    defaults = ReidSettings()
+    sha = rid.get("model_sha256")
+    return ReidSettings(
+        enabled=bool(rid.get("enabled", False)),
+        model_path=str(rid.get("model_path") or defaults.model_path),
+        model_sha256=(str(sha).strip() if sha else None),
+        match_threshold=_optional_float(rid.get("match_threshold")),
+        match_margin=_optional_float(rid.get("match_margin")),
+        min_crop_height_px=float(rid.get("min_crop_height_px", defaults.min_crop_height_px)),
+        min_aspect=float(rid.get("min_aspect", defaults.min_aspect)),
+        max_aspect=float(rid.get("max_aspect", defaults.max_aspect)),
+        edge_margin_px=float(rid.get("edge_margin_px", defaults.edge_margin_px)),
+        embed_interval_seconds=float(rid.get("embed_interval_seconds", defaults.embed_interval_seconds)),
+        max_batch=int(rid.get("max_batch", defaults.max_batch)),
+        worker_queue=int(rid.get("worker_queue", defaults.worker_queue)),
+        max_age_seconds=float(rid.get("max_age_seconds", defaults.max_age_seconds)),
+        onnx_providers=(
+            tuple(str(p) for p in rid["onnx_providers"]) if rid.get("onnx_providers") else None
+        ),
+        onnx_gpu_mem_limit_mb=_optional_int(rid.get("onnx_gpu_mem_limit_mb")),
+        travel_time_seconds=dict(rid.get("travel_time_seconds") or {}),
+        default_travel_time_seconds=float(
+            rid.get("default_travel_time_seconds", defaults.default_travel_time_seconds)
+        ),
+        # YAML membaca 00:00 tanpa kutip sebagai angka sexagesimal; terima keduanya.
+        daily_purge_time=_hhmm(rid.get("daily_purge_time", defaults.daily_purge_time)),
+    )
+
+
+def _hhmm(value: Any) -> str:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return f"{value // 60:02d}:{value % 60:02d}"
+    return str(value)
 
 
 def _optional_float(value: Any) -> Optional[float]:

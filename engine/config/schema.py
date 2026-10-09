@@ -329,6 +329,105 @@ class RecognitionConfig:
 
 
 @dataclass(frozen=True)
+class ReidSettings:
+    """ReID berjangkar wajah (dokumen 12 §3.6, dokumen 04 §11). Default MATI.
+
+    Mati berarti tidak ada onnxruntime yang disentuh untuk ReID, tidak ada
+    worker, dan tidak ada satu event pun yang berubah. Menyala butuh
+    rekognisi wajah (`recognition.recognizer: onnx_face`): galeri ReID hanya
+    diisi dari track yang identitasnya berasal dari wajah, jadi tanpa wajah
+    ReID hanya bisa membuat kelompok ANON yang tidak pernah selesai.
+
+    Ambang kecocokan (`match_threshold`) adalah konstanta perseptual milik
+    model, BUKAN kebijakan. `None` = usulan 0,80 di `identity/reid/merge.py`
+    yang belum dikalibrasi; nilai sebenarnya dari MODEL-CARD (`eval_reid.py`
+    pada crop berlabel) dan baru diisi setelah EA menyetujui.
+    """
+
+    enabled: bool = False
+    model_path: str = "engine/models/reid/osnet_reid.onnx"
+    model_sha256: Optional[str] = None
+    match_threshold: Optional[float] = None
+    match_margin: Optional[float] = None
+    # Gerbang kualitas crop badan (identity/reid/quality.py).
+    min_crop_height_px: float = 96.0
+    min_aspect: float = 0.15
+    max_aspect: float = 1.0
+    edge_margin_px: float = 2.0
+    # Embedding berbasis kejadian: track baru, wajah baru terkonfirmasi, lalu
+    # paling sering sekali per interval ini per track. Bukan tiap frame.
+    embed_interval_seconds: float = 15.0
+    max_batch: int = 8
+    worker_queue: int = 16
+    max_age_seconds: float = 1.0
+    onnx_providers: Optional[Tuple[str, ...]] = None
+    onnx_gpu_mem_limit_mb: Optional[int] = None
+    # Waktu tempuh minimum antar lokasi (detik), bersarang dan simetris:
+    #   travel_time_seconds: {lobby: {smoking: 12}, luar: {lobby: 8}}
+    # Pasangan yang tidak tercantum memakai default yang sengaja besar (ketat).
+    travel_time_seconds: dict = field(default_factory=dict)
+    default_travel_time_seconds: float = 30.0
+    # Jam lokal (HH:MM) galeri tubuh + kelompok ANON dikosongkan setiap hari.
+    # Pakaian berganti antar hari; penampilan kemarin hanya menambah peluang tertukar,
+    # dan data penampilan tidak disimpan lebih lama dari perlu. Pilih jam di luar
+    # jam operasional (engine tetap jalan, ReID mulai dari galeri kosong).
+    daily_purge_time: str = "00:00"
+
+    def __post_init__(self) -> None:
+        if self.match_threshold is not None and not -1.0 <= self.match_threshold <= 1.0:
+            raise ValueError("reid.match_threshold must be within [-1, 1].")
+        if self.match_margin is not None and self.match_margin < 0:
+            raise ValueError("reid.match_margin must be >= 0.")
+        if self.model_sha256 is not None:
+            digest = self.model_sha256.strip().lower()
+            if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+                raise ValueError("reid.model_sha256 must be 64 hex characters (or unset).")
+        if self.embed_interval_seconds <= 0:
+            raise ValueError("reid.embed_interval_seconds must be > 0.")
+        if self.max_batch < 1 or self.worker_queue < 1:
+            raise ValueError("reid.max_batch and reid.worker_queue must be >= 1.")
+        if self.max_age_seconds <= 0:
+            raise ValueError("reid.max_age_seconds must be > 0.")
+        if self.onnx_gpu_mem_limit_mb is not None and self.onnx_gpu_mem_limit_mb < 64:
+            raise ValueError("reid.onnx_gpu_mem_limit_mb must be >= 64 (or unset).")
+        if not isinstance(self.travel_time_seconds, dict):
+            raise ValueError("reid.travel_time_seconds must be a mapping location -> {location: seconds}.")
+        self.purge_offset_seconds()
+        from ..identity.reid.quality import CropRules
+
+        CropRules(self.min_crop_height_px, self.min_aspect, self.max_aspect, self.edge_margin_px)
+        self.merge_config()  # validasi waktu tempuh sekarang, bukan saat track pertama
+
+    def purge_offset_seconds(self) -> float:
+        """`daily_purge_time` "HH:MM" -> detik sejak 00:00 lokal."""
+        text = str(self.daily_purge_time).strip()
+        hours, sep, minutes = text.partition(":")
+        if not (sep and hours.isdigit() and minutes.isdigit() and len(minutes) == 2
+                and 0 <= int(hours) <= 23 and 0 <= int(minutes) <= 59):
+            raise ValueError(f"reid.daily_purge_time must be HH:MM (00:00..23:59), got {text!r}.")
+        return float(int(hours) * 3600 + int(minutes) * 60)
+
+    def crop_rules(self):
+        from ..identity.reid.quality import CropRules
+
+        return CropRules(self.min_crop_height_px, self.min_aspect, self.max_aspect, self.edge_margin_px)
+
+    def merge_config(self):
+        """Ke `identity.reid.merge.ReidConfig`; None = default modul itu."""
+        from ..identity.reid.merge import ReidConfig
+
+        raw: dict = {
+            "default_min_travel_seconds": float(self.default_travel_time_seconds),
+            "min_travel_seconds": self.travel_time_seconds,
+        }
+        if self.match_threshold is not None:
+            raw["match_threshold"] = float(self.match_threshold)
+        if self.match_margin is not None:
+            raw["match_margin"] = float(self.match_margin)
+        return ReidConfig.from_mapping(raw)
+
+
+@dataclass(frozen=True)
 class DetectorConfig:
     """Perceptual constants for the object detector."""
 
@@ -413,6 +512,7 @@ class EngineConfig:
     tracker: TrackerConfig = field(default_factory=TrackerConfig)
     zones: ZoneConfig = field(default_factory=ZoneConfig)
     recognition: RecognitionConfig = field(default_factory=RecognitionConfig)
+    reid: ReidSettings = field(default_factory=ReidSettings)
 
     def effective_fps(self, source_fps: float) -> float:
         """
@@ -440,3 +540,9 @@ class EngineConfig:
             )
         if self.source_type not in ("opencv", "video_file", "mock"):
             raise ValueError(f"Unknown source_type '{self.source_type}'.")
+        if self.reid.enabled and self.recognition.recognizer == "none":
+            raise ValueError(
+                "reid.enabled butuh recognition.recognizer: onnx_face. Galeri ReID hanya "
+                "diisi dari track berwajah; tanpa wajah ReID hanya membuat kelompok ANON "
+                "yang tidak pernah selesai."
+            )
