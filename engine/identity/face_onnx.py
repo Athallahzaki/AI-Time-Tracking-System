@@ -77,12 +77,16 @@ class FaceAnalysis:
     landmarks: Optional[List[List[float]]] = None
 
 
-def _session(path: str, providers: Optional[Sequence[str]]):
+def _session(path: str, providers: Optional[Sequence[str]], *,
+             purpose: str = "recognition.recognizer=onnx_face",
+             providers_key: str = "recognition.onnx_providers"):
+    """Sesi onnxruntime; `purpose`/`providers_key` hanya untuk pesan galat
+    (dipakai ulang oleh embedder ReID, `identity/reid/embedder_onnx.py`)."""
     try:
         import onnxruntime as ort  # noqa: WPS433 — optional dependency by design
     except ImportError as error:
         raise RecognizerUnavailable(
-            "recognition.recognizer=onnx_face butuh onnxruntime "
+            f"{purpose} butuh onnxruntime "
             "(pip install onnxruntime-gpu atau onnxruntime)"
         ) from error
     if not Path(path).is_file():
@@ -103,7 +107,7 @@ def _session(path: str, providers: Optional[Sequence[str]]):
             f"CUDAExecutionProvider diminta untuk {Path(path).name} tetapi tidak aktif "
             f"(aktif: {active}, onnxruntime {getattr(ort, '__version__', '?')}). Biasanya DLL CUDA/cuDNN "
             "tidak cocok dengan build onnxruntime-gpu; lihat pesan [E:onnxruntime] di atas. "
-            "Kalau memang ingin CPU, set recognition.onnx_providers: [\"CPUExecutionProvider\"]."
+            f"Kalau memang ingin CPU, set {providers_key}: [\"CPUExecutionProvider\"]."
         )
     logger.info("onnx %s: provider aktif %s", Path(path).name, active)
     return session

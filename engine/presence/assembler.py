@@ -37,6 +37,11 @@ from ..api.events import PtsClock
 from .zones import ZONE_INTERIOR, ZoneLabeller
 
 Emit = Callable[[dict], None]
+# (person_id, track_uuid, emit_fn) -> interval_id. Dipasang hanya bila ReID
+# menyala (pipeline/reid_coordinator.py): label ANON yang sudah diselesaikan
+# diganti karyawan, dan interval ANON dicatat untuk `moved_intervals` di bawah
+# satu kunci, supaya interval ANON tidak pernah terbit SESUDAH identity.resolved.
+IntervalGate = Callable[[str, str, Callable[[str], str]], str]
 
 # Konstanta perseptual, sementara. Nilai sebenarnya keluar dari rekaman B1
 # (§13, §15): berapa lama jeda masih bisa diyakini tracker sebagai kehadiran
@@ -61,6 +66,9 @@ class _Presence:
     evidence_count: int = 1
     prev_interval_id: Optional[str] = None
     last_zone: str = ZONE_INTERIOR
+    # Label dari ReID (ANON-xxxx atau karyawan lewat galeri), bukan dari wajah.
+    # Bisa dicabut tanpa memancarkan interval; wajah selalu menimpanya.
+    reid: bool = False
 
 
 @dataclass(frozen=True)
@@ -89,11 +97,13 @@ class PresenceAssembler:
         zones: Optional[ZoneLabeller] = None,
         stitch_window_seconds: float = DEFAULT_STITCH_WINDOW_SECONDS,
         interval_prefix: str = "iv",
+        interval_gate: Optional[IntervalGate] = None,
     ) -> None:
         self._emit = emit
         self._zones = zones or ZoneLabeller()
         self._stitch_window = stitch_window_seconds
         self._prefix = interval_prefix
+        self._interval_gate = interval_gate
 
         self._clocks: Dict[str, PtsClock] = {}
         self._open: Dict[str, _Presence] = {}
@@ -194,6 +204,7 @@ class PresenceAssembler:
 
         clock = self.clock_for(presence.camera_id)
         presence.person_id = person_id
+        presence.reid = False
         presence.confidence = confidence
         presence.evidence_count = evidence_count
         # §4.4: batas dimundurkan ke kelahiran track, bukan ke saat wajah terbaca.
@@ -222,6 +233,37 @@ class PresenceAssembler:
 
         return None
 
+    def reid_assigned(self, track_uuid: str, person_id: str) -> bool:
+        """Label dari ReID untuk track TANPA identitas wajah (dokumen 12 §3.6).
+
+        Tidak memancarkan `track.identified`: event itu milik bukti wajah
+        (similarity, margin, evidence_count). Interval nanti ditutup dengan
+        person_id ini dan batas `tracking`, mulai dari kelahiran track.
+        False = ditolak karena track sudah dipegang wajah.
+        """
+        presence = self._open.get(track_uuid)
+        if presence is None:
+            return False
+        if presence.person_id is not None and not presence.reid:
+            return False
+        presence.person_id = person_id
+        presence.reid = True
+        presence.start_pts = presence.track_started_pts
+        presence.start_source = "tracking"
+        presence.confidence = 0.0
+        presence.evidence_count = 1
+        presence.prev_interval_id = None
+        return True
+
+    def reid_cleared(self, track_uuid: str) -> None:
+        """Klaim ReID dicabut sebelum interval terbit: tidak ada yang dipancarkan."""
+        presence = self._open.get(track_uuid)
+        if presence is None or not presence.reid:
+            return
+        presence.person_id = None
+        presence.reid = False
+        presence.start_pts = None
+
     def identity_released(self, track_uuid: str, pts: float) -> None:
         """Klaim dicabut di tengah track: interval ditutup, track berlanjut.
 
@@ -235,6 +277,7 @@ class PresenceAssembler:
         self._close_interval(presence, pts, presence.last_zone, "tracking", "identity_released")
 
         presence.person_id = None
+        presence.reid = False
         presence.start_pts = None
         presence.prev_interval_id = None
         presence.track_started_pts = pts
@@ -265,12 +308,21 @@ class PresenceAssembler:
 
     def _close_interval(self, presence: _Presence, end_pts: float, end_zone: str,
                         end_source: str, end_reason: str) -> str:
+        def emit(person_id: str) -> str:
+            return self._emit_interval(presence, person_id, end_pts, end_zone, end_source, end_reason)
+
+        if self._interval_gate is None:
+            return emit(presence.person_id)
+        return self._interval_gate(presence.person_id, presence.track_uuid, emit)
+
+    def _emit_interval(self, presence: _Presence, person_id: str, end_pts: float,
+                       end_zone: str, end_source: str, end_reason: str) -> str:
         clock = self.clock_for(presence.camera_id)
         interval_id = self._next_interval_id(presence.camera_id)
         start_pts = presence.start_pts if presence.start_pts is not None else presence.track_started_pts
 
         self._emit(events.presence_interval(
-            clock, interval_id, presence.person_id,
+            clock, interval_id, person_id,
             start_pts=start_pts, end_pts=max(start_pts, end_pts),
             start_source=presence.start_source, end_source=end_source,
             start_zone=presence.start_zone, end_zone=end_zone,
@@ -282,7 +334,7 @@ class PresenceAssembler:
 
         self._closed.append(_Closed(
             interval_id=interval_id, camera_id=presence.camera_id,
-            stream_epoch=presence.stream_epoch, person_id=presence.person_id,
+            stream_epoch=presence.stream_epoch, person_id=person_id,
             end_pts=end_pts, end_zone=end_zone,
         ))
         self._resumed_from[interval_id] = presence.track_uuid

@@ -255,8 +255,12 @@ def summarize(rows: List[Dict[str, Any]], duration: float) -> List[str]:
 
 
 def run(host: str, port: int, cameras: List[Tuple[str, str]], seconds: float,
-        out_path: Path, key: Optional[str]) -> List[str]:
+        out_path: Path, key: Optional[str], events_out: Optional[Path] = None) -> List[str]:
+    """`events_out`: bila diisi, setiap event kanal `events` (yang bernomor `seq`,
+    bukan putar ulang) ditulis apa adanya ke NDJSON, untuk
+    `python -m contracts.validator <berkas> --strict` tanpa backend (paket ea-r3)."""
     sock, reader, hello_ack = connect(host, port, key)
+    event_lines: List[str] = []
     _send(sock, {"type": "set_cameras", "v": 1, "ts": _now_iso(),
                  "cameras": [{"camera_id": c, "uri": u, "enabled": True} for c, u in cameras]})
 
@@ -297,6 +301,8 @@ def run(host: str, port: int, cameras: List[Tuple[str, str]], seconds: float,
             if kind != "view.frame" and sent is not None and sent < started - REPLAY_SLACK:
                 replayed += 1
                 continue
+            if events_out is not None and "seq" in message:
+                event_lines.append(line if line.endswith("\n") else line + "\n")
             if kind == "view.frame":
                 camera = message.get("camera_id", "")
                 at = _parse_at(message.get("at"))
@@ -325,6 +331,10 @@ def run(host: str, port: int, cameras: List[Tuple[str, str]], seconds: float,
             writer = csv.DictWriter(handle, fieldnames=fields)
             writer.writeheader()
             writer.writerows(rows)
+        if events_out is not None:
+            events_out.parent.mkdir(parents=True, exist_ok=True)
+            with events_out.open("w", newline="", encoding="utf-8") as handle:
+                handle.writelines(event_lines)
 
     lines = summarize(rows, time.time() - started)
     if replayed:
@@ -362,6 +372,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--minutes", type=float, default=5.0)
     parser.add_argument("--seconds", type=float, default=None, help="override --minutes (untuk uji singkat)")
     parser.add_argument("--out", default=None, help="berkas CSV (default bench-out/lag-probe-<waktu>.csv)")
+    parser.add_argument("--events-out", default=None, metavar="NDJSON",
+                        help="simpan event kanal events ke NDJSON (cek: python -m contracts.validator BERKAS --strict)")
     parser.add_argument("--summarize", default=None, metavar="CSV",
                         help="ringkas ulang CSV hasil probe sebelumnya, tanpa menyambung ke engine")
     args = parser.parse_args(argv)
@@ -380,9 +392,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     out = Path(args.out) if args.out else ROOT / "bench-out" / f"lag-probe-{time.strftime('%Y%m%d-%H%M%S')}.csv"
 
     print(f"probe {seconds:.0f} dtk ke {host}:{port}, kamera: {', '.join(c for c, _ in cameras)}")
-    lines = run(host or "127.0.0.1", int(port), cameras, seconds, out, os.environ.get("ENGINE_SHARED_KEY") or None)
+    events_out = Path(args.events_out) if args.events_out else None
+    lines = run(host or "127.0.0.1", int(port), cameras, seconds, out, os.environ.get("ENGINE_SHARED_KEY") or None,
+                events_out=events_out)
     print("\n".join(lines))
     print(f"\ndata mentah: {out}")
+    if events_out is not None:
+        print(f"event NDJSON: {events_out}")
     return 0
 
 

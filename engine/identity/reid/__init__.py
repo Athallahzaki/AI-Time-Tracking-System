@@ -1,8 +1,10 @@
 """ReID berjangkar wajah (dokumen 12 §3.6).
 
-Logika saja, tanpa model: embedding tubuh datang sebagai vektor numpy lewat
-pesan antrean (`messages.py`). Belum dirakit ke `runtime/camera.py`; itu
-menunggu penjadwal tahap 2 (EB).
+Logika di sini tetap tanpa model: embedding tubuh datang sebagai vektor numpy
+lewat pesan antrean (`messages.py`). Model OSNet ONNX ada di
+`embedder_onnx.py` dan gerbang kualitas crop di `quality.py`; keduanya hanya
+dimuat bila `reid.enabled: true`. Perakitan ke kamera ada di `pipeline/`
+(`reid_coordinator.py`, `reid_worker.py`, `reid_tap.py`, paket ea-r3), default mati.
 """
 
 from .gallery import DailyGallery, PrototypeSet

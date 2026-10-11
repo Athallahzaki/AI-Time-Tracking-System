@@ -188,3 +188,52 @@ def test_median_segar_tapi_lonjakan_tidak_lulus():
     text = "\n".join(probe.summarize(rows, 120.0))
     assert "TIDAK STABIL" in text
     assert "terburuk 6.00" in text and "fps turun ke 2.5" in text and "POSITIF" in text
+
+
+def test_probe_menyimpan_event_ndjson_yang_lolos_validator_dengan_reid_menyala(tmp_path):
+    """--events-out (paket ea-r3): cara memeriksa aliran ReID di laptop tanpa backend."""
+    import importlib.util
+    import json
+
+    import numpy as np
+
+    from contracts.validator import ConformanceChecker, SchemaValidator
+    from engine.config.schema import ReidSettings
+
+    spec = importlib.util.spec_from_file_location("lag_probe", "scripts/lag_probe.py")
+    lag_probe = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(lag_probe)
+
+    def embed(crops):
+        out = np.zeros((len(crops), 8), dtype=np.float32)
+        out[:, 0] = 1.0
+        return out
+
+    port = _free_port()
+    base = dataclasses.replace(load_config(), source_type="mock", auto_warmup=False)
+    config = dataclasses.replace(
+        base,
+        recognition=dataclasses.replace(base.recognition, enabled=True, recognizer="onnx_face",
+                                        face_detector_model="det.onnx", face_embedder_model="emb.onnx"),
+        reid=ReidSettings(enabled=True, min_crop_height_px=50),
+    )
+    runtime = EngineRuntime(config=config, options=RuntimeOptions(
+        tcp=("127.0.0.1", port), health_interval_seconds=0.5, view_fps=5.0, target_fps=10.0,
+    ), recognize=lambda track, frame: None, reid_embed=embed)
+    runtime.listen()
+    threading.Thread(target=runtime.api.serve_forever, daemon=True).start()
+    time.sleep(0.2)
+    try:
+        events_out = tmp_path / "events.ndjson"
+        lag_probe.run("127.0.0.1", port, [("cam01", "mock")], 3.0, tmp_path / "probe.csv", None,
+                      events_out=events_out)
+        messages = [json.loads(line) for line in events_out.read_text(encoding="utf-8").splitlines()]
+        assert any(m["type"] == "camera.online" for m in messages)
+        assert all("seq" in m for m in messages)
+        validator = SchemaValidator()
+        for message in messages:
+            assert not validator.validate_message(message, expected_channel="events"), message
+        assert ConformanceChecker().check(messages).ok
+        assert runtime._reid.worker.snapshot_metrics()["submitted"] >= 1
+    finally:
+        runtime.close()
