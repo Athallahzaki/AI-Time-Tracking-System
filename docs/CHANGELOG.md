@@ -7,6 +7,30 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-10-12 · paket eb-r1 — Hasil baseline 5 kamera dan A/B free vs tick (dokumen saja)
+
+Dasar: repo 12 Okt (sesudah ea-r7). Jalur EB. **Tidak ada kode, config, atau skema yang berubah.**
+
+**Apa yang berubah**
+
+- `docs/DEMO-REMOTE.md` §8.1: prasyarat path MediaMTX `cam02`..`cam05` (tanpa itu
+  `publish_test_video.ps1 -Count 5` kena 400 Bad Request), hasil uji 12 Okt, cara membaca
+  kolom `drop/s`, dan butir "Cara membaca" yang terbantah data (tick + batch).
+- `docs/SERAH-TERIMA.md` ditulis ulang: hasil, temuan, keputusan untuk tim.
+
+**Hasil singkat.** 5 × 1080p25 di RTX 4060, probe 15 menit: free 6 fps LULUS (umur kotak p99
+0,28 dtk); tick 6 fps LULUS tipis (p99 0,66 dtk); free dan tick di target 10 sama-sama mentok
+±7,7 fps/kamera (sesi lain 6,26 fps), jadi plafon 31–38 frame/dtk tergantung kondisi laptop;
+tick + `batch_inference` + `cuda_graph` = CUDA `illegal memory access`, tanpa `cuda_graph` 2,5 fps.
+
+**Temuan di luar lingkup (dicatat, tidak dikerjakan).** Empat file baru paket ea-r3 tidak pernah
+di-commit (checkout bersih crash di `load_config`); `deploy/mediamtx/mediamtx.yml` hanya punya
+`cam01`; fallback batch di `dfine_detector.py` tidak bisa pulih dari error CUDA fatal; log usang
+`factory.py:242`; dugaan offset jam tetap pada satu kamera per run. Rincian di SERAH-TERIMA.
+
+**Cara uji.** Tidak ada (dokumen). Angka dari `bench-out/ab-T0.csv`, `ab-T0-6.csv`, `ab-T1.csv`,
+`ab-idk2.csv` (tick, target 10), `ab-idk3.csv` (free, target 10) di laptop; CSV tidak di-commit.
+
 ## 2026-10-09 · paket ea-r7 — `forget_person` ikut menghapus data tubuh ReID
 
 Dasar: ea-r6. Hanya berpengaruh bila `reid.enabled: true` (default mati).

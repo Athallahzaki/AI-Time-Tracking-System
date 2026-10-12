@@ -309,6 +309,22 @@ Uji ini bagian dari baseline 5 kamera (minggu 1) dan gerbang 23 Oktober. Kondisi
 T0-6 perlu supaya perbandingannya adil: tick di 6 fps harus dibandingkan dengan free di 6 fps,
 bukan free di 10 fps.
 
+**Prasyarat MediaMTX.** `deploy/mediamtx/mediamtx.yml` di repo hanya mendaftarkan `cam01`;
+publish ke path yang tidak terdaftar ditolak MediaMTX dengan `400 Bad Request` (ffmpeg:
+"Could not write header ... Server returned 400"). Sampai config repo diperbarui, tambahkan
+di bawah `cam01` lalu restart MediaMTX:
+
+```yaml
+  cam02:
+    source: publisher
+  cam03:
+    source: publisher
+  cam04:
+    source: publisher
+  cam05:
+    source: publisher
+```
+
 Publish lima stream sekaligus dari satu video (satu proses ffmpeg per path, encode sama dengan
 §3.3) di terminal terpisah, dan biarkan jalan selama semua run:
 
@@ -336,12 +352,42 @@ keterlambatannya), detak yang dilompati, dan detak terlewat per kamera. Kirim lo
 
 Cara membaca:
 - **T1 LULUS, T0-6 GAGAL:** penjadwal memperbaiki stabilitas; lanjut ke tahap 2 sesuai dokumen 14.
-- **Keduanya LULUS:** 6 fps saja sudah cukup cadangan; tick tetap dipakai karena memberi batch
-  serentak dan irama yang bisa diprediksi, tetapi tidak mendesak.
+- **Keduanya LULUS:** 6 fps saja sudah cukup cadangan. Catatan 12 Okt: "batch serentak" tidak
+  berlaku di 4060 (lihat hasil di bawah), jadi tick tahap 1 tidak punya keuntungan di laptop ini.
 - **Keduanya GAGAL:** masalahnya bukan irama. Lihat detak telat di log: bila banyak, satu langkah
   lebih lama dari periode (GPU/CPU kurang) -- turunkan `tick_fps` atau ukur per tahap dengan py-spy.
 - **`missed_ticks` besar hanya di satu kamera:** kamera itu yang lambat (decode, sumber), bukan
   penjadwalnya.
+
+**Kolom `drop/s`.** Isinya `frames_dropped_stale` = frame yang tertimpa di slot sebelum diambil
+pipeline, bukan frame yang hilang. Frame yang dibuang decimation `target_fps` tidak terhitung, jadi
+nilainya tinggi saat thread kamera sibuk atau menunggu detak, rendah saat ia sering mengambil slot.
+Jangan bandingkan kolom ini antar mode (free ±8/dtk vs tick ±19/dtk di 6 fps bukan beda kehilangan).
+
+#### Hasil 12 Oktober (RTX 4060 laptop, 5 × 1080p25 `ongame.mp4`, ReID mati)
+
+| Run | Mode, target | fps/kamera | umur kotak med / p99 | Vonis |
+|---|---|---|---|---|
+| T0-6 | free, 6 | 6,00 | 0,13 / 0,28 dtk | LULUS |
+| T1 | tick, 6, tanpa batch | 5,95 | 0,30 / 0,66 dtk | LULUS (tipis) |
+| T0 | free, 10 | 6,26 (mentok) | 0,19 / 0,32 dtk | GAGAL (target) |
+| idk3 | free, 10 | 7,76 (mentok) | 0,17 / 0,58 dtk | GAGAL (target) |
+| idk2 | tick, 10 | 7,70 (mentok) | 0,16 / 0,23 dtk | GAGAL (target) |
+| — | tick + `batch_inference` + `cuda_graph` | — | — | CUDA crash |
+| — | tick + `batch_inference`, tanpa `cuda_graph` | ±2,5 | — | tidak dipakai |
+
+Bacaan:
+- **Baseline 5 kamera = free, 6 fps.** Plafon 31–38 frame/dtk total, tergantung kondisi laptop
+  (charger, mode daya, suhu): T0 dan idk3 identik tetapi beda sesi. 6 fps memberi cadangan ±22%
+  dari plafon atas, ±0% dari plafon bawah. Catat kondisi laptop tiap run.
+- **Tick tidak menang:** di 6 fps menambah latensi, di 10 fps throughput sama dengan free.
+- **Batch gugur di 4060:** dengan `cuda_graph` konteks CUDA rusak (`illegal memory access`, semua
+  kamera mati, reconnect di proses yang sama tidak pulih); tanpa `cuda_graph` forward kembali eager.
+  Jangan nyalakan `batch_inference` bersama `cuda_graph`.
+- **Satu kamera per run** (cam05 di T1, cam04 di idk3) punya umur kotak ±0,4 dtk lebih tua dengan
+  sebaran sempit: dugaan offset jam (P18), bukan antrean. Cek median `drift_s` per kamera di CSV.
+- Belum terukur: apakah rekognisi wajah benar-benar bekerja selama run (`rekognisi: diproses N` di
+  log engine) dan profil CPU per tahap (`py-spy`), yang menentukan vonis spike NVDEC.
 
 ## 9. Checklist hari demo
 
