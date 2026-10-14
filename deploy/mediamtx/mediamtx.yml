@@ -36,4 +36,15 @@ paths:
   cam01:
     # Aman sebagai default; Compose wajib menggantinya dengan CAM01_SOURCE.
     source: publisher
+  # cam02..cam05: uji 5 kamera dengan video (publish_test_video.ps1 -Count 5).
+  # Tanpa path terdaftar, publish ditolak "400 Bad Request" (eb-r1). Untuk CCTV
+  # sungguhan ganti `source` dengan URL RTSP kamera masing-masing.
+  cam02:
+    source: publisher
+  cam03:
+    source: publisher
+  cam04:
+    source: publisher
+  cam05:
+    source: publisher
 

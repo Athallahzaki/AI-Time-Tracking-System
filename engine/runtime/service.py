@@ -71,6 +71,17 @@ logger = logging.getLogger("engine.runtime")
 SNAPSHOT_INTERVAL_SECONDS = 10.0
 HEALTH_INTERVAL_SECONDS = 30.0
 
+# Kode keluar proses saat engine berhenti karena error GPU fatal (ea-r8). Watchdog
+# menyalakan ulang pada kode keluar apa pun; kode ini supaya log-nya bisa dibedakan.
+EXIT_CODE_GPU_FATAL = 3
+# Rasio sibuk dispatcher detector bersama di atas ini = peringatan di log: fps
+# akan turun begitu beban naik sedikit (rekognisi, ReID, orang lebih banyak).
+DETECTOR_BUSY_WARN = 0.8
+# Penjaga sementara: batch + cuda_graph membuat CUDA `illegal memory access` di
+# RTX 4060 (eb-r1, 12 Okt). Isi env ini dengan 1 hanya untuk eksperimen (mis. batch
+# berukuran tetap); engine dengan error itu akan keluar dan dinyalakan ulang terus.
+ALLOW_BATCH_CUDA_GRAPH_ENV = "ENGINE_ALLOW_BATCH_CUDA_GRAPH"
+
 
 class _LockedScheduler:
     """One scheduler, many camera threads.
@@ -158,6 +169,7 @@ class EngineRuntime:
                             self.config.target_fps, tick_fps)
                 self.config = dataclasses.replace(self.config, target_fps=tick_fps)
             self._tick_gate = TickGate(tick_fps)
+        _refuse_known_crash(self.config)
         # Sebelum detector/recognizer dimuat, supaya variabel lingkungan
         # masih berlaku untuk pustaka yang belum diimpor.
         from .threads import apply_cpu_threads
@@ -226,6 +238,15 @@ class EngineRuntime:
                                         self.options.heartbeat_interval_seconds)
         # Dipanggil sekali saat berkas stop terlihat; __main__ memasang jalur berhenti rapinya.
         self.on_stop_file: Optional[Callable[[], None]] = None
+        # Error GPU fatal (core.gpu_fatal_action: exit). `fatal_reason` terisi = engine
+        # berhenti karena itu; __main__ keluar dengan EXIT_CODE_GPU_FATAL. `on_fatal`
+        # dipasang __main__ (jalur berhenti rapi yang sama dengan Ctrl+C).
+        self.fatal_reason: Optional[str] = None
+        self.on_fatal: Optional[Callable[[str], None]] = None
+        self._fatal_lock = threading.Lock()
+        # Rasio sibuk dispatcher: (waktu, busy_seconds) pada laporan health terakhir.
+        self._busy_sample: Optional[Tuple[float, float]] = None
+        self.detector_busy_ratio: Optional[float] = None
         self._stop_file_seen = False
         if self.options.stop_file and os.path.exists(self.options.stop_file):
             # Sisa permintaan stop dari run sebelumnya, bukan untuk run ini.
@@ -384,6 +405,7 @@ class EngineRuntime:
             detector_provider=self._detector_for,
             tick_gate=self._tick_gate,
             reid=self._reid,
+            on_fatal=self._on_camera_fatal if self.config.gpu_fatal_action == "exit" else None,
         )
         if self._tick_gate is not None and not self._tick_gate.running:
             self._tick_gate.start()
@@ -418,6 +440,30 @@ class EngineRuntime:
                             "batch_inference %s)", config.detector.max_batch, config.detector.batch_wait_ms,
                             "on" if config.detector.batch_inference else "off")
             return self._shared_detector.handle(camera_id)
+
+    def _on_camera_fatal(self, camera_id: str, detail: str) -> None:
+        """Thread kamera melihat error GPU fatal: hentikan seluruh engine, sekali.
+
+        Konteks CUDA milik proses, bukan milik kamera: kamera lain akan gagal juga,
+        dan membuka ulang stream tidak memperbaiki apa pun (eb-r1). Proses baru
+        dari watchdog/Task Scheduler adalah satu-satunya pemulihan. Dipanggil dari
+        thread kamera, jadi berhentinya selalu di thread lain (close() menunggu
+        thread kamera selesai).
+        """
+        with self._fatal_lock:
+            if self.fatal_reason is not None:
+                return
+            self.fatal_reason = f"{camera_id}: {detail}"
+        logger.critical(
+            "error GPU fatal di kamera %s; engine berhenti (kode keluar %d) supaya dinyalakan "
+            "ulang dengan konteks CUDA baru: %s", camera_id, EXIT_CODE_GPU_FATAL, detail,
+        )
+        callback = self.on_fatal
+        if callback is not None:
+            threading.Thread(target=callback, args=(self.fatal_reason,),
+                             name="engine-gpu-fatal", daemon=True).start()
+        else:
+            threading.Thread(target=self.close, name="engine-gpu-fatal", daemon=True).start()
 
     def _release_detector(self, camera_id: str) -> None:
         if self._shared_detector is not None:
@@ -620,11 +666,19 @@ class EngineRuntime:
         shared = self._shared_detector
         if shared is not None:
             d = shared.metrics.as_dict()
+            ratio = self._sample_busy_ratio(now, shared.metrics.busy_seconds)
             logger.info(
                 "detector bersama: %d kamera, %d gambar dalam %d panggilan (rata2 %.2f/panggilan, maks %d), "
-                "%.0f ms/gambar", shared.active_cameras, int(d["images"]), int(d["batches"]),
+                "%.0f ms/gambar, sibuk %s", shared.active_cameras, int(d["images"]), int(d["batches"]),
                 d["mean_batch"], int(d["largest_batch"]), d["ms_per_image"],
+                "-" if ratio is None else f"{100.0 * ratio:.0f}%",
             )
+            if ratio is not None and ratio >= DETECTOR_BUSY_WARN:
+                logger.warning(
+                    "detector bersama sibuk %.0f%% dari waktu (batas aman %.0f%%): cadangan hampir habis, "
+                    "fps akan turun bila beban naik. Turunkan target_fps atau kurangi beban per frame.",
+                    100.0 * ratio, 100.0 * DETECTOR_BUSY_WARN,
+                )
         api_metrics = self.api.metrics
         drop_rate = _drop_rate(api_metrics)
 
@@ -645,6 +699,19 @@ class EngineRuntime:
                 } or None,
             )
         )
+
+    def _sample_busy_ratio(self, now: float, busy_seconds: float) -> Optional[float]:
+        """Porsi waktu dinding dispatcher sibuk sejak laporan health sebelumnya.
+
+        Mendekati 1,0 = dispatcher jenuh: inilah plafon fps 5 kamera (dok. analisis
+        14 Okt). None pada sampel pertama atau bila jam mundur.
+        """
+        previous, self._busy_sample = self._busy_sample, (now, busy_seconds)
+        if previous is None or now <= previous[0]:
+            return None
+        ratio = max(0.0, busy_seconds - previous[1]) / (now - previous[0])
+        self.detector_busy_ratio = min(1.0, ratio)
+        return self.detector_busy_ratio
 
     def _disk_free_mb(self) -> Optional[float]:
         """Ruang kosong di disk outbox (E10). None bila outbox di memori."""
@@ -679,6 +746,27 @@ class EngineRuntime:
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
+
+def _refuse_known_crash(config: EngineConfig) -> None:
+    """Tolak start untuk kombinasi yang terbukti merusak konteks CUDA.
+
+    Tidak di `config/schema.py`: `engine.tools.batch_check --cuda-graph` justru
+    perlu menyalakan kombinasi ini untuk mengujinya (cek ukuran batch tetap).
+    """
+    det = config.detector
+    if not (det.batch_inference and det.cuda_graph and det.share_across_cameras):
+        return
+    if os.environ.get(ALLOW_BATCH_CUDA_GRAPH_ENV, "").strip() in ("1", "true", "yes"):
+        logger.warning("detector.batch_inference + cuda_graph dinyalakan lewat %s: kombinasi ini "
+                       "membuat CUDA illegal memory access di RTX 4060 (eb-r1).", ALLOW_BATCH_CUDA_GRAPH_ENV)
+        return
+    raise ValueError(
+        "detector.batch_inference: true bersama detector.cuda_graph membuat CUDA "
+        "'illegal memory access' di RTX 4060 (paket eb-r1), dan sesudahnya tidak ada "
+        "kamera yang bisa pulih dalam proses yang sama. Matikan salah satunya. Untuk "
+        f"eksperimen, set env {ALLOW_BATCH_CUDA_GRAPH_ENV}=1."
+    )
+
 
 def _specs_from(cameras: Sequence[Dict[str, Any]]) -> List[CameraSpec]:
     specs = []

@@ -443,6 +443,12 @@ class DFINEDetector:
             # it a list is processed image by image.
             out = self._call(list(inputs), colour_format, confidence, batch=len(inputs))
         except Exception as exc:  # noqa: BLE001 -- jatuh ke per gambar, dicatat sekali
+            from .gpu_fatal import is_fatal_gpu_error
+
+            if is_fatal_gpu_error(exc):
+                # Konteks CUDA rusak: fallback per gambar pasti gagal juga dan hanya
+                # menyamarkan penyebab aslinya (eb-r1). Biarkan naik apa adanya.
+                raise
             self._batch_unsupported(f"model(list, batch={len(inputs)}) raised {exc!r}")
             return None
         if isinstance(out, (list, tuple)) and len(out) == len(inputs):

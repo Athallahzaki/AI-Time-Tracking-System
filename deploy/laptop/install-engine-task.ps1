@@ -98,7 +98,14 @@ $watchdogArgs = @(
     "-BindIp", $BindIp, "-Config", (Quote-Arg $Config), "-Port", $Port,
     "-HealthSeconds", $HealthSeconds, "-Python", (Quote-Arg $Python), "-StateDir", (Quote-Arg $StateDir)
 )
-if ($AffinityMask) { $watchdogArgs += @("-AffinityMask", $AffinityMask) }
+if ($AffinityMask) {
+    $watchdogArgs += @("-AffinityMask", $AffinityMask)
+} else {
+    # Uji 4060 (8 Okt): tanpa afinitas P-core engine berayun 10 -> 6 fps dan stall.
+    # start-engine.ps1 dipakai dengan -AffinityMask; tugas 24/7 harus sama.
+    Write-Warning ("-AffinityMask tidak diisi: engine dari tugas ini TIDAK dikunci ke P-core. " +
+        "Di laptop i7-13700HX pakai -AffinityMask 0xFFFF (16 thread P-core), sama dengan start-engine.ps1.")
+}
 if ($TargetFps -gt 0) {
     $watchdogArgs += @("-TargetFps", $TargetFps.ToString([Globalization.CultureInfo]::InvariantCulture))
 }

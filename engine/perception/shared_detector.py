@@ -30,6 +30,12 @@ serentak. Dispatcher lalu menunggu sampai SEMUA kamera terdaftar mengirim (atau
 berisi semua kamera per detak. Kamera yang sedang putus tetap terdaftar dan
 membuat detak itu menunggu sampai `batch_wait_ms`; batas itulah yang menjaga
 satu kamera mati tidak menahan yang lain lebih lama dari itu.
+
+**Error GPU fatal (paket ea-r8).** Error CUDA "sticky" (`illegal memory access`
+dan sejenisnya, lihat `gpu_fatal.py`) merusak konteks CUDA seluruh proses. Begitu
+satu terlihat, `fatal_error` diisi dan setiap permintaan berikutnya langsung
+dijawab dengan error itu tanpa menyentuh model lagi. Kamera melaporkannya ke
+runtime, yang (default) menghentikan proses supaya watchdog menyalakannya ulang.
 """
 
 from __future__ import annotations
@@ -43,6 +49,7 @@ from typing import Any, Dict, List, Optional
 
 from ..ports.detection import Detection
 from ..ports.frame import Frame
+from .gpu_fatal import describe, is_fatal_gpu_error
 
 logger = logging.getLogger("engine.perception.shared_detector")
 
@@ -92,6 +99,8 @@ class SharedDetector:
         self._warmed = False
         self._handles: Dict[str, "DetectorHandle"] = {}
         self.metrics = SharedMetrics()
+        # Error GPU fatal pertama; sesudahnya model tidak dipanggil lagi.
+        self.fatal_error: Optional[BaseException] = None
 
     # -- siklus hidup -------------------------------------------------------
 
@@ -144,6 +153,8 @@ class SharedDetector:
     # -- dipanggil thread kamera -------------------------------------------
 
     def infer(self, image: Any, confidence: Optional[float] = None) -> Any:
+        if self.fatal_error is not None:
+            raise self.fatal_error
         if self._thread is None:
             self.start()
         request = _Request(image, confidence)
@@ -188,6 +199,12 @@ class SharedDetector:
                 self._execute(requests, confidence)
 
     def _execute(self, requests: List[_Request], confidence: Optional[float]) -> None:
+        if self.fatal_error is not None:
+            # Konteks CUDA sudah rusak: jangan sentuh model lagi.
+            for request in requests:
+                request.error = self.fatal_error
+                request.done.set()
+            return
         started = time.perf_counter()
         try:
             results = self.inner.predict_images([r.image for r in requests], confidence=confidence)
@@ -196,6 +213,10 @@ class SharedDetector:
             for result in results[:1]:
                 self.inner.note_result(result)
         except BaseException as error:  # noqa: BLE001 -- dikembalikan ke kamera pemanggil
+            if self.fatal_error is None and is_fatal_gpu_error(error):
+                self.fatal_error = error
+                logger.critical("detector bersama: error GPU fatal, model tidak dipanggil lagi: %s",
+                                describe(error))
             for request in requests:
                 request.error = error
                 request.done.set()

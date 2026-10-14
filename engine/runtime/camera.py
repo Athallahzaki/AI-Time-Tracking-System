@@ -56,6 +56,7 @@ from ..presence.assembler import PresenceAssembler
 from ..presence.binding import EngineBinding
 from ..presence.zones import ZONE_INTERIOR
 from ..pipeline.zoning import TrackZoner, ZonePriorityQueue
+from ..perception.gpu_fatal import describe, is_fatal_gpu_error
 from ..ports.frame import Frame
 from ..ports.tracking import Track, TrackState
 from .clock import OffsetCorrector
@@ -117,8 +118,9 @@ class CameraStats:
     error: Optional[str] = None
     attempts: int = 0
     loops: int = 0
+    # Percobaan rekognisi per track yang MASIH hidup. Entri dihapus saat track
+    # hilang dari frame (`_remember_live`); dulu tumbuh selamanya (ea-r8).
     attempts_by_uuid: Dict[str, int] = field(default_factory=dict)
-    evidence_by_uuid: Dict[str, int] = field(default_factory=dict)
 
 
 class CameraSupervisor:
@@ -142,8 +144,15 @@ class CameraSupervisor:
         detector_provider: Optional[Callable[[str, EngineConfig], Any]] = None,
         tick_gate: Any = None,
         reid: Any = None,
+        on_fatal: Optional[Callable[[str, str], None]] = None,
     ) -> None:
         self.spec = spec
+        # Dipanggil (camera_id, ringkasan error) saat error GPU fatal terlihat
+        # di thread ini. None = perilaku lama: dicatat lalu dicoba ulang terus.
+        self._on_fatal = on_fatal
+        # Jeda sebelum percobaan buka ulang berikutnya; diumumkan apa adanya
+        # di camera.failed.retry_in_seconds (dulu selalu 5 walau backoff naik).
+        self._retry_delay = RETRY_INITIAL_SECONDS
         # ReID (pipeline/reid_coordinator.ReidRuntime) milik runtime; None =
         # mati, dan tidak satu baris pun di bawah berperilaku beda.
         self._reid = reid
@@ -263,6 +272,7 @@ class CameraSupervisor:
         camera_id = self.spec.camera_id
         delay = RETRY_INITIAL_SECONDS
         while not self._stop.is_set():
+            self._retry_delay = delay
             outcome = self._run_once()
             if outcome == "stopped" or self._stop.is_set():
                 break
@@ -297,9 +307,11 @@ class CameraSupervisor:
             self._emit_event(
                 events.camera_failed(
                     camera_id, time.time(), reason=_failure_reason(error),
-                    retry_in_seconds=RETRY_INITIAL_SECONDS,
+                    retry_in_seconds=self._retry_delay,
                 )
             )
+            if self._report_fatal(error):
+                return "stopped"
             return "failed"
 
         self.stats.state = "online"
@@ -330,11 +342,13 @@ class CameraSupervisor:
             self._emit_event(
                 events.camera_failed(
                     camera_id, time.time(), reason=_failure_reason(error),
-                    retry_in_seconds=RETRY_INITIAL_SECONDS,
+                    retry_in_seconds=self._retry_delay,
                 )
             )
             self._leave_gate()
             self._stop_engine()
+            if self._report_fatal(error):
+                return "stopped"
             return "failed"
 
         if outcome == "failed":
@@ -345,7 +359,7 @@ class CameraSupervisor:
             self._emit_event(
                 events.camera_failed(
                     camera_id, time.time(), reason="stream_ended",
-                    retry_in_seconds=RETRY_INITIAL_SECONDS,
+                    retry_in_seconds=self._retry_delay,
                 )
             )
             self._leave_gate()
@@ -355,6 +369,27 @@ class CameraSupervisor:
         self._leave_gate()
         self._shutdown()
         return outcome
+
+    def _report_fatal(self, error: BaseException) -> bool:
+        """Error GPU fatal → beri tahu runtime dan berhenti mencoba ulang.
+
+        True = kamera ini berhenti (runtime yang memutuskan nasib proses).
+        Tanpa `on_fatal` (core.gpu_fatal_action: retry) perilakunya seperti
+        dulu: dicoba ulang dengan backoff.
+        """
+        if not is_fatal_gpu_error(error):
+            return False
+        detail = describe(error)
+        if self._on_fatal is None:
+            logger.error("[%s] error GPU fatal; dicoba ulang (gpu_fatal_action: retry): %s",
+                         self.spec.camera_id, detail)
+            return False
+        self._stop.set()
+        try:
+            self._on_fatal(self.spec.camera_id, detail)
+        except Exception:  # noqa: BLE001 -- jalur berhenti tidak boleh menjatuhkan thread kamera
+            logger.exception("[%s] gagal melaporkan error GPU fatal", self.spec.camera_id)
+        return True
 
     def _leave_gate(self) -> None:
         if self._tick_gate is not None:
@@ -370,6 +405,7 @@ class CameraSupervisor:
         self._last_heartbeat.clear()
         self._track_born_pts.clear()
         self._unidentified_reported.clear()
+        self.stats.attempts_by_uuid.clear()
         self._live.clear()
         # New ids for every run: track_uuid / interval_id are never reused.
         self._run_nonce = uuid_module.uuid4().hex[:8]
@@ -536,6 +572,7 @@ class CameraSupervisor:
         self._last_heartbeat.clear()
         self._track_born_pts.clear()
         self._unidentified_reported.clear()
+        self.stats.attempts_by_uuid.clear()
         self._epoch = epoch
         # camera.online menutup semua rentang degraded kamera ini (07 §1.4).
         self._lag.reset()
@@ -581,6 +618,12 @@ class CameraSupervisor:
             self._track_born_pts.pop(uuid, None)
             self._last_heartbeat.pop(uuid, None)
             self._unidentified_reported.discard(uuid)
+            self.stats.attempts_by_uuid.pop(uuid, None)
+        attempts = self.stats.attempts_by_uuid
+        if len(attempts) > len(self._live):
+            # Percobaan untuk track yang tidak pernah masuk `_live` (mis. hilang
+            # sebelum frame berikutnya) juga tidak boleh tertinggal.
+            self.stats.attempts_by_uuid = {u: n for u, n in attempts.items() if u in self._live}
 
     def _heartbeats(self, pts: float) -> None:
         """Periodic proof a claim is still standing, and how it is being held.
@@ -704,6 +747,7 @@ class CameraSupervisor:
             self._last_heartbeat.clear()
             self._track_born_pts.clear()
             self._unidentified_reported.clear()
+            self.stats.attempts_by_uuid.clear()
             self._engine.set_analysis_paused(True)
             self._analysis_on = False
             logger.info("[%s] analisis dijeda (schedule_off); stream tetap dibaca", self.spec.camera_id)
@@ -724,9 +768,10 @@ class CameraSupervisor:
         """Bukti yang sudah DITERAPKAN untuk track ini. Di jalur asinkron (P7)
         bukti tiba beberapa frame setelah percobaan, jadi menghitungnya di sekitar
         pemanggilan binding akan selalu nol."""
+        # `CameraStats.evidence_by_uuid` dihapus (ea-r8): tidak pernah ditulis.
         if self._binding is None:
-            return self.stats.evidence_by_uuid.get(uuid, 0)
-        return self._binding.evidence_by_uuid.get(uuid, 0) or self.stats.evidence_by_uuid.get(uuid, 0)
+            return 0
+        return self._binding.evidence_by_uuid.get(uuid, 0)
 
     def _identity_of(self, uuid: str) -> Any:
         entry = self._live.get(uuid) or {}
@@ -923,6 +968,9 @@ def _failure_reason(error: BaseException) -> str:
     The vocabulary is small on purpose: `camera.failed` exists so the backend
     knows nobody went home (§2.3), not so it can diagnose FFmpeg.
     """
+    if is_fatal_gpu_error(error):
+        # Bukan kamera yang rusak: GPU engine. Backend jangan mencari masalah di CCTV.
+        return "gpu_fatal"
     text = repr(error).lower()
     if "refused" in text or "connection" in text:
         return "connection_refused"

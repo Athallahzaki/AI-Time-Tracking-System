@@ -25,9 +25,13 @@ di branch `claude/youthful-euler-eka234` dan zip `EA_2026-10-09-r3..r7_*.zip` (p
 
 1. **Ambang ditahan**: `match_threshold: null` = usulan 0,80 yang belum dikalibrasi. Butuh crop berlabel dari
    kamera lokasi (`eval_reid.py`), lalu EA menyetujui nilai di MODEL-CARD.
-2. **Backend belum siap**: `backend/schemas/protocol.py` hanya mengenal `identity_source` face/tracking dan tidak
-   punya handler `identity.resolved` (tugas BE dari ea-k1). **Jangan nyalakan ReID dengan backend sungguhan**:
-   heartbeat/snapshot `reid` akan gagal validasi, dan interval `ANON-…` bisa terhitung sebagai kehadiran.
+2. **Backend belum siap**: tidak ada handler `identity.resolved` dan ledger tidak menyaring `ANON-…` (tugas BE dari
+   ea-k1). **Jangan nyalakan ReID dengan backend sungguhan.** Koreksi 14 Okt (ea-r8): pesannya TIDAK gagal validasi.
+   `backend/services/protocol_adapter.py` memvalidasi dengan `contracts/schema/` yang sudah menerima `reid`,
+   `reid_retro`, dan `identity.resolved`, jadi pesannya diterima lalu diproses diam-diam dengan cara salah:
+   interval `ANON-…` masuk `free_time.py` sebagai kehadiran "karyawan" dan bisa memicu pelanggaran + email atas
+   nama ID sementara, dan atribusi mundur tidak pernah terjadi. Enum `IdentitySource` di `schemas/protocol.py`
+   hanya dipakai pesan keluar (hello/enroll) dan tes, bukan untuk ingest.
 3. Waktu tempuh antar lokasi belum diukur (`travel_time_seconds: {}`, default ketat 30 dtk).
 4. Mode `pause` belum aman dengan backend sungguhan: `EndReason` backend belum punya `schedule_off`, dan tombol
    start/stop operator memakai `enabled=false` yang sama (dengan `pause`, "stop" operator berarti stream tetap dibaca).

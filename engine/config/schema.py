@@ -514,6 +514,12 @@ class EngineConfig:
     #   lagi tanpa camera.online baru dan orangnya jadi track baru. Butuh backend yang
     #   mengenal end_reason schedule_off.
     analysis_off_mode: str = "stop"
+    # Error GPU fatal (konteks CUDA rusak, mis. `illegal memory access`;
+    # perception/gpu_fatal.py). "exit" (default sejak ea-r8): engine berhenti rapi
+    # dengan kode keluar 3 supaya watchdog/Task Scheduler menyalakannya ulang
+    # dengan konteks CUDA baru. "retry" = perilaku lama: kamera mencoba buka ulang
+    # terus dengan konteks yang sudah rusak (proses hidup, nol deteksi).
+    gpu_fatal_action: str = "exit"
 
     ingest: IngestConfig = field(default_factory=IngestConfig)
     detector: DetectorConfig = field(default_factory=DetectorConfig)
@@ -538,6 +544,8 @@ class EngineConfig:
             raise ValueError("core.cpu_threads must be >= 0 (0 = tidak dibatasi).")
         if self.analysis_off_mode not in ("stop", "pause"):
             raise ValueError("core.analysis_off_mode must be 'stop' or 'pause'.")
+        if self.gpu_fatal_action not in ("exit", "retry"):
+            raise ValueError("core.gpu_fatal_action must be 'exit' or 'retry'.")
         if self.scheduler not in ("free", "tick"):
             raise ValueError("core.scheduler must be 'free' or 'tick'.")
         if self.tick_fps is not None and self.tick_fps <= 0:

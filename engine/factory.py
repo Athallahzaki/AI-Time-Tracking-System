@@ -238,10 +238,11 @@ def build_recognition_queue(config: EngineConfig, zoner: Any) -> Optional[Any]:
     from .pipeline.zoning import ZonePriorityQueue
 
     scheduler = RecognitionScheduler(**config.recognition.scheduler_kwargs())
+    # Teks lama ("No consumer is attached ... does not recognise anything") usang:
+    # runtime/camera.py memasang consumer lewat set_consumer (ea-r8).
     logger.info(
-        "Recognition queue enabled: %s, max %d request(s) per frame. No consumer "
-        "is attached — until the worker pool of §5.2 exists this orders requests "
-        "and measures the queue, it does not recognise anything.",
+        "Antrean rekognisi aktif: %s, maks %d permintaan per frame. Consumer dipasang "
+        "pemanggil (runtime/camera.py); tanpa consumer antrean hanya mengurutkan.",
         scheduler.__class__.__name__,
         config.recognition.max_requests_per_frame,
     )

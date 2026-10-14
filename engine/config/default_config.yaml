@@ -47,6 +47,9 @@ core:
   target_fps: 30.0                 # baseline value. Dropping to 10 is step 10, measured separately
   auto_warmup: true
   strict_mode: true                # fail loudly rather than degrade silently
+  gpu_fatal_action: "exit"         # "exit" | "retry". Error CUDA fatal (illegal memory access dsb.)
+                                   # = engine keluar (kode 3) supaya watchdog menyalakannya ulang.
+                                   # "retry" = perilaku lama (proses hidup, nol deteksi). Paket ea-r8.
   cpu_threads: 0                   # batas thread torch/OpenCV/BLAS. 0 = semua core
                                    # (lama). Uji 2 untuk dugaan rebutan thread
                                    # di live_buffer: latest (runtime/threads.py).

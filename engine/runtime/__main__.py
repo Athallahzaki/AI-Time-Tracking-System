@@ -24,7 +24,7 @@ import sys
 import threading
 from typing import Optional
 
-from .service import EngineRuntime, RuntimeOptions
+from .service import EXIT_CODE_GPU_FATAL, EngineRuntime, RuntimeOptions
 
 _DEFAULT_OUTBOX = Path(__file__).resolve().parents[1] / "data" / "outbox.sqlite3"
 
@@ -149,6 +149,9 @@ def main(argv: Optional[list] = None) -> int:
 
     stopper = _Stopper(runtime.close)
     runtime.on_stop_file = lambda: stopper.request("berkas stop")
+    # Error GPU fatal (core.gpu_fatal_action: exit): berhenti rapi lewat jalur yang
+    # sama, lalu keluar dengan EXIT_CODE_GPU_FATAL supaya watchdog menyalakan ulang.
+    runtime.on_fatal = lambda reason: stopper.request(f"error GPU fatal ({reason})")
 
     def _on_signal(signum, _frame):
         stopper.request(f"sinyal {signum}")
@@ -169,6 +172,9 @@ def main(argv: Optional[list] = None) -> int:
         file=sys.stderr,
     )
     runtime.serve()
+    if runtime.fatal_reason is not None:
+        print(f"engine berhenti karena error GPU fatal: {runtime.fatal_reason}", file=sys.stderr)
+        return EXIT_CODE_GPU_FATAL
     return 0
 
 

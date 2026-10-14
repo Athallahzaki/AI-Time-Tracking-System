@@ -7,6 +7,59 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-10-14 · paket ea-r8 — Error GPU fatal menghentikan engine, kebocoran per track, metrik dispatcher
+
+Dasar: repo 14 Okt (sesudah eb-r1). Jalur EA + EB. Kontrak (`contracts/`), `engine/ports/`, dan `backend/`
+tidak disentuh. **Satu default berubah dengan sengaja**: `core.gpu_fatal_action: "exit"` (lihat Alasan).
+
+**Apa yang berubah**
+
+- Baru `engine/perception/gpu_fatal.py`: `is_fatal_gpu_error(error)` mengenali error CUDA "sticky"
+  (`illegal memory access`, `device-side assert`, `unspecified launch failure`, `launch timed out` (TDR Windows),
+  `CUBLAS/CUDNN_STATUS_EXECUTION_FAILED`, tipe `AcceleratorError`), termasuk di rantai `__cause__`.
+  CUDA out of memory sengaja BUKAN fatal.
+- `perception/shared_detector.py`: error fatal pertama disimpan di `fatal_error`; sesudahnya model tidak
+  dipanggil lagi dan setiap permintaan langsung dijawab dengan error itu.
+- `perception/dfine_detector.py` (`_try_batch`): error fatal di batch naik apa adanya, tidak jatuh ke per gambar
+  (fallback itu pasti gagal juga dan menyamarkan penyebab aslinya), dan tidak menandai batch "tidak didukung".
+- `runtime/camera.py`: parameter `on_fatal`. Error fatal di thread kamera → `camera.failed reason=gpu_fatal`,
+  kamera berhenti mencoba ulang, runtime diberi tahu. `camera.failed.retry_in_seconds` sekarang jeda yang
+  sebenarnya (5 → 10 → … → 60), bukan selalu 5. `CameraStats.attempts_by_uuid` dibersihkan saat track hilang
+  dan saat state kamera di-reset (dulu tumbuh selamanya); `evidence_by_uuid` dihapus (tidak pernah ditulis).
+- `runtime/service.py`: `_on_camera_fatal` (sekali, di thread lain) → `on_fatal` (`__main__`: berhenti rapi lewat
+  jalur Ctrl+C) → proses keluar dengan kode **3** (`EXIT_CODE_GPU_FATAL`). Start ditolak bila
+  `detector.batch_inference` + `cuda_graph` + detector bersama (crash eb-r1); env `ENGINE_ALLOW_BATCH_CUDA_GRAPH=1`
+  untuk eksperimen. Penjaga ini di runtime, bukan di skema, supaya `engine.tools.batch_check --cuda-graph` tetap
+  bisa menguji kombinasi itu. Log health "detector bersama" memuat **sibuk N%** (porsi waktu dispatcher bekerja
+  sejak laporan sebelumnya) dan WARNING bila ≥ 80%.
+- `config/schema.py` + `loader.py` + `default_config.yaml`: `core.gpu_fatal_action` = `"exit"` (default) | `"retry"`
+  (perilaku lama).
+- `presence/assembler.py`: `_resumed_from` hanya menyimpan interval yang masih kandidat sambungan (dulu satu entri
+  per interval selamanya). Kandidat sambungan kamera itu juga dipangkas saat interval ditutup, dengan acuan
+  kelahiran track tertua yang masih terbuka (track lama yang baru dikenali tetap bisa menyambung).
+- `factory.py`: log usang "No consumer is attached … does not recognise anything" diganti.
+- `deploy/mediamtx/mediamtx.yml`: path `cam02`..`cam05` (`source: publisher`); tanpa itu
+  `publish_test_video.ps1 -Count 5` kena 400 (eb-r1).
+- `deploy/laptop/install-engine-task.ps1`: peringatan bila `-AffinityMask` kosong (afinitas P-core terbukti
+  penyebab ayunan/stall 8 Okt; tugas 24/7 harus sama dengan `start-engine.ps1`).
+- `deploy/mediamtx/start-mediamtx.sh`, `scripts/publish_test_video.sh`: line ending LF (di folder kerja CRLF;
+  `sh` di Linux gagal `$'\r': command not found`).
+- Dokumen: `SERAH-TERIMA.md` ditulis ulang; `SERAH-TERIMA-EA-R3.md` Belum #2 dikoreksi (pesan ReID TIDAK gagal
+  validasi di backend, tetapi dihitung salah diam-diam); `PETA-KODE.md`.
+
+**Alasan.** Uji 4060 12 Okt (eb-r1): sesudah `illegal memory access` tidak ada kamera yang pulih dalam proses yang
+sama. Dulu kamera menganggapnya kamera putus dan mencoba ulang selamanya, sementara ticker tetap menulis berkas
+detak, jadi watchdog ea-r6 tidak pernah menyalakan ulang engine: proses hidup, nol deteksi, backend menerima
+`camera.failed`/`camera.online` bergantian. Default lama itu adalah bug-nya, jadi default diganti ke `exit`;
+`retry` tersedia sebagai tombol mundur. Kebocoran dict per track dan `_resumed_from` kecil per hari tetapi
+bertentangan dengan target 24/7 dan uji 3 hari (dok. 12 §2.4). Rasio sibuk dispatcher memperlihatkan plafon fps
+5 kamera (dispatcher seri ±25–29 ms/gambar = 31–38 frame/dtk) sebelum fps-nya turun.
+
+**Cara uji.** `python -m pytest engine/tests -q`: 658 lulus, 9 dilewati di cloud (tanpa torch/LibreYOLO/onnx/PyAV;
+sebelum paket ini 633 lulus, 9 dilewati yang sama); baru `test_gpu_fatal.py` (25). `contracts/tests` 151 lulus.
+`policy_grep` bersih. Backend tidak disentuh (tesnya tidak dijalankan di cloud: FastAPI tidak tersedia). Uji
+laptop: SERAH-TERIMA, "Uji manual di laptop".
+
 ## 2026-10-12 · paket eb-r1 — Hasil baseline 5 kamera dan A/B free vs tick (dokumen saja)
 
 Dasar: repo 12 Okt (sesudah ea-r7). Jalur EB. **Tidak ada kode, config, atau skema yang berubah.**

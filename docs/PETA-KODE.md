@@ -1,7 +1,7 @@
 # Peta Kode
 
 Untuk menemukan file tanpa menjelajah repo. Perbarui saat menambah/memindah modul.
-Per 9 Oktober 2026 (paket ea-r7).
+Per 14 Oktober 2026 (paket ea-r8).
 
 ## Alur data
 
@@ -19,7 +19,7 @@ frontend (Vue + Vite): dashboard, overlay kotak, enrollment, pengaturan
 | Hal | File |
 |---|---|
 | Entry point, argumen CLI | `runtime/__main__.py` |
-| Rakit kamera, `set_cameras`, health, detector bersama, gerbang detak | `runtime/service.py` |
+| Rakit kamera, `set_cameras`, health, detector bersama, gerbang detak, error GPU fatal → keluar kode 3 (`_on_camera_fatal`, `core.gpu_fatal_action`), rasio sibuk dispatcher (`_sample_busy_ratio`) | `runtime/service.py` |
 | Loop per kamera, event presence, overlay `view.frame` (`_maybe_view`), jeda jadwal analisis `schedule_off` (`_apply_analysis_switch`, `core.analysis_off_mode`) | `runtime/camera.py` |
 | Penjadwal berdetak (TickClock, TickGate, kerangka TickScheduler) | `runtime/tick_scheduler.py` |
 | Langkah pipeline per frame, decimation PTS | `pipeline/engine.py` |
@@ -30,7 +30,8 @@ frontend (Vue + Vite): dashboard, overlay kotak, enrollment, pengaturan
 | NVDEC (kerangka, menunggu spike) | `ingest/nvdec_source.py` |
 | PTS, epoch, offset jam | `ingest/timeline.py` |
 | D-FINE (LibreYOLO), pra-proses GPU, CUDA graph | `perception/dfine_detector.py` |
-| Satu detector untuk semua kamera, batching | `perception/shared_detector.py` |
+| Satu detector untuk semua kamera, batching, berhenti memanggil model sesudah error GPU fatal (`fatal_error`) | `perception/shared_detector.py` |
+| Pengenal error CUDA fatal (`is_fatal_gpu_error`, pola teks) | `perception/gpu_fatal.py` (tes `test_gpu_fatal.py`) |
 | Tracker | `perception/bytetrack_tracker.py`, `perception/iou_tracker.py` |
 | Crop orang/kepala | `perception/person_cropper.py` |
 | Wajah (SCRFD + AuraFace ONNX) | `identity/face_onnx.py` |

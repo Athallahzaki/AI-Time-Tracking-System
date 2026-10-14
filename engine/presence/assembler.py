@@ -229,6 +229,8 @@ class PresenceAssembler:
                 clock, track_uuid, prev_track_uuid=_track_of(stitched.interval_id, self._resumed_from),
                 person_id=person_id, gap_seconds=max(0.0, gap), pts=pts,
             ))
+            # Interval yang sudah disambung tidak bisa disambung lagi (ea-r8).
+            self._resumed_from.pop(stitched.interval_id, None)
             return stitched.interval_id
 
         return None
@@ -332,6 +334,7 @@ class PresenceAssembler:
         ))
         self.metrics.intervals_emitted += 1
 
+        self._prune_camera(presence.camera_id, presence.stream_epoch, end_pts)
         self._closed.append(_Closed(
             interval_id=interval_id, camera_id=presence.camera_id,
             stream_epoch=presence.stream_epoch, person_id=person_id,
@@ -339,6 +342,33 @@ class PresenceAssembler:
         ))
         self._resumed_from[interval_id] = presence.track_uuid
         return interval_id
+
+    def _prune_camera(self, camera_id: str, stream_epoch: int, now_pts: float) -> None:
+        """Buang kandidat sambungan kamera ini yang tidak mungkin dipakai lagi.
+
+        Dipanggil saat interval ditutup, bukan hanya saat ada wajah dikenali, supaya
+        `_closed`/`_resumed_from` tidak tumbuh di kamera yang jarang mengenali orang.
+        Hanya membandingkan pts dalam kamera dan epoch yang sama: epoch lama tidak
+        pernah disambung (lihat `_find_stitch`), dan pts antar kamera tidak sebanding.
+
+        Acuan waktunya kelahiran track tertua yang masih terbuka di kamera dan epoch
+        ini, bukan `now_pts`: `_find_stitch` mengukur jeda dari `track_started_pts`,
+        jadi track yang lahir lebih awal dan baru dikenali nanti masih boleh
+        menyambung interval yang lebih tua dari `now_pts - jendela`.
+        """
+        for presence in self._open.values():
+            if presence.camera_id == camera_id and presence.stream_epoch == stream_epoch:
+                now_pts = min(now_pts, presence.track_started_pts)
+        kept = []
+        for closed in self._closed:
+            if closed.camera_id == camera_id and (
+                closed.stream_epoch != stream_epoch
+                or now_pts - closed.end_pts > self._stitch_window
+            ):
+                self._resumed_from.pop(closed.interval_id, None)
+                continue
+            kept.append(closed)
+        self._closed = kept
 
     def _find_stitch(self, presence: _Presence, pts: float) -> Optional[_Closed]:
         """Kehadiran yang sama berlanjut, atau bukan.
@@ -370,6 +400,14 @@ class PresenceAssembler:
             closed for closed in self._closed
             if now_pts - closed.end_pts <= self._stitch_window
         ]
+        # `_resumed_from` hanya dibutuhkan selama intervalnya masih kandidat
+        # sambungan. Dulu tumbuh satu entri per interval selamanya (ea-r8).
+        if len(self._resumed_from) > len(self._closed):
+            alive = {closed.interval_id for closed in self._closed}
+            self._resumed_from = {
+                interval_id: track for interval_id, track in self._resumed_from.items()
+                if interval_id in alive
+            }
 
     def _next_interval_id(self, camera_id: str) -> str:
         counter = self._counters.setdefault(camera_id, itertools.count(1))
