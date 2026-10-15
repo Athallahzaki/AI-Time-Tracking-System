@@ -9,6 +9,11 @@ export interface AuthUser {
   id: number;
   username: string;
   role: 'admin' | 'viewer' | string;
+  /** Field berikut diharapkan dari /api/auth/me versi baru (dok. 12 §3.2). */
+  employee_uid?: string | null;
+  employee_id?: string | null;
+  name?: string | null;
+  must_change_password?: boolean;
 }
 
 const STORAGE_KEY = 'ai-time-tracking.auth';
@@ -56,10 +61,54 @@ export async function apiFetch(input: string, init: RequestInit = {}): Promise<R
   return res;
 }
 
+/** Username pengguna aktif (untuk jejak audit di mode simulasi). */
+export function currentUsername(): string {
+  return state.user?.username || 'tidak diketahui';
+}
+
+/**
+ * ID karyawan milik akun viewer. Selama /api/auth/me belum mengirim
+ * employee_id, dipakai username — akun viewer dibuat dengan username = ID
+ * karyawan (dok. 12 §3.2).
+ */
+export function employeeIdOf(user: AuthUser | null): string | null {
+  if (!user) return null;
+  return user.employee_id || user.username || null;
+}
+
+export function homePathFor(user: AuthUser | null): string {
+  return user?.role === 'admin' ? '/' : '/me';
+}
+
 export function useAuth() {
   const isLoggedIn = computed(() => !!state.token);
   const isAdmin = computed(() => state.user?.role === 'admin');
+  const isViewer = computed(() => !!state.user && state.user.role !== 'admin');
+  const mustChangePassword = computed(() => !!state.user?.must_change_password);
   const user = computed(() => state.user);
+
+  /** Ambil ulang profil dari /api/auth/me supaya field baru (bila BE sudah punya) ikut terbaca. */
+  async function refreshMe(): Promise<void> {
+    if (!state.token) return;
+    try {
+      const res = await apiFetch('/api/auth/me');
+      if (!res.ok) return;
+      const body = await res.json();
+      if (body?.user && state.user) {
+        state.user = { ...state.user, ...body.user };
+        persist();
+      }
+    } catch {
+      // jaringan putus: pakai data login yang tersimpan
+    }
+  }
+
+  function markPasswordChanged(): void {
+    if (state.user) {
+      state.user = { ...state.user, must_change_password: false };
+      persist();
+    }
+  }
 
   async function login(username: string, password: string): Promise<void> {
     const res = await fetch('/api/auth/login', {
@@ -76,6 +125,7 @@ export function useAuth() {
     state.user = body.user;
     state.expiresAt = body.expires_at;
     persist();
+    await refreshMe();
   }
 
   async function logout(): Promise<void> {
@@ -85,5 +135,15 @@ export function useAuth() {
     clear();
   }
 
-  return { isLoggedIn, isAdmin, user, login, logout };
+  return {
+    isLoggedIn,
+    isAdmin,
+    isViewer,
+    mustChangePassword,
+    user,
+    login,
+    logout,
+    refreshMe,
+    markPasswordChanged,
+  };
 }

@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, onUnmounted } from 'vue';
+import { RouterLink, useRoute } from 'vue-router';
 import {
   Upload,
   X,
@@ -21,12 +22,33 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import EmployeeCombobox from '@/components/common/EmployeeCombobox.vue';
+import { listEmployees } from '@/api/employees';
 
 const { submitEnrollment, isSubmitting, submitError } = useEnrollment();
 
-const personId = ref('');
+// Enrollment memilih karyawan dari data master (dok. 12 §3.1), bukan ID ketikan.
+// Backend enrollment saat ini masih memakai person_id = ID karyawan.
+const route = useRoute();
+const selectedUid = ref(typeof route.query.employee === 'string' ? route.query.employee : '');
+const selectedEmployee = ref(null);
+const comboboxRef = ref(null);
+const personId = computed(() => selectedEmployee.value?.employee_id || '');
+
+function onEmployeeSelect(employee) {
+  selectedEmployee.value = employee;
+}
+
+// Pilihan awal dari ?employee=<uid> (tombol "Daftarkan wajah" di Data Karyawan):
+// combobox memuat daftar sendiri, jadi objek karyawan diambil saat sudah ada.
+if (selectedUid.value) {
+  listEmployees({ status: 'active' })
+    .then((items) => {
+      selectedEmployee.value = items.find((e) => e.uid === selectedUid.value) || null;
+    })
+    .catch(() => undefined);
+}
 const selectedFiles = ref([]);
 const previews = ref([]);
 const lastResult = ref(null);
@@ -120,7 +142,7 @@ onUnmounted(() => {
 
 const canSubmit = computed(
   () =>
-    personId.value.trim().length > 0 &&
+    !!selectedEmployee.value &&
     selectedFiles.value.length >= 3 &&
     !isSubmitting.value,
 );
@@ -175,7 +197,9 @@ async function handleSubmit() {
     );
     lastResult.value = result;
     if (result.status === 'accepted') {
-      personId.value = '';
+      selectedUid.value = '';
+      selectedEmployee.value = null;
+      comboboxRef.value?.reload();
       previews.value.forEach((url) => URL.revokeObjectURL(url));
       selectedFiles.value = [];
       previews.value = [];
@@ -210,24 +234,29 @@ async function handleSubmit() {
         class="space-y-4"
         @submit.prevent="handleSubmit"
       >
-        <!-- Employee ID -->
+        <!-- Employee (combobox dari data master) -->
         <div class="space-y-1.5">
           <Label
             for="enroll-person-id"
             class="text-xs font-semibold text-slate-700"
           >
-            ID Karyawan <span class="text-red-500">*</span>
+            Karyawan <span class="text-red-500">*</span>
           </Label>
-          <Input
+          <EmployeeCombobox
             id="enroll-person-id"
-            v-model="personId"
-            type="text"
-            required
-            placeholder="Contoh: EMP_001 atau 4471"
+            ref="comboboxRef"
+            v-model="selectedUid"
+            placeholder="Cari ID atau nama karyawan…"
+            @select="onEmployeeSelect"
           />
-          <p class="text-[11px] text-slate-400">
-            Jika ID sudah terdaftar, sistem akan otomatis melakukan
-            re-enrollment ke versi berikutnya.
+          <p v-if="selectedEmployee?.enrolled_refs > 0" class="text-[11px] text-amber-700">
+            {{ selectedEmployee.name }} sudah punya {{ selectedEmployee.enrolled_refs }} foto referensi;
+            pengiriman ini membuat re-enrollment ke versi berikutnya.
+          </p>
+          <p v-else class="text-[11px] text-slate-400">
+            Karyawan belum ada di daftar?
+            <RouterLink to="/employees" class="font-medium text-indigo-600 hover:underline">Tambah di Data Karyawan</RouterLink>
+            dulu.
           </p>
         </div>
 

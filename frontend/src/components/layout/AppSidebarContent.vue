@@ -1,11 +1,14 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import {
+  ClipboardCheck,
   FileText,
+  House,
   LayoutDashboard,
   Settings,
+  ShieldCheck,
   UserCheck,
-  Video,
+  Users,
 } from '@lucide/vue';
 import { RouterLink, useRoute } from 'vue-router';
 import BrandMark from './BrandMark.vue';
@@ -15,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { useEnrollment } from '@/composables/useEnrollment';
 import { useAuth } from '@/composables/useAuth';
+import { countPendingReviews } from '@/api/reviews';
 import { cn } from '@/lib/utils';
 
 // Isi sidebar dipisah dari wadahnya: dipakai oleh <aside> desktop dan <Sheet> mobile.
@@ -22,26 +26,43 @@ defineEmits(['navigate']);
 
 const route = useRoute();
 const { enrolledPersons } = useEnrollment();
-const { user } = useAuth();
+const { user, isAdmin } = useAuth();
+const pendingReviews = ref(0);
 
-const mainNav = computed(() => [
-  { label: 'Dashboard', icon: LayoutDashboard, to: '/' },
-  { label: 'Live Monitoring', icon: Video, to: '/#' },
-  {
-    label: 'Enrollment Karyawan',
-    icon: UserCheck,
-    to: '/enrollment',
-    badge: enrolledPersons.length > 0 ? `${enrolledPersons.length}` : undefined,
-  },
-  { label: 'Reports', icon: FileText, to: '/#' },
-  { label: 'Pengaturan Sistem', icon: Settings, to: '/settings' },
-]);
+onMounted(async () => {
+  if (isAdmin.value) pendingReviews.value = await countPendingReviews();
+});
+
+// Menu disaring per peran. Admin = HR (semua menu); viewer = karyawan (dok. 12 §3.2).
+const mainNav = computed(() => {
+  if (!isAdmin.value) {
+    return [{ label: 'Pemakaian Saya', icon: House, to: '/me' }];
+  }
+  return [
+    { label: 'Dashboard', icon: LayoutDashboard, to: '/' },
+    { label: 'Data Karyawan', icon: Users, to: '/employees' },
+    {
+      label: 'Enrollment Wajah',
+      icon: UserCheck,
+      to: '/enrollment',
+      badge: enrolledPersons.length > 0 ? `${enrolledPersons.length}` : undefined,
+    },
+    { label: 'Report', icon: FileText, to: '/reports' },
+    {
+      label: 'Tinjauan HR',
+      icon: ClipboardCheck,
+      to: '/reviews',
+      badge: pendingReviews.value > 0 ? `${pendingReviews.value}` : undefined,
+      badgeClass: 'bg-amber-100 text-amber-800',
+    },
+    { label: 'Manajemen Pengguna', icon: ShieldCheck, to: '/users' },
+    { label: 'Pengaturan Sistem', icon: Settings, to: '/settings' },
+  ];
+});
 
 const isActive = (path) => {
   if (path === '/') return route.path === '/';
-  if (path === '/enrollment')
-    return route.path === '/enrollment' || route.path === '/employees';
-  return route.path === path;
+  return route.path === path || route.path.startsWith(`${path}/`);
 };
 </script>
 
@@ -74,7 +95,7 @@ const isActive = (path) => {
           <Badge
             v-if="item.badge"
             variant="secondary"
-            class="h-5 bg-indigo-100 px-1.5 text-indigo-700"
+            :class="cn('h-5 px-1.5', item.badgeClass || 'bg-indigo-100 text-indigo-700')"
           >
             {{ item.badge }}
           </Badge>
@@ -97,7 +118,7 @@ const isActive = (path) => {
           {{ user?.username || 'Tamu / Viewer' }}
         </p>
         <p class="truncate text-xs text-slate-500 capitalize">
-          {{ user?.role || 'Belum masuk' }}
+          {{ user?.role === 'admin' ? 'Admin (HR)' : user ? 'Karyawan' : 'Belum masuk' }}
         </p>
       </div>
     </div>
