@@ -7,6 +7,53 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-10-15 · paket ea-r9 — Beban rekognisi wajah, kode keluar config, dan vonis uji 4060 minggu ini
+
+Dasar: ea-r8. Jalur EA + EB. Kontrak, `engine/ports/`, dan `backend/` tidak disentuh. **Default tidak
+berubah**: semua setelan baru `None`/mati. Satu perilaku baru yang tidak bisa dimatikan: start ditolak bila
+`face_detector_input_size` tidak cocok dengan model SCRFD berbentuk tetap (sebelumnya jalan 10x lebih lambat).
+
+**Hasil uji di RTX 4060 (14–15 Okt), dasar paket ini**
+
+| Uji | Hasil | Vonis |
+|---|---|---|
+| Crash GPU terkendali (ea-r8) | engine keluar kode 3 setelah 82 dtk, watchdog menyalakan ulang | lulus |
+| `batch_check` batch 1/2/5 + cuda_graph | 17,6 / 17,0 / 18,6 ms per gambar; batch 5 mengubah 2 gambar (kotak skor 0,816 tanpa pasangan); ukuran berubah TIDAK crash | batch D-FINE gugur |
+| `drift_s` per kamera (idk3, T1) | kamera yang umur kotaknya +0,3 dtk punya `drift_s` +0,32/+0,34 | P18 bukan bug jam: frame tiba terlambat (antrean pembaca saat engine jenuh) |
+| Gladi 5 kamera 6 fps, 15 menit (watchdog + afinitas) | 6,00 fps, umur kotak p99 0,22 dtk, 0 stall; tanpa antrean +0,3 dtk | lulus |
+| `py-spy` 300 dtk | rekognisi 82% sibuk, detector 50% (16,7 ms/gambar), kamera 8–10%, decode 3–4% per stream (±10% CPU engine) | NVDEC tunda; hambatan = rekognisi |
+| `nvidia-smi dmon` | SM median 50%, clock 2385 MHz, 74 °C, NVDEC 0% | GPU tidak tercekik |
+| Log rekognisi, input SCRFD 640 | 16 wajah/dtk, 54 ms/wajah, 35% permintaan dibuang (12.558 penuh + 2.416 basi) | jenuh di ±18 wajah/dtk |
+| Log rekognisi, input SCRFD 480 | 547 ms/wajah, 1,7 wajah/dtk, 86% dibuang, peringatan ORT `VerifyOutputSizes` | model berbentuk tetap 640 |
+
+Rekognisi menambah ±4 ms per gambar detector lewat GPU yang sama (20 ms saat rekognisi jenuh, 16 ms saat
+hampir diam). Peringatan "No accelerated MSDA provider" muncul juga di engine runtime (belum diselidiki).
+
+**Apa yang berubah**
+
+- `identity/face_onnx.py`: gerbang kualitas sebelum embedding (`embed_min_face_px`, `embed_min_score`,
+  `embed_max_yaw`; hadap samping diukur dari 5 titik SCRFD, `yaw_ratio`). Wajah yang dilewati tidak dikirim ke
+  glintr100 (bagian termahal per wajah); penghitung `gate_metrics()`. `ScrfdDetector` menolak
+  `face_detector_input_size` yang tidak cocok dengan bentuk keluaran model (`_check_static_size`); model
+  berdimensi dinamis tidak diperiksa.
+- `config/schema.py` + `loader.py`: `recognition.embed_min_face_px`, `embed_min_score`, `embed_max_yaw`,
+  `backoff_interval_seconds`, `attempts_before_backoff` (dua terakhir sudah ada di penjadwal, kini dari config).
+- `runtime/service.py`: log health "gerbang embedding: ..." (bila gerbang aktif) dan WARNING "worker rekognisi
+  membuang N%" bila ≥ 20% permintaan dibuang sejak laporan sebelumnya. `ConfigRefused` untuk config yang ditolak
+  runtime; `EXIT_CODE_CONFIG = 2`.
+- `runtime/__main__.py`: config tidak bisa dimuat/ditolak, atau tidak cocok dengan model (`ModelConfigMismatch`,
+  mis. input SCRFD) → keluar kode **2**. Model yang belum bisa dimuat
+  (mis. driver GPU belum siap saat boot) tetap kode 1 dan dicoba ulang.
+- `deploy/laptop/engine-watchdog.ps1`: kode 2 = tidak dinyalakan ulang; tunggu berkas `-Config` berubah (cek tiap
+  10 dtk) atau `watchdog.stop`. Sebelumnya config salah berputar 5→120 dtk selamanya.
+- `tools/batch_check.py`: kolom `vs ukuran1` (angka keputusan batch) di samping `vs eager`; keluaran ASCII; JSON
+  ditulis sebelum print (di Windows, `Δ` + Tee-Object membuat print gagal dan JSON hilang). `scaling_check.py`
+  juga tanpa `Δ`.
+- `config/demo-4060.yaml`: usulan nilai gerbang sebagai komentar (tidak aktif) + peringatan input SCRFD.
+
+**Cara uji.** `python -m pytest engine/tests -q`: 680 lulus, 9 dilewati di cloud (sebelumnya 658; +22 di
+`test_rekognisi_beban.py`); `contracts/tests` 151 lulus; `policy_grep` bersih. Uji laptop: SERAH-TERIMA.
+
 ## 2026-10-14 · paket ea-r8 — Error GPU fatal menghentikan engine, kebocoran per track, metrik dispatcher
 
 Dasar: repo 14 Okt (sesudah eb-r1). Jalur EA + EB. Kontrak (`contracts/`), `engine/ports/`, dan `backend/`

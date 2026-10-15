@@ -71,6 +71,12 @@ logger = logging.getLogger("engine.runtime")
 SNAPSHOT_INTERVAL_SECONDS = 10.0
 HEALTH_INTERVAL_SECONDS = 30.0
 
+# Kode keluar untuk config yang salah/ditolak (ea-r9). Menyalakan ulang tidak
+# memperbaikinya, jadi watchdog berhenti menyalakan ulang sampai berkas config berubah.
+EXIT_CODE_CONFIG = 2
+# Porsi permintaan rekognisi yang dibuang (ditolak-penuh + basi) sejak laporan
+# health sebelumnya, di atas ini = WARNING: worker rekognisi jenuh (uji 15 Okt: 35%).
+RECOGNITION_DROP_WARN = 0.2
 # Kode keluar proses saat engine berhenti karena error GPU fatal (ea-r8). Watchdog
 # menyalakan ulang pada kode keluar apa pun; kode ini supaya log-nya bisa dibedakan.
 EXIT_CODE_GPU_FATAL = 3
@@ -247,6 +253,8 @@ class EngineRuntime:
         # Rasio sibuk dispatcher: (waktu, busy_seconds) pada laporan health terakhir.
         self._busy_sample: Optional[Tuple[float, float]] = None
         self.detector_busy_ratio: Optional[float] = None
+        # Rekognisi: (waktu, diproses, ditolak-penuh, basi) pada laporan health terakhir.
+        self._recognition_sample: Optional[Tuple[float, int, int, int]] = None
         self._stop_file_seen = False
         if self.options.stop_file and os.path.exists(self.options.stop_file):
             # Sisa permintaan stop dari run sebelumnya, bukan untuk run ini.
@@ -651,6 +659,7 @@ class EngineRuntime:
                 int(worker["processed"]), int(worker["rejected_full"]), int(worker["dropped_stale"]),
                 int(worker["failed"]), worker["avg_recognize_ms"], int(worker["queue_depth"]),
             )
+            self._report_recognition_load(now, worker)
         if self._reid is not None:
             if not self._reid.worker.running:
                 degraded.append("reid_worker_stopped")
@@ -700,6 +709,41 @@ class EngineRuntime:
             )
         )
 
+    def _report_recognition_load(self, now: float, worker: Dict[str, Any]) -> Optional[float]:
+        """Laju dan porsi buang worker rekognisi sejak laporan sebelumnya (ea-r9).
+
+        Kembalikan porsi buang (0..1), None pada sampel pertama atau bila terlalu sedikit
+        permintaan untuk dinilai. Juga mencatat penghitung gerbang embedding bila ada.
+        """
+        processed = int(worker.get("processed", 0))
+        rejected = int(worker.get("rejected_full", 0))
+        stale = int(worker.get("dropped_stale", 0))
+        previous, self._recognition_sample = self._recognition_sample, (now, processed, rejected, stale)
+        gate = getattr(self._recognize, "gate_metrics", None)
+        rec = self.config.recognition
+        if callable(gate) and any(value is not None for value in (
+                rec.embed_min_face_px, rec.embed_min_score, rec.embed_max_yaw)):
+            g = gate()
+            logger.info("gerbang embedding: di-embed %d, lewati kecil %d, skor %d, samping %d",
+                        g.get("embedded", 0), g.get("lewati_kecil", 0), g.get("lewati_skor", 0),
+                        g.get("lewati_samping", 0))
+        if previous is None or now <= previous[0]:
+            return None
+        d_processed = processed - previous[1]
+        d_dropped = (rejected - previous[2]) + (stale - previous[3])
+        total = d_processed + d_dropped
+        if total < 20:
+            return None
+        ratio = d_dropped / total
+        if ratio >= RECOGNITION_DROP_WARN:
+            logger.warning(
+                "worker rekognisi membuang %.0f%% permintaan (%.1f wajah/dtk diproses, rata2 %.0f ms): "
+                "jenuh. Wajah baru dikenali lebih lambat. Pertimbangkan recognition.embed_* "
+                "(gerbang kualitas) atau backoff_interval_seconds.",
+                100.0 * ratio, d_processed / (now - previous[0]), worker.get("avg_recognize_ms", 0.0),
+            )
+        return ratio
+
     def _sample_busy_ratio(self, now: float, busy_seconds: float) -> Optional[float]:
         """Porsi waktu dinding dispatcher sibuk sejak laporan health sebelumnya.
 
@@ -747,6 +791,10 @@ class EngineRuntime:
 # helpers
 # ---------------------------------------------------------------------------
 
+class ConfigRefused(ValueError):
+    """Config sah secara skema tetapi ditolak runtime; __main__ keluar dengan kode 2."""
+
+
 def _refuse_known_crash(config: EngineConfig) -> None:
     """Tolak start untuk kombinasi yang terbukti merusak konteks CUDA.
 
@@ -760,7 +808,7 @@ def _refuse_known_crash(config: EngineConfig) -> None:
         logger.warning("detector.batch_inference + cuda_graph dinyalakan lewat %s: kombinasi ini "
                        "membuat CUDA illegal memory access di RTX 4060 (eb-r1).", ALLOW_BATCH_CUDA_GRAPH_ENV)
         return
-    raise ValueError(
+    raise ConfigRefused(
         "detector.batch_inference: true bersama detector.cuda_graph membuat CUDA "
         "'illegal memory access' di RTX 4060 (paket eb-r1), dan sesudahnya tidak ada "
         "kamera yang bisa pulih dalam proses yang sama. Matikan salah satunya. Untuk "

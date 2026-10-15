@@ -24,7 +24,7 @@ import sys
 import threading
 from typing import Optional
 
-from .service import EXIT_CODE_GPU_FATAL, EngineRuntime, RuntimeOptions
+from .service import EXIT_CODE_CONFIG, EXIT_CODE_GPU_FATAL, ConfigRefused, EngineRuntime, RuntimeOptions
 
 _DEFAULT_OUTBOX = Path(__file__).resolve().parents[1] / "data" / "outbox.sqlite3"
 
@@ -129,7 +129,31 @@ def main(argv: Optional[list] = None) -> int:
             return 2
         tcp = (host, int(port))
 
-    runtime = EngineRuntime(
+    # Config salah = kode keluar 2 (ea-r9): watchdog tidak menyalakan ulang sia-sia.
+    # Hanya pemuatan config dan penolakan config yang masuk ke sini; model yang belum
+    # bisa dimuat (mis. driver GPU belum siap saat boot) tetap kode 1 dan dicoba ulang.
+    from ..config import load_config
+
+    try:
+        config = load_config(args.config)
+    except Exception as error:  # noqa: BLE001 -- apa pun dari YAML/skema = config salah
+        logging.getLogger("engine.runtime").error("config engine tidak bisa dipakai: %s", error)
+        print(f"config engine salah ({args.config}): {error}", file=sys.stderr)
+        return EXIT_CODE_CONFIG
+    from ..identity.face_onnx import ModelConfigMismatch
+
+    try:
+        runtime = _build_runtime(args, config, tcp)
+    except (ConfigRefused, ModelConfigMismatch) as error:
+        logging.getLogger("engine.runtime").error("config engine ditolak: %s", error)
+        print(f"config engine ditolak: {error}", file=sys.stderr)
+        return EXIT_CODE_CONFIG
+    return _serve(runtime)
+
+
+def _build_runtime(args, config, tcp) -> EngineRuntime:
+    return EngineRuntime(
+        config=config,
         options=RuntimeOptions(
             config_path=args.config,
             tcp=tcp,
@@ -147,6 +171,8 @@ def main(argv: Optional[list] = None) -> int:
         )
     )
 
+
+def _serve(runtime: EngineRuntime) -> int:
     stopper = _Stopper(runtime.close)
     runtime.on_stop_file = lambda: stopper.request("berkas stop")
     # Error GPU fatal (core.gpu_fatal_action: exit): berhenti rapi lewat jalur yang

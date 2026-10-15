@@ -105,7 +105,7 @@ def format_report(report: ScalingReport) -> str:
         f"  swscale (YUV -> RGB 640 langsung)      : {report.swscale_ms:.2f} ms/frame",
         f"  beda piksel rata-rata (0-255)          : {report.pixel_mean_abs_diff:.3f}",
         f"  frame beda di ambang / semua kotak     : {report.mismatched} / {report.mismatched_all}",
-        f"  IoU min {report.worst_iou:.3f}, Δskor maks {report.worst_conf_delta:.3f}, "
+        f"  IoU min {report.worst_iou:.3f}, d-skor maks {report.worst_conf_delta:.3f}, "
         f"skor kotak tanpa pasangan maks {report.unmatched_max_score:.3f}",
     ]
     lines.extend("  catatan: " + note for note in report.notes[:5])

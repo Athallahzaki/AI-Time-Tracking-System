@@ -16,6 +16,10 @@
   5, 10, 20, ... dtk (maks -MaxBackoffSeconds); jeda kembali ke 5 dtk bila run sebelumnya
   bertahan lebih dari -StableSeconds.
 
+  Kode keluar 2 = config engine salah atau ditolak (paket ea-r9). Menyalakan ulang tidak
+  memperbaikinya, jadi watchdog TIDAK menyalakan ulang: ia menunggu sampai berkas -Config
+  diubah (diperiksa tiap 10 dtk), baru mencoba lagi. Pesan galatnya ada di engine-*.err.log.
+
   Berhenti rapi: buat berkas <StateDir>\watchdog.stop (install-engine-task.ps1 -Stop),
   atau Ctrl+C. Watchdog meminta engine berhenti rapi lewat berkas stop engine (interval
   ditutup engine_shutdown), menunggu -StopGraceSeconds, baru dipaksa.
@@ -218,6 +222,20 @@ try {
         $ran = ((Get-Date) - $started).TotalSeconds
         Write-Log "$why (berjalan $([int]$ran) dtk)"
         Remove-Item -Force $PidFile -ErrorAction SilentlyContinue
+        if ($proc.HasExited -and $proc.ExitCode -eq 2) {
+            # Config salah: hidup ulang sia-sia. Tunggu config diubah atau watchdog.stop.
+            $configStamp = (Get-Item $Config).LastWriteTimeUtc
+            Write-Log "config engine salah atau ditolak (kode 2; lihat $errLog). Tidak dinyalakan ulang sampai $Config diubah."
+            while (-not (Test-WatchdogStop)) {
+                Start-Sleep -Seconds 10
+                if ((Test-Path $Config) -and (Get-Item $Config).LastWriteTimeUtc -ne $configStamp) {
+                    Write-Log "$Config berubah; mencoba lagi"
+                    break
+                }
+            }
+            $backoff = 5
+            continue
+        }
         if ($ran -ge $StableSeconds) { $backoff = 5 }
         $restarts += 1
         if ($MaxRestarts -gt 0 -and $restarts -ge $MaxRestarts) {

@@ -1,7 +1,7 @@
 # Peta Kode
 
 Untuk menemukan file tanpa menjelajah repo. Perbarui saat menambah/memindah modul.
-Per 14 Oktober 2026 (paket ea-r8).
+Per 15 Oktober 2026 (paket ea-r9).
 
 ## Alur data
 
@@ -34,7 +34,7 @@ frontend (Vue + Vite): dashboard, overlay kotak, enrollment, pengaturan
 | Pengenal error CUDA fatal (`is_fatal_gpu_error`, pola teks) | `perception/gpu_fatal.py` (tes `test_gpu_fatal.py`) |
 | Tracker | `perception/bytetrack_tracker.py`, `perception/iou_tracker.py` |
 | Crop orang/kepala | `perception/person_cropper.py` |
-| Wajah (SCRFD + AuraFace ONNX) | `identity/face_onnx.py` |
+| Wajah (SCRFD + AuraFace ONNX), gerbang kualitas sebelum embedding (`embed_*`, `yaw_ratio`), cek bentuk model SCRFD (`_check_static_size`) | `identity/face_onnx.py` (tes `test_rekognisi_beban.py`) |
 | Matcher, arbiter identitas, admission, enrollment | `identity/matcher.py`, `identity/arbiter.py`, `identity/admission.py`, `identity/enrollment.py` |
 | ReID berjangkar wajah (logika): pesan antrean, galeri harian, aturan gabung, ANON-xxxx | `identity/reid/messages.py`, `identity/reid/gallery.py`, `identity/reid/merge.py`, `identity/reid/pending.py` (tes `test_reid_*.py`) |
 | ReID model + gerbang crop (dimuat hanya bila `reid.enabled`): OSNet ONNX, pra-proses = kit latih, SHA-256 | `identity/reid/embedder_onnx.py`, `identity/reid/quality.py` (tes `test_reid_embedder.py`) |
@@ -87,7 +87,7 @@ generator `.xlsx`, halaman report, penyaringan per peran di semua endpoint.
 | Pemeriksa kebijakan di engine | `contracts/tools/policy_grep.py` |
 | Compose lokal / Portainer | `deploy/docker-compose.yml`, `deploy/docker-compose.portainer.yml`, `deploy/portainer.env.example` |
 | nginx frontend (proxy API, HLS, WHEP) | `deploy/frontend/nginx/` |
-| Laptop engine (Windows); watchdog + tugas auto-start (Task Scheduler) | `deploy/laptop/start-engine.ps1`, `start-mediamtx.ps1`, `firewall.ps1`, `engine-watchdog.ps1`, `install-engine-task.ps1` (log di `logs/engine/`, di-ignore) |
+| Laptop engine (Windows); watchdog + tugas auto-start (Task Scheduler). Kode keluar engine: 0 berhenti, 1 galat (dinyalakan ulang), 2 config salah (tunggu config diubah), 3 GPU fatal (dinyalakan ulang) | `deploy/laptop/start-engine.ps1`, `start-mediamtx.ps1`, `firewall.ps1`, `engine-watchdog.ps1`, `install-engine-task.ps1` (log di `logs/engine/`, di-ignore) |
 | VPS WebRTC | `deploy/vps/nginx-stream-webrtc.conf` |
 | Uji lag/gladi, ringkasan (`lag_probe.py --events-out` = rekam event NDJSON untuk validator) | `scripts/lag_probe.py`, `scripts/summarize_gladi.py` |
 | Spike NVDEC | `scripts/spike_nvdec.py` |

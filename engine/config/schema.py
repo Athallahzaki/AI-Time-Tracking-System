@@ -247,6 +247,11 @@ class RecognitionConfig:
     retry_interval_seconds: Optional[float] = None
     reverify_interval_seconds: Optional[float] = None
     per_camera_quota: Optional[int] = None
+    # Track tanpa wajah: sesudah `attempts_before_backoff` percobaan gagal, coba
+    # ulang hanya tiap `backoff_interval_seconds` (paket ea-r9 mengeksposnya). None =
+    # nilai identity/admission.py. Beban rekognisi mengikuti jumlah ORANG, bukan fps.
+    backoff_interval_seconds: Optional[float] = None
+    attempts_before_backoff: Optional[int] = None
 
     # How many requests the frame loop hands out per frame. The loop is still
     # synchronous: until the worker pool of §5.2 exists there is nothing to
@@ -272,6 +277,9 @@ class RecognitionConfig:
     # SCRFD input canvas (pixels, multiple of 32). Runtime crops are head
     # regions of ~60-150 px, so 640 mostly upscales; 320 is the candidate for
     # 5 cameras (P7) once similarity on real footage is compared at both.
+    # PERINGATAN (ea-r9): scrfd_10g_bnkps.onnx tim berbentuk tetap untuk 640. Ukuran
+    # lain ditolak saat start (face_onnx._check_static_size); 480 pada model itu
+    # membuat rekognisi 10x lebih lambat (uji 4060, 15 Okt). Butuh ekspor ulang dulu.
     face_detector_input_size: int = 640
     # P7: "async" = SCRFD + AuraFace berjalan di worker terpisah, loop frame
     # tidak menunggu; "sync" = cara lama (di dalam loop frame), untuk
@@ -280,6 +288,14 @@ class RecognitionConfig:
     execution: str = "async"
     worker_queue: int = 8
     min_face_px: float = 40.0
+    # Gerbang kualitas sebelum embedding (paket ea-r9; face_onnx.OnnxFaceRecognizer).
+    # Wajah yang lolos SCRFD tetapi terlalu kecil, skornya rendah, atau terlalu
+    # menyamping tidak dikirim ke glintr100 (bagian termahal per wajah). None = mati.
+    # Uji 4060 15 Okt: worker rekognisi jenuh di ±18 wajah/dtk (54 ms/wajah) dan
+    # membuang 35% permintaan pada 6 fps × 5 kamera.
+    embed_min_face_px: Optional[float] = None
+    embed_min_score: Optional[float] = None
+    embed_max_yaw: Optional[float] = None
     match_threshold: Optional[float] = None
     match_margin: Optional[float] = None
 
@@ -303,6 +319,16 @@ class RecognitionConfig:
             raise ValueError("recognition.worker_queue must be >= 1.")
         if self.onnx_gpu_mem_limit_mb is not None and self.onnx_gpu_mem_limit_mb < 64:
             raise ValueError("recognition.onnx_gpu_mem_limit_mb must be >= 64 (or unset).")
+        if self.embed_min_face_px is not None and self.embed_min_face_px < 0:
+            raise ValueError("recognition.embed_min_face_px must be >= 0 (or unset).")
+        if self.embed_min_score is not None and not 0.0 <= self.embed_min_score <= 1.0:
+            raise ValueError("recognition.embed_min_score must be within 0..1 (or unset).")
+        if self.embed_max_yaw is not None and self.embed_max_yaw <= 0:
+            raise ValueError("recognition.embed_max_yaw must be > 0 (or unset).")
+        if self.backoff_interval_seconds is not None and self.backoff_interval_seconds <= 0:
+            raise ValueError("recognition.backoff_interval_seconds must be > 0 (or unset).")
+        if self.attempts_before_backoff is not None and self.attempts_before_backoff < 1:
+            raise ValueError("recognition.attempts_before_backoff must be >= 1 (or unset).")
         if (self.face_detector_input_size < 64 or self.face_detector_input_size > 1280
                 or self.face_detector_input_size % 32):
             raise ValueError(
@@ -324,6 +350,8 @@ class RecognitionConfig:
             "retry_interval_seconds": self.retry_interval_seconds,
             "reverify_interval_seconds": self.reverify_interval_seconds,
             "per_camera_quota": self.per_camera_quota,
+            "backoff_interval_seconds": self.backoff_interval_seconds,
+            "attempts_before_backoff": self.attempts_before_backoff,
         }
         return {key: value for key, value in mapping.items() if value is not None}
 

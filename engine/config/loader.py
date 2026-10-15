@@ -216,6 +216,8 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
                 rec.get("reverify_interval_seconds")
             ),
             per_camera_quota=_optional_int(rec.get("per_camera_quota")),
+            backoff_interval_seconds=_optional_float(rec.get("backoff_interval_seconds")),
+            attempts_before_backoff=_optional_int(rec.get("attempts_before_backoff")),
             max_requests_per_frame=int(rec.get("max_requests_per_frame", 2)),
             recognizer=str(rec.get("recognizer", "none") or "none"),
             face_detector_model=rec.get("face_detector_model"),
@@ -231,6 +233,9 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
             execution=str(rec.get("execution", "async")),
             worker_queue=int(rec.get("worker_queue", 8)),
             min_face_px=float(rec.get("min_face_px", 40.0)),
+            embed_min_face_px=_optional_float(rec.get("embed_min_face_px")),
+            embed_min_score=_optional_float(rec.get("embed_min_score")),
+            embed_max_yaw=_optional_float(rec.get("embed_max_yaw")),
             match_threshold=_optional_float(rec.get("match_threshold")),
             match_margin=_optional_float(rec.get("match_margin")),
         ),

@@ -21,7 +21,7 @@ import logging
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -45,6 +45,13 @@ _ARCFACE_TEMPLATE = np.array(
 class RecognizerUnavailable(RuntimeError):
     """Recognizer diminta config tapi tidak bisa dimuat. Engine gagal start
     dengan pesan ini, bukan diam-diam berjalan tanpa identitas."""
+
+
+class ModelConfigMismatch(RecognizerUnavailable):
+    """Model ada dan bisa dimuat, tetapi config tidak cocok dengannya (ea-r9).
+
+    Menyalakan ulang tidak memperbaikinya, jadi __main__ keluar dengan kode 2
+    (config salah), bukan 1."""
 
 
 @dataclass
@@ -168,6 +175,7 @@ class ScrfdDetector:
             raise RecognizerUnavailable(
                 f"{model_path}: SCRFD dengan keypoint diharapkan 9 keluaran, dapat {len(outputs)}"
             )
+        _check_static_size(model_path, outputs, self._size, self.STRIDES, self.NUM_ANCHORS)
         self._anchor_cache: dict = {}
 
     def detect(self, bgr: np.ndarray) -> List[FaceDetection]:
@@ -253,6 +261,48 @@ def align_face(bgr: np.ndarray, landmarks: np.ndarray, size: int = 112) -> np.nd
     return cv2.warpAffine(bgr, matrix, (size, size), borderValue=0.0)
 
 
+def _check_static_size(model_path: str, outputs: Sequence[Any], size: int,
+                       strides: Sequence[int], num_anchors: int) -> None:
+    """Tolak `face_detector_input_size` yang tidak cocok dengan ONNX berbentuk tetap.
+
+    Uji 4060 (15 Okt, paket ea-r9): `scrfd_10g_bnkps.onnx` mendeklarasikan keluaran
+    untuk kanvas 640. Dengan 480, onnxruntime tetap jalan (peringatan
+    `VerifyOutputSizes`) tetapi rata-rata rekognisi naik dari 54 ke 547 ms per wajah
+    dan 86% permintaan dibuang. Ukuran lain butuh ekspor ulang dengan dimensi
+    dinamis atau berbentuk tetap ukuran itu. Model berdimensi simbolik tidak diperiksa.
+    """
+    for index, stride in enumerate(strides):
+        shape = list(getattr(outputs[index], "shape", None) or [])
+        if not shape or not all(isinstance(dim, int) and dim > 0 for dim in shape):
+            return
+        declared = 1
+        for dim in shape:
+            declared *= dim
+        expected = (size // stride) ** 2 * num_anchors
+        if declared != expected:
+            raise ModelConfigMismatch(
+                f"{model_path}: model ini berbentuk tetap ({declared} skor untuk stride {stride}), "
+                f"tidak cocok dengan recognition.face_detector_input_size={size} (butuh {expected}). "
+                "Pakai ukuran asli model (biasanya 640) atau ekspor ulang model dengan dimensi "
+                "dinamis. Menjalankannya tetap membuat rekognisi ±10x lebih lambat (uji 15 Okt)."
+            )
+
+
+def yaw_ratio(landmarks: np.ndarray) -> float:
+    """Perkiraan kasar hadap samping dari 5 titik SCRFD (mata kiri, mata kanan, hidung, ...).
+
+    |x hidung - x tengah dua mata| / jarak dua mata. Wajah frontal ±0; makin menyamping
+    makin besar (±0,5 ke atas = sudah jauh dari frontal). Tidak dipakai sebagai sudut,
+    hanya sebagai gerbang murah sebelum embedding.
+    """
+    points = np.asarray(landmarks, dtype=np.float32).reshape(-1, 2)
+    left, right, nose = points[0], points[1], points[2]
+    eye_distance = float(np.hypot(*(right - left)))
+    if eye_distance <= 1e-6:
+        return float("inf")
+    return abs(float(nose[0]) - float(left[0] + right[0]) / 2.0) / eye_distance
+
+
 class OnnxFaceEmbedder:
     def __init__(self, model_path: str, providers: Optional[Sequence[str]] = None,
                  mean: float = 127.5, std: float = 127.5) -> None:
@@ -281,12 +331,22 @@ class OnnxFaceRecognizer:
 
     def __init__(self, detector: ScrfdDetector, embedder: OnnxFaceEmbedder,
                  embedding_version: str, min_face_px: float = 40.0,
-                 head_fraction: float = 0.45) -> None:
+                 head_fraction: float = 0.45,
+                 embed_min_face_px: Optional[float] = None,
+                 embed_min_score: Optional[float] = None,
+                 embed_max_yaw: Optional[float] = None) -> None:
         self._detector = detector
         self._embedder = embedder
         self.embedding_version = embedding_version
         self._min_face = float(min_face_px)
         self._head_fraction = float(head_fraction)
+        # Gerbang kualitas sebelum embedding (paket ea-r9). Embedder (glintr100,
+        # IResNet-100) adalah bagian termahal per wajah; wajah yang hampir pasti
+        # gagal cocok tidak perlu dibayar. None = mati (perilaku lama).
+        self._embed_min_face = None if embed_min_face_px is None else float(embed_min_face_px)
+        self._embed_min_score = None if embed_min_score is None else float(embed_min_score)
+        self._embed_max_yaw = None if embed_max_yaw is None else float(embed_max_yaw)
+        self._gate = {"embedded": 0, "lewati_kecil": 0, "lewati_skor": 0, "lewati_samping": 0}
         # onnxruntime sessions are thread-safe for run(), but the detector's
         # anchor cache and cv2 temporary buffers are cheap to serialise and the
         # recognition path is already rate-limited by the scheduler.
@@ -311,9 +371,14 @@ class OnnxFaceRecognizer:
             if not faces:
                 return None
             face = max(faces, key=lambda f: f.width * f.height)
+            skip = self._gate_reason(face)
+            if skip is not None:
+                self._gate[skip] += 1
+                return None
             landmarks = face.landmarks + np.array([x1, y1], dtype=np.float32)
             aligned = align_face(image, landmarks, self._embedder.input_size)
             embedding = self._embedder.embed(aligned)
+            self._gate["embedded"] += 1
         quality = float(min(1.0, face.score * min(1.0, min(face.width, face.height) / 112.0)))
         return Evidence(
             embedding=embedding,
@@ -321,6 +386,21 @@ class OnnxFaceRecognizer:
             quality=max(quality, 1e-3),
             embedding_version=self.embedding_version,
         )
+
+    def _gate_reason(self, face: FaceDetection) -> Optional[str]:
+        """Nama penghitung bila wajah ini dilewati, None bila di-embed."""
+        if self._embed_min_face is not None and min(face.width, face.height) < self._embed_min_face:
+            return "lewati_kecil"
+        if self._embed_min_score is not None and face.score < self._embed_min_score:
+            return "lewati_skor"
+        if self._embed_max_yaw is not None and yaw_ratio(face.landmarks) > self._embed_max_yaw:
+            return "lewati_samping"
+        return None
+
+    def gate_metrics(self) -> Dict[str, int]:
+        """Kumulatif sejak start: wajah di-embed dan yang dilewati gerbang."""
+        with self._lock:
+            return dict(self._gate)
 
     # -- enrollment: one still image ------------------------------------
     def analyze_image(self, bgr: np.ndarray) -> FaceAnalysis:
@@ -373,4 +453,7 @@ def build_recognizer(recognition_config: Any) -> Optional[OnnxFaceRecognizer]:
         detector, embedder,
         embedding_version=recognition_config.embedding_version,
         min_face_px=recognition_config.min_face_px,
+        embed_min_face_px=getattr(recognition_config, "embed_min_face_px", None),
+        embed_min_score=getattr(recognition_config, "embed_min_score", None),
+        embed_max_yaw=getattr(recognition_config, "embed_max_yaw", None),
     )

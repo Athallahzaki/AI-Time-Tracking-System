@@ -1,39 +1,36 @@
 # Serah Terima
 
-Ditulis ulang di akhir setiap sesi. Terakhir: 14 Oktober 2026, sesi EA + EB (paket ea-r8). `SERAH-TERIMA-EA-R3.md` tetap berlaku untuk ReID/`schedule_off`/watchdog.
+Ditulis ulang di akhir setiap sesi. Terakhir: 15 Oktober 2026, sesi EA + EB (paket ea-r9). `SERAH-TERIMA-EA-R3.md` tetap berlaku untuk ReID/`schedule_off`/watchdog. Angka uji minggu ini: CHANGELOG ea-r9.
 
 ## Selesai
 
-- Error GPU fatal (`illegal memory access` dsb.) → kamera `camera.failed reason=gpu_fatal`, model tidak dipanggil lagi, engine berhenti rapi, kode keluar **3** → watchdog menyalakan ulang. Default `core.gpu_fatal_action: "exit"` (lama: `"retry"`).
-- Start ditolak untuk `batch_inference` + `cuda_graph` (crash eb-r1); `ENGINE_ALLOW_BATCH_CUDA_GRAPH=1` untuk eksperimen. `batch_check --cuda-graph` tidak terpengaruh.
-- Kebocoran 24/7: `attempts_by_uuid`, `_resumed_from`/kandidat sambungan. `retry_in_seconds` = jeda sebenarnya. Log `factory.py` usang diganti.
-- Log health "detector bersama ... sibuk N%" + WARNING ≥ 80%.
-- `mediamtx.yml` cam02–cam05; peringatan afinitas di `install-engine-task.ps1`; `.sh` LF.
-- Afinitas P-core terkonfirmasi sebagai penyebab ayunan/stall 8 Okt (sudah di `start-engine.ps1`).
-- Tes cloud: engine 658 lulus / 9 dilewati (sebelumnya 633/9); kontrak 151; `policy_grep` bersih.
+- Vonis uji 4060: 6 fps × 5 kamera **LULUS** (p99 0,22 dtk); crash GPU → kode 3 → watchdog hidup ulang **lulus**; batch D-FINE **gugur**; P18 **bukan bug jam** (antrean pembaca saat jenuh); NVDEC **tunda** (decode ±10% CPU); hambatan berikutnya **rekognisi wajah** (jenuh ±18 wajah/dtk, 35% dibuang).
+- ea-r9: gerbang kualitas sebelum embedding (`recognition.embed_*`, default mati); `backoff_interval_seconds`/`attempts_before_backoff` dari config; WARNING worker rekognisi jenuh; start ditolak untuk input SCRFD yang tidak cocok dengan model; kode keluar 2 untuk config salah dan watchdog menunggu config diubah; `batch_check` membandingkan dengan ukuran 1 dan keluarannya ASCII.
+- Tes cloud: engine 680 lulus / 9 dilewati; kontrak 151; `policy_grep` bersih.
 
 ## Belum (diurutkan)
 
-1. **Pola error fatal belum dicocokkan dengan traceback asli** 4060. Ambil teks/tipe exception dari log crash tick + batch + `cuda_graph` (12 Okt) atau ulangi 1 menit; bila tidak cocok, tambah pola di `perception/gpu_fatal.py`.
-2. Batch berukuran tetap (pad ke jumlah kamera) bila uji manual #2 menunjukkan crash hanya saat ukuran batch berubah. Lalu hapus penjaga `_refuse_known_crash`.
-3. EB1: profil `py-spy` + `nvidia-smi dmon` (vonis NVDEC/EB2). `swscale_resize: true` setelah `scaling_check` lulus.
-4. P18: cek `drift_s` per kamera (uji manual #3). Positif ±0,4 = backlog decode (EB), bukan jam.
-5. Kolom `drop/s` di `summarize_gladi` = `frames_replaced`; ganti nama/beri catatan.
-6. Backend: ReID TIDAK gagal validasi, tetapi ANON dihitung sebagai karyawan (koreksi di SERAH-TERIMA-EA-R3 #2). Endpoint baca + video belum butuh login (jalur BE, 19–23 Okt).
+1. **Kalibrasi gerbang rekognisi** (uji manual #1). Tanpa itu stress test 100 orang (dok. 12 §2.2) kemungkinan gagal.
+2. Batch embedding glintr100 / SCRFD beberapa crop sekaligus; glintr100 lewat onnxruntime TensorRT EP FP16 (calon TensorRT yang lebih berguna daripada D-FINE).
+3. SCRFD berdimensi dinamis (ekspor ulang) bila ingin input < 640; ukur ulang ms/wajah dan recall.
+4. MSDA: peringatan "No accelerated MSDA provider" muncul di runtime. Coba `libreyolo[hub-kernels]` di env kloningan; prioritas rendah (detector 50% sibuk).
+5. `swscale_resize: true` setelah `scaling_check` (±70% waktu thread kamera = konversi warna).
+6. Traceback asli uji crash ea-r8 belum dicatat (dari `logs\engine\engine-20261015-212945.err.log`).
+7. Kolom `drop/s` `summarize_gladi` = `frames_replaced`; ganti nama/beri catatan.
+8. Backend: ReID dihitung salah diam-diam (SERAH-TERIMA-EA-R3 #2); endpoint baca + video belum butuh login.
 
 ## Keputusan yang perlu disetujui
 
-- Default `gpu_fatal_action: "exit"` (perilaku lama = bug). Kode keluar 3 khusus GPU fatal.
-- Penjadwal tahap 2 hanya bila batch tetap jalan; bila tidak, tetap `free`. Margin 6 fps × 5 kamera terhadap plafon bawah (31 frame/dtk) hanya ±3%.
+- Penjadwal tahap 2: batch gugur → tetap `free` (atau tick tanpa batch). Rapat EA–EB.
+- Nilai gerbang rekognisi untuk profil demo/pilot, dari uji manual #1.
+- Start ditolak untuk `face_detector_input_size` yang tidak cocok dengan model berbentuk tetap (tidak ada tombol mati).
 
 ## Uji manual di laptop
 
-1. Crash terkendali: `$env:ENGINE_ALLOW_BATCH_CUDA_GRAPH=1`, profil lokal dengan `batch_inference: true` + `cuda_graph: true`, 5 kamera, lewat `engine-watchdog.ps1`. Harap log `error GPU fatal ... kode keluar 3`, watchdog `engine keluar dengan kode 3`, hidup ulang. Kirim traceback-nya (Belum #1). Hapus env sesudahnya.
-2. Dua proses terpisah: `python -m engine.tools.batch_check --config engine/config/demo-4060.yaml --source <video> --batch-sizes 5 --cuda-graph`, lalu `--batch-sizes 1,2,5 --cuda-graph`. Pertama lulus + kedua crash = ukuran berubah penyebabnya.
-3. `drift_s` per kamera dari `bench-out/ab-idk3.csv` dan `ab-T1.csv` (median per `camera_id`).
-4. Gladi T0-6 15 menit: catat baris `detector bersama ... sibuk N%`. `ms/gambar × total frame/dtk ≈ 1000` = dispatcher jenuh.
-5. Pasang tugas dengan `-AffinityMask 0xFFFF`; pastikan tidak ada peringatan afinitas.
+1. **Gerbang rekognisi.** Salin `demo-4060.yaml` ke profil lokal, buka komentar blok ea-r9 (embed_* + backoff), gladi 6 fps 15 menit seperti 15 Okt (watchdog `-HealthSeconds 2 -TargetFps 6`, `ENGINE_OUTBOX_PATH` uji, `lag_probe` 5 kamera). Bandingkan dengan run 640 tanpa gerbang (16 wajah/dtk, 54 ms, 35% dibuang): `rekognisi: diproses/ditolak-penuh/basi/rata2`, `gerbang embedding: ...`, `detector bersama ... ms/gambar`, dan apakah `EMP123` tetap dikenali di kelima kamera (event `track.identified` di CSV/log). Gerbang yang membuat orang terdaftar tak dikenali = terlalu ketat.
+2. **Kode keluar 2.** Profil lokal dengan kunci salah (mis. `core: {kunci_tidak_ada: 1}`) lewat watchdog: log `config engine salah ... (kode 2)`, tidak ada hidup ulang; perbaiki berkasnya → `berubah; mencoba lagi`.
+3. **Input SCRFD.** Profil lokal `face_detector_input_size: 480`: engine menolak start dengan pesan "model ini berbentuk tetap", kode keluar 2, watchdog menunggu config diubah. Kembalikan 640.
 
 ## Langkah berikutnya
 
-Uji manual 1–2 sebelum rapat EA–EB (penjadwal tahap 2, sebelum 19 Okt), lalu batch tetap atau tetap `free`; py-spy (EB1); BE: auth endpoint baca + penolakan `ANON-` di ledger.
+Uji manual #1 → pilih nilai gerbang → stress test bertahap (video berorang banyak, mis. MOT20) sebelum M4 (6 Nov). Rapat EA–EB: penjadwal tetap `free`, prioritas EB pindah ke rekognisi.

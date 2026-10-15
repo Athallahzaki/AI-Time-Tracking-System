@@ -224,14 +224,22 @@ def run(detector: Any, images: Sequence[np.ndarray], batch_sizes: Sequence[int],
 
 def format_report(report: Report) -> str:
     threshold = report.detection_threshold
-    lines = [f"{report.images} gambar; tanpa batch {report.reference_ms_per_image:.1f} ms/gambar; "
-             f"batch didukung: {report.batch_supported}; ambang deteksi {threshold}",
-             f"{'batch':>5} {'ms/gambar':>10} {'percepatan':>10} {'dibatch':>8} {'salah':>6} {'IoU min':>8} "
-             f"{'Δskor':>7} {'beda-semua':>10} {'skor-maks':>9}"]
+    single = next((s for s in report.sizes if s.batch_size == 1), None)
+    # ASCII saja: di Windows, keluaran yang dialirkan ke Tee-Object memakai cp1252 dan
+    # karakter seperti delta membuat print gagal SEBELUM --json ditulis (uji 15 Okt).
+    lines = [f"{report.images} gambar; pembanding eager+PIL tanpa batch {report.reference_ms_per_image:.1f} "
+             f"ms/gambar; batch didukung: {report.batch_supported}; ambang deteksi {threshold}",
+             f"{'batch':>5} {'ms/gambar':>10} {'vs eager':>9} {'vs ukuran1':>10} {'dibatch':>8} {'salah':>6} "
+             f"{'IoU min':>8} {'d-skor':>7} {'beda-semua':>10} {'skor-maks':>9}"]
     for s in report.sizes:
-        lines.append(f"{s.batch_size:>5} {s.ms_per_image:>10.1f} {s.speedup:>9.2f}x {str(s.batched):>8} "
-                     f"{s.mismatched_images:>6} {s.worst_iou:>8.3f} {s.worst_conf_delta:>7.3f} "
-                     f"{s.mismatched_all:>10} {s.unmatched_max_score:>9.3f}")
+        vs_single = (f"{single.ms_per_image / s.ms_per_image:>9.2f}x"
+                     if single and s.ms_per_image else f"{'-':>10}")
+        lines.append(f"{s.batch_size:>5} {s.ms_per_image:>10.1f} {s.speedup:>8.2f}x {vs_single} "
+                     f"{str(s.batched):>8} {s.mismatched_images:>6} {s.worst_iou:>8.3f} "
+                     f"{s.worst_conf_delta:>7.3f} {s.mismatched_all:>10} {s.unmatched_max_score:>9.3f}")
+    lines.append("  vs eager   = terhadap pembanding eager+PIL (BUKAN konfigurasi yang dipakai engine)")
+    lines.append("  vs ukuran1 = terhadap baris batch 1 dengan pengaturan yang sama: ini angka keputusan batch"
+                 + ("" if single else " (tambahkan 1 ke --batch-sizes untuk mengisinya)"))
     lines.append("  salah      = gambar yang kotaknya beda pada ambang deteksi (menentukan vonis)")
     lines.append("  beda-semua = termasuk kotak skor rendah yang hanya dipakai ByteTrack tahap kedua;")
     lines.append("  skor-maks  = skor tertinggi kotak yang tidak punya pasangan")
@@ -311,10 +319,11 @@ def main(argv: Optional[List[str]] = None) -> int:
           f"fast_preprocess {getattr(detector, '_fast_preprocess', '?')} "
           f"(dipakai {getattr(detector, '_fast_preprocess_hits', 0)}x) (pembanding: eager, PIL, tanpa batch"
           f"{', FP32' if args.reference_fp32 else ''})")
-    print(format_report(report))
+    # JSON dulu: kalau print gagal karena encoding konsol, angkanya tetap tersimpan.
     if args.json:
         with open(args.json, "w", encoding="utf-8") as handle:
             json.dump({**asdict(report), "verdict": report.verdict}, handle, indent=2)
+    print(format_report(report))
     return 0
 
 
