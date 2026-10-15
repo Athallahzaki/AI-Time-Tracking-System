@@ -143,7 +143,7 @@ function withLiveTimers(detections) {
       );
       extra = `${Math.ceil(remaining)}s`;
     } else if (detection.timerMode === 'paused') {
-      extra = 'Istirahat 12:00–13:00 · timer dijeda';
+      extra = 'Jam istirahat resmi · timer dijeda';
     } else if (
       detection.timerMode === 'counting' ||
       detection.timerMode === 'limit'

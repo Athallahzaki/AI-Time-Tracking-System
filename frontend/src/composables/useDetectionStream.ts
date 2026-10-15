@@ -1,4 +1,9 @@
 import { onMounted, onUnmounted, reactive, ref } from 'vue';
+import {
+  interpolationEnabled,
+  resolveInterpolated,
+  type BoxGeom,
+} from './useBoxInterpolation';
 
 export interface DetectionItem {
   id?: string | number;
@@ -13,6 +18,12 @@ export interface DetectionItem {
   height: string;
   warning?: boolean;
   track_id?: string | number;
+  /** Kunci track stabil untuk interpolasi (track_uuid); kosong = tidak diinterpolasi. */
+  interpKey?: string;
+  /** Geometri numerik (persen) — sumber interpolasi; top/left/width/height turunannya. */
+  geom?: BoxGeom;
+  /** Sumber identitas (dok. 12 §3.6): face | tracking | reid | reid_retro. */
+  identitySource?: string;
   elapsedSeconds?: number;
   elapsedObservedAtMs?: number;
   /** Global clock: server epoch seconds when this track was first seen. */
@@ -68,6 +79,8 @@ interface BackendBbox {
 
 interface BackendPerson {
   track_id: string | number;
+  track_uuid?: string;
+  identity_source?: string | null;
   bbox: BackendBbox;
   confidence: number | null;
   first_seen_at?: number;
@@ -89,6 +102,7 @@ interface BackendPerson {
 
 interface ProtocolViewBox {
   track_uuid?: string;
+  identity_source?: string | null;
   track_id?: string | number;
   bbox?: [number, number, number, number];
   person_id?: string | null;
@@ -137,7 +151,7 @@ function formatDuration(seconds: number): string {
   return `${m}m ${s % 60}s`;
 }
 
-export function resolveDetectionsAt(
+function nearestFrameDetections(
   camera: CameraItem,
   targetMs: number,
 ): DetectionItem[] {
@@ -156,12 +170,41 @@ export function resolveDetectionsAt(
   return best.detections;
 }
 
+/** Kotak pada waktu jam dinding `targetMs` (mode HLS/WebRTC), dengan interpolasi. */
+export function resolveDetectionsAt(
+  camera: CameraItem,
+  targetMs: number,
+): DetectionItem[] {
+  if (!interpolationEnabled()) return nearestFrameDetections(camera, targetMs);
+  const resolved = resolveInterpolated(
+    camera.frameBuffer || [],
+    (frame) => frame.atMs,
+    (frame) => frame.detections,
+    targetMs,
+  );
+  return resolved ? resolved.boxes : camera.detections || [];
+}
+
+/** Kotak pada posisi video `targetPts` detik (mode direct/MP4), dengan interpolasi. */
 export function resolveDetectionsAtPts(
   camera: CameraItem,
   targetPts: number,
 ): DetectionItem[] {
   const buffer = camera.ptsFrameBuffer;
   if (!buffer?.length || !Number.isFinite(targetPts)) return [];
+
+  if (interpolationEnabled()) {
+    const resolved = resolveInterpolated(
+      buffer,
+      (frame) => frame.pts * 1000,
+      (frame) => frame.detections,
+      targetPts * 1000,
+    );
+    if (!resolved) return [];
+    return resolved.nearestDistance <= MAX_DIRECT_PTS_DIFFERENCE_SECONDS * 1000
+      ? resolved.boxes
+      : [];
+  }
 
   // Frames arrive in ascending PTS order. Binary search keeps this cheap for
   // long recordings while retaining the full file timeline.
@@ -238,7 +281,12 @@ function protocolBoxesToPeople(
       (value) => Number(value) >= 0 && Number(value) <= 1,
     );
     return {
-      track_id: box.track_id ?? box.track_uuid ?? index + 1,
+      // Dulu fallback-nya `index + 1`: ID berganti tiap urutan kotak berubah,
+      // sehingga interpolasi salah memasangkan kotak. Sekarang tanpa ID stabil
+      // kotak tetap tampil tetapi tidak diinterpolasi (track_uuid kosong).
+      track_id: box.track_id ?? box.track_uuid ?? `n${index + 1}`,
+      track_uuid: box.track_uuid ?? (box.track_id != null ? String(box.track_id) : undefined),
+      identity_source: box.identity_source ?? null,
       identity: box.person_id ?? null,
       // Detector score from the engine. No fake default: missing stays missing.
       confidence: box.confidence ?? null,
@@ -386,16 +434,29 @@ export function useDetectionStream() {
         if (timerMode === 'qualifying') {
           timerText = `${Math.ceil(qualificationRemaining)}s`;
         } else if (timerMode === 'paused') {
-          timerText = 'Istirahat 12:00–13:00 · timer dijeda';
+          timerText = 'Jam istirahat resmi · timer dijeda';
         } else if (timerMode === 'unidentified') {
           timerText = `Belum dikenali · kunjungan ${formatDuration(finiteNumber(person.visit_free_time_seconds))}`;
         } else if (timerMode === 'limit') {
           timerText = `BATAS TERCAPAI · ${formatDuration(dailyUsed)} / ${formatDuration(allowance)}`;
         }
 
+        const geom: BoxGeom = {
+          x: (x1 / frameWidth) * 100,
+          y: (y1 / frameHeight) * 100,
+          w: ((x2 - x1) / frameWidth) * 100,
+          h: ((y2 - y1) / frameHeight) * 100,
+        };
+        // Payload lama (`people`) membawa track_id dari engine yang stabil per track.
+        const interpKey = person.track_uuid
+          ?? (Array.isArray(data.people) && person.track_id != null ? String(person.track_id) : undefined);
+
         return {
-          id: person.track_id,
+          id: interpKey ?? person.track_id,
           track_id: person.track_id,
+          interpKey,
+          geom,
+          identitySource: person.identity_source || undefined,
           label: person.identity
             ? `Emp #${person.identity}`
             : `ID #${person.track_id}`,
@@ -423,7 +484,16 @@ export function useDetectionStream() {
       });
 
       const atMs = eventTimeMs(data);
-      camera.frameBuffer.push({ atMs, detections });
+      // Buffer harus terurut waktu (interpolasi memakai pencarian biner). Frame
+      // yang datang terlambat disisipkan di tempatnya, bukan di ujung.
+      const buffer = camera.frameBuffer;
+      if (!buffer.length || buffer[buffer.length - 1].atMs <= atMs) {
+        buffer.push({ atMs, detections });
+      } else {
+        let insertAt = buffer.length - 1;
+        while (insertAt > 0 && buffer[insertAt - 1].atMs > atMs) insertAt--;
+        buffer.splice(insertAt, 0, { atMs, detections });
+      }
       const cutoff = Date.now() - DETECTION_BUFFER_WINDOW_MS;
       while (camera.frameBuffer.length && camera.frameBuffer[0].atMs < cutoff) {
         camera.frameBuffer.shift();

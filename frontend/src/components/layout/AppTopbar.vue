@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
-import { LayoutGrid, LogIn, LogOut, Menu } from '@lucide/vue';
+import { KeyRound, LayoutGrid, LogIn, LogOut, Menu } from '@lucide/vue';
 import { useAuth } from '@/composables/useAuth';
 import NotificationDropdown from './NotificationDropdown.vue';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -121,6 +121,10 @@ defineEmits(['toggle-sidebar']);
             }}</Badge>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
+          <DropdownMenuItem @select="router.push('/change-password')">
+            <KeyRound />
+            Ganti password
+          </DropdownMenuItem>
           <DropdownMenuItem variant="destructive" @select="handleLogout">
             <LogOut />
             Keluar

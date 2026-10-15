@@ -1,5 +1,6 @@
 <script setup>
 import { ref } from 'vue';
+import { useRouter } from 'vue-router';
 import DashboardLayout from '@/layouts/DashboardLayout.vue';
 import DashboardHeader from '@/components/dashboard/DashboardHeader.vue';
 import StatsRow from '@/components/dashboard/StatsRow.vue';
@@ -12,12 +13,15 @@ import ManualCorrectionPanel from '@/components/dashboard/ManualCorrectionPanel.
 const refreshInterval = ref('5');
 const { cameras, stats, isConnected, isStreaming } = useDetectionStream();
 
+const router = useRouter();
+
+// Sisa demo lama (membuka JSON mentah di tab baru) diganti tautan ke halaman terkait.
 function handleExport() {
-  window.open('/api/attendance/events', '_blank');
+  router.push('/reports');
 }
 
 function handleConfigure() {
-  window.open('/api/cameras', '_blank');
+  router.push('/settings?tab=engine');
 }
 </script>
 

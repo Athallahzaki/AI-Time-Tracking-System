@@ -1,5 +1,8 @@
 <script setup>
-defineProps({
+import { computed } from 'vue';
+import { identitySourceMeta } from '@/lib/format';
+
+const props = defineProps({
   detection: { type: Object, required: true },
   compact: { type: Boolean, default: false },
 });
@@ -12,11 +15,20 @@ const colorMap = {
   red: 'border-red-400 text-red-300 shadow-[0_0_8px_rgba(248,113,113,0.4)]',
   cyan: 'border-cyan-400 text-cyan-300 shadow-[0_0_8px_rgba(34,211,238,0.3)]',
 };
+
+// Label sumber identitas (dok. 12 §3.6). ReID ditandai warna berbeda supaya HR
+// tahu identitasnya disambung lewat tubuh, bukan wajah.
+const source = computed(() => identitySourceMeta(props.detection.identitySource));
+const sourceTone = computed(() =>
+  props.detection.identitySource === 'reid' || props.detection.identitySource === 'reid_retro'
+    ? 'bg-violet-500/90 text-white'
+    : 'bg-white/15 text-white/90',
+);
 </script>
 
 <template>
   <div
-    class="pointer-events-none absolute rounded border-2 transition-all duration-75 ease-linear"
+    class="pointer-events-none absolute rounded border-2 transition-[border-color,box-shadow] duration-150"
     :class="colorMap[detection.color] || colorMap.emerald"
     :style="{
       top: detection.top,
@@ -40,6 +52,12 @@ const colorMap = {
     >
       <span v-if="detection.sub">{{ detection.sub }}</span>
       <span v-if="detection.conf"> · {{ detection.conf }}</span>
+      <span
+        v-if="source"
+        class="ml-1 rounded px-1 text-[9px] font-bold tracking-normal uppercase"
+        :class="sourceTone"
+        :title="source.hint"
+      >{{ source.short }}</span>
     </div>
 
     <!-- Bottom duration / extra badge — ikut dinaikkan agar konsisten dengan label atas -->
