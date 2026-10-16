@@ -660,6 +660,7 @@ class EngineRuntime:
                 int(worker["failed"]), worker["avg_recognize_ms"], int(worker["queue_depth"]),
             )
             self._report_recognition_load(now, worker)
+            self._report_identify_delay(cameras)
         if self._reid is not None:
             if not self._reid.worker.running:
                 degraded.append("reid_worker_stopped")
@@ -708,6 +709,26 @@ class EngineRuntime:
                 } or None,
             )
         )
+
+    def _report_identify_delay(self, cameras: Sequence[CameraSupervisor]) -> Optional[Dict[str, float]]:
+        """Median/p90 detik dari track lahir sampai dikenali, semua kamera (ea-r10).
+
+        Patokan untuk setiap perubahan rekognisi: lebih hemat tapi lebih lambat
+        mengenali bukan perbaikan (uji gerbang 16 Okt: 4-6 dtk -> 56 dtk). Dokumen 12
+        §2.2: wajah yang terlihat jelas teridentifikasi <= 5 dtk.
+        """
+        delays = sorted(d for camera in cameras for d in camera.identify_delays())
+        if not delays:
+            return None
+        summary = {
+            "n": float(len(delays)),
+            "median": delays[len(delays) // 2],
+            "p90": delays[min(len(delays) - 1, int(0.9 * len(delays)))],
+            "max": delays[-1],
+        }
+        logger.info("identifikasi: %d track terakhir, sejak track lahir median %.1f dtk, p90 %.1f dtk, maks %.1f dtk",
+                    int(summary["n"]), summary["median"], summary["p90"], summary["max"])
+        return summary
 
     def _report_recognition_load(self, now: float, worker: Dict[str, Any]) -> Optional[float]:
         """Laju dan porsi buang worker rekognisi sejak laporan sebelumnya (ea-r9).

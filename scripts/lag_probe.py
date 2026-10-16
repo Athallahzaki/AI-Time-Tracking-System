@@ -224,6 +224,13 @@ def summarize(rows: List[Dict[str, Any]], duration: float) -> List[str]:
         if identified:
             people = sorted(set(identified))
             lines.append(f"  track.identified: {len(identified)} kali ({', '.join(people[:5])})")
+            delays = sorted(float(r["identify_s"]) for r in rows if r["camera_id"] == camera
+                            and r.get("source") == "identified" and r.get("identify_s") not in ("", None))
+            if delays:
+                lines.append(f"  waktu sampai dikenali (sejak track lahir): median {statistics.median(delays):.1f} dtk, "
+                             f"min {delays[0]:.1f}, maks {delays[-1]:.1f} (dok. 12: <= 5 dtk untuk wajah jelas)")
+        else:
+            lines.append("  track.identified: tidak ada di kamera ini")
         for note in events:
             lines.append(f"  event: {note}")
         warnings = _warnings(ages, [float(v) for v in fps], drifts)
@@ -268,14 +275,17 @@ def run(host: str, port: int, cameras: List[Tuple[str, str]], seconds: float,
     replayed = 0
     rows: List[Dict[str, Any]] = []
     last_view: Dict[str, float] = {}
+    # identify_s (ea-r10): detik dari track lahir sampai track.identified (pts - track_started_pts).
     fields = ["wall_t", "elapsed_s", "camera_id", "source", "frame_age_s", "lag_s", "fps", "dropped",
-              "drift_s", "note"]
+              "drift_s", "note", "identify_s"]
+    # track.identified tidak membawa camera_id; diambil dari track.started (ea-r10).
+    camera_of_track: Dict[str, str] = {}
 
     def row(camera_id: str, source: str, **values: Any) -> None:
         now = time.time()
         entry = {"wall_t": round(now, 3), "elapsed_s": round(now - started, 3), "camera_id": camera_id,
                  "source": source, "frame_age_s": "", "lag_s": "", "fps": "", "dropped": "", "drift_s": "",
-                 "note": ""}
+                 "note": "", "identify_s": ""}
         entry.update(values)
         rows.append(entry)
 
@@ -316,8 +326,17 @@ def run(host: str, port: int, cameras: List[Tuple[str, str]], seconds: float,
                         dropped=m.get("frames_dropped_stale", ""),
                         drift_s=m.get("clock_drift_seconds", ""),
                         note=(message.get("cameras") or {}).get(camera, ""))
+            elif kind == "track.started":
+                camera_of_track[str(message.get("track_uuid", ""))] = str(message.get("camera_id", ""))
             elif kind == "track.identified":
-                row(message.get("camera_id", ""), "identified", note=str(message.get("person_id", "")))
+                uuid = str(message.get("track_uuid", ""))
+                camera = message.get("camera_id") or camera_of_track.get(uuid, "")
+                delay = ""
+                try:
+                    delay = round(max(0.0, float(message["pts"]) - float(message["track_started_pts"])), 2)
+                except (KeyError, TypeError, ValueError):
+                    pass
+                row(camera, "identified", note=str(message.get("person_id", "")), identify_s=delay)
             elif kind in ("camera.degraded", "camera.recovered", "camera.online", "camera.failed"):
                 detail = message.get("reason") or message.get("kind") or ""
                 row(message.get("camera_id", ""), "event", note=f"{kind} {detail}".strip())

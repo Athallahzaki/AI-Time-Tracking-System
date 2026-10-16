@@ -7,6 +7,41 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-10-16 · paket ea-r10 — Hasil uji gerbang rekognisi; metrik waktu sampai dikenali
+
+Dasar: ea-r9. Jalur EA + EB. Kontrak, `engine/ports/`, dan `backend/` tidak disentuh. Default tidak berubah.
+
+**Hasil uji gerbang (RTX 4060, 16 Okt, 6 fps × 5 kamera, `uji-siap.mp4`)**
+
+| Konfigurasi | ms/permintaan | Dibuang | Di-embed | `EMP123` dikenali |
+|---|---|---|---|---|
+| Tanpa gerbang (15 Okt) | 54 | 35% | semua | 5×, 4–6 dtk setelah frame pertama |
+| ukuran 56 + skor 0,6 + samping 0,35 + mundur 3/8 dtk | 21 | 0,2% | **0** (kecil 92%, samping 6%, skor 1%) | **tidak pernah** (15 menit) |
+| skor 0,6 + samping 0,5 + mundur 3/8 dtk | 29 | 0,2% | 45% (samping 41%, skor 14% dibuang) | 3× dalam 5 menit, pertama ±56 dtk |
+
+Biaya per wajah: SCRFD 640 ±21 ms, glintr100 ±33 ms. Kelancaran 6 fps lulus di semua run (p99 0,13–0,16
+dtk), tetapi run yang paling mulus adalah yang rekognisinya tidak menghasilkan apa-apa: angka beban saja
+menyesatkan. **Keputusan: gerbang tetap mati di profil;** beban 100 orang dikejar lewat biaya per wajah
+(glintr100 TensorRT EP FP16, SCRFD berdimensi dinamis), bukan dengan membuang wajah. Keterlambatan
+identifikasi tidak menghapus menit orang yang terlihat terus (awal interval dimundurkan ke kelahiran track),
+tetapi menghilangkan kunjungan singkat/track yang putus sebelum dikenali, memicu peringatan "tidak dikenal",
+dan melanggar dok. 12 §2.2 (≤ 5 dtk).
+
+**Apa yang berubah**
+
+- `presence/assembler.py`: `AssemblerMetrics.identify_delays` (200 terakhir) = detik dari track lahir sampai
+  wajah pertama dikenali; identifikasi ulang track yang sama tidak dihitung.
+- `runtime/camera.py`: `identify_delays()`. `runtime/service.py`: log health "identifikasi: N track terakhir,
+  sejak track lahir median X dtk, p90 Y dtk, maks Z dtk" (bersama baris rekognisi).
+- `scripts/lag_probe.py`: `track.identified` kini dicatat dengan kamera (dipetakan dari `track.started`;
+  event itu tidak membawa `camera_id`) dan kolom CSV baru `identify_s`; ringkasan per kamera menampilkan waktu
+  sampai dikenali atau "tidak ada di kamera ini". CSV lama tetap bisa diringkas.
+- `config/demo-4060.yaml` + komentar `schema.py`: usulan nilai gerbang ea-r9 DIHAPUS (membuat nol orang
+  dikenali) dan diganti tabel hasil di atas.
+
+**Cara uji.** `python -m pytest engine/tests -q`: 686 lulus, 9 dilewati di cloud (+6 di
+`test_waktu_kenali.py`); `contracts/tests` 151; `policy_grep` bersih.
+
 ## 2026-10-15 · paket ea-r9 — Beban rekognisi wajah, kode keluar config, dan vonis uji 4060 minggu ini
 
 Dasar: ea-r8. Jalur EA + EB. Kontrak, `engine/ports/`, dan `backend/` tidak disentuh. **Default tidak

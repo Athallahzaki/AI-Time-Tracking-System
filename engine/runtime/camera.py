@@ -888,6 +888,11 @@ class CameraSupervisor:
         """Rentang camera.degraded(kind=lag) sedang terbuka."""
         return self._lag.degraded
 
+    def identify_delays(self) -> List[float]:
+        """Detik dari track lahir sampai dikenali, identifikasi terbaru kamera ini (ea-r10)."""
+        assembler = self._assembler
+        return list(assembler.metrics.identify_delays) if assembler is not None else []
+
     def metrics(self) -> Dict[str, Any]:
         """Isi engine.health.camera_metrics untuk kamera ini; hanya yang terukur."""
         out: Dict[str, Any] = {}

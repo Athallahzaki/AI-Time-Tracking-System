@@ -1,36 +1,36 @@
 # Serah Terima
 
-Ditulis ulang di akhir setiap sesi. Terakhir: 15 Oktober 2026, sesi EA + EB (paket ea-r9). `SERAH-TERIMA-EA-R3.md` tetap berlaku untuk ReID/`schedule_off`/watchdog. Angka uji minggu ini: CHANGELOG ea-r9.
+Ditulis ulang di akhir setiap sesi. Terakhir: 16 Oktober 2026, sesi EA + EB (paket ea-r10). `SERAH-TERIMA-EA-R3.md` tetap berlaku untuk ReID/`schedule_off`/watchdog. Angka uji: CHANGELOG ea-r9 (vonis 14–15 Okt) dan ea-r10 (gerbang).
 
 ## Selesai
 
-- Vonis uji 4060: 6 fps × 5 kamera **LULUS** (p99 0,22 dtk); crash GPU → kode 3 → watchdog hidup ulang **lulus**; batch D-FINE **gugur**; P18 **bukan bug jam** (antrean pembaca saat jenuh); NVDEC **tunda** (decode ±10% CPU); hambatan berikutnya **rekognisi wajah** (jenuh ±18 wajah/dtk, 35% dibuang).
-- ea-r9: gerbang kualitas sebelum embedding (`recognition.embed_*`, default mati); `backoff_interval_seconds`/`attempts_before_backoff` dari config; WARNING worker rekognisi jenuh; start ditolak untuk input SCRFD yang tidak cocok dengan model; kode keluar 2 untuk config salah dan watchdog menunggu config diubah; `batch_check` membandingkan dengan ukuran 1 dan keluarannya ASCII.
-- Tes cloud: engine 680 lulus / 9 dilewati; kontrak 151; `policy_grep` bersih.
+- Vonis uji 4060: 6 fps × 5 kamera **LULUS**; crash GPU → kode 3 → watchdog hidup ulang **lulus**; batch D-FINE **gugur**; P18 **bukan bug jam**; NVDEC **tunda**; hambatan berikutnya **rekognisi wajah** (54 ms/wajah = SCRFD ±21 + glintr100 ±33; jenuh ±18 wajah/dtk).
+- Uji gerbang rekognisi (ea-r9) **gagal sebagai solusi beban**: ukuran 56 = nol orang dikenali; skor 0,6 + samping 0,5 = beban turun (29 ms) tetapi dikenali ±56 dtk (vs 4–6). Gerbang tetap di kode, mati di profil.
+- ea-r10: metrik "waktu sampai dikenali" di log engine dan `lag_probe` (kolom `identify_s`, kamera untuk `track.identified`); usulan gerbang lama dihapus dari `demo-4060.yaml`.
+- Kode keluar 2 untuk config salah dan input SCRFD yang tidak cocok: diuji di laptop (uji manual ea-r9 #2–#3).
+- Tes cloud: engine 686 lulus / 9 dilewati; kontrak 151; `policy_grep` bersih.
 
 ## Belum (diurutkan)
 
-1. **Kalibrasi gerbang rekognisi** (uji manual #1). Tanpa itu stress test 100 orang (dok. 12 §2.2) kemungkinan gagal.
-2. Batch embedding glintr100 / SCRFD beberapa crop sekaligus; glintr100 lewat onnxruntime TensorRT EP FP16 (calon TensorRT yang lebih berguna daripada D-FINE).
-3. SCRFD berdimensi dinamis (ekspor ulang) bila ingin input < 640; ukur ulang ms/wajah dan recall.
-4. MSDA: peringatan "No accelerated MSDA provider" muncul di runtime. Coba `libreyolo[hub-kernels]` di env kloningan; prioritas rendah (detector 50% sibuk).
-5. `swscale_resize: true` setelah `scaling_check` (±70% waktu thread kamera = konversi warna).
-6. Traceback asli uji crash ea-r8 belum dicatat (dari `logs\engine\engine-20261015-212945.err.log`).
-7. Kolom `drop/s` `summarize_gladi` = `frames_replaced`; ganti nama/beri catatan.
-8. Backend: ReID dihitung salah diam-diam (SERAH-TERIMA-EA-R3 #2); endpoint baca + video belum butuh login.
+1. **Biaya per wajah**: glintr100 lewat onnxruntime TensorRT EP FP16 (33 ms), lalu SCRFD berdimensi dinamis di 320 (21 ms). Ukur dengan `rata2 ms`, porsi buang, DAN baris `identifikasi: ... median`.
+2. Stress test bertahap dengan video berorang banyak (mis. MOT20) sebelum M4 (6 Nov).
+3. MSDA: "No accelerated MSDA provider" di runtime; coba `libreyolo[hub-kernels]` di env kloningan (prioritas rendah).
+4. `swscale_resize: true` setelah `scaling_check`.
+5. Traceback asli uji crash ea-r8 belum dicatat.
+6. Kolom `drop/s` `summarize_gladi` = `frames_replaced`; ganti nama/beri catatan.
+7. Backend: ReID dihitung salah diam-diam (SERAH-TERIMA-EA-R3 #2); endpoint baca + video belum butuh login.
+8. Opsional: kalibrasi `embed_max_yaw` saja (0,7, tanpa skor/mundur); cek dulu apakah `yaw_ratio` wajar untuk kamera dari atas (41% wajah dinilai > 0,5).
 
 ## Keputusan yang perlu disetujui
 
-- Penjadwal tahap 2: batch gugur → tetap `free` (atau tick tanpa batch). Rapat EA–EB.
-- Nilai gerbang rekognisi untuk profil demo/pilot, dari uji manual #1.
-- Start ditolak untuk `face_detector_input_size` yang tidak cocok dengan model berbentuk tetap (tidak ada tombol mati).
+- Penjadwal tahap 2: batch gugur → tetap `free`. Rapat EA–EB.
+- Gerbang rekognisi tidak dipakai di profil demo/pilot; beban dikejar lewat percepatan model.
+- Patokan baru setiap perubahan rekognisi: median waktu sampai dikenali tidak naik (dok. 12 §2.2: ≤ 5 dtk).
 
 ## Uji manual di laptop
 
-1. **Gerbang rekognisi.** Salin `demo-4060.yaml` ke profil lokal, buka komentar blok ea-r9 (embed_* + backoff), gladi 6 fps 15 menit seperti 15 Okt (watchdog `-HealthSeconds 2 -TargetFps 6`, `ENGINE_OUTBOX_PATH` uji, `lag_probe` 5 kamera). Bandingkan dengan run 640 tanpa gerbang (16 wajah/dtk, 54 ms, 35% dibuang): `rekognisi: diproses/ditolak-penuh/basi/rata2`, `gerbang embedding: ...`, `detector bersama ... ms/gambar`, dan apakah `EMP123` tetap dikenali di kelima kamera (event `track.identified` di CSV/log). Gerbang yang membuat orang terdaftar tak dikenali = terlalu ketat.
-2. **Kode keluar 2.** Profil lokal dengan kunci salah (mis. `core: {kunci_tidak_ada: 1}`) lewat watchdog: log `config engine salah ... (kode 2)`, tidak ada hidup ulang; perbaiki berkasnya → `berubah; mencoba lagi`.
-3. **Input SCRFD.** Profil lokal `face_detector_input_size: 480`: engine menolak start dengan pesan "model ini berbentuk tetap", kode keluar 2, watchdog menunggu config diubah. Kembalikan 640.
+1. Gladi 5 menit dengan `demo-4060.yaml` asli (watchdog `-HealthSeconds 2 -TargetFps 6`, `ENGINE_OUTBOX_PATH` uji, `lag_probe` 5 kamera ke CSV baru). Harap: ringkasan probe menampilkan `track.identified` dan "waktu sampai dikenali" per kamera; log engine `identifikasi: ... median` ±4–6 dtk. Ini baseline untuk butir Belum #1.
 
 ## Langkah berikutnya
 
-Uji manual #1 → pilih nilai gerbang → stress test bertahap (video berorang banyak, mis. MOT20) sebelum M4 (6 Nov). Rapat EA–EB: penjadwal tetap `free`, prioritas EB pindah ke rekognisi.
+Baseline uji manual #1 → spike glintr100 TensorRT EP FP16 (env kloningan; bandingkan embedding vs CUDA EP, ms/wajah, waktu sampai dikenali) → SCRFD dinamis → stress test.

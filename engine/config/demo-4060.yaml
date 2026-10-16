@@ -111,15 +111,16 @@ recognition:
   face_detection_threshold: 0.5
   face_detector_input_size: 640
   min_face_px: 40
-  # Paket ea-r9: gerbang kualitas sebelum embedding + mundur penjadwal. Default MATI.
-  # Uji 15 Okt (6 fps x 5 kamera): worker rekognisi jenuh, 54 ms/wajah, 35% permintaan
-  # dibuang. Usulan awal untuk diuji (bandingkan diproses/ditolak-penuh/basi dan waktu
-  # sampai track.identified dengan run tanpa gerbang; lihat SERAH-TERIMA):
-  # embed_min_face_px: 56
-  # embed_min_score: 0.6
-  # embed_max_yaw: 0.35
-  # attempts_before_backoff: 3
-  # backoff_interval_seconds: 8
+  # Gerbang kualitas sebelum embedding (embed_min_face_px / embed_min_score /
+  # embed_max_yaw) dan mundur penjadwal (attempts_before_backoff /
+  # backoff_interval_seconds), paket ea-r9: SENGAJA TIDAK DIPAKAI di profil ini.
+  # Uji 4060 16 Okt, 6 fps x 5 kamera, video uji-siap.mp4 (CHANGELOG ea-r10):
+  #   tanpa gerbang                        54 ms, 35% dibuang, dikenali 4-6 dtk
+  #   ukuran 56 + skor 0.6 + samping 0.35  0 di-embed (92% wajah < 56 px): TIDAK dikenali
+  #   skor 0.6 + samping 0.5 + mundur 3/8  29 ms, 0,2% dibuang, dikenali +-56 dtk
+  # Wajah CCTV kecil dan miring adalah kasus normal; gerbang membeli beban dengan
+  # waktu identifikasi. Ukur ulang dengan baris log "identifikasi: ... median" sebelum
+  # menyalakan apa pun di sini.
   # JANGAN ganti face_detector_input_size dari 640: model SCRFD ini berbentuk tetap
   # (480 = 10x lebih lambat, uji 15 Okt). Engine menolak start bila ukurannya tidak cocok
   # dengan model; ukuran lain butuh ekspor ulang SCRFD berdimensi dinamis.

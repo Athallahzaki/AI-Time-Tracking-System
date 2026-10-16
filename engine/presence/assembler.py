@@ -29,8 +29,9 @@ saat itu identitasnya belum diketahui — ia diambil saat track baru terkonfirma
 from __future__ import annotations
 
 import itertools
+from collections import deque
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Deque, Dict, List, Optional, Sequence, Tuple
 
 from ..api import events
 from ..api.events import PtsClock
@@ -83,11 +84,19 @@ class _Closed:
     end_zone: str
 
 
+# Berapa identifikasi terakhir yang disimpan untuk metrik "waktu sampai dikenali".
+IDENTIFY_DELAY_SAMPLES = 200
+
+
 @dataclass
 class AssemblerMetrics:
     intervals_emitted: int = 0
     stitches: int = 0
     unidentified_closed: int = 0
+    # Detik dari track lahir sampai track.identified, identifikasi terbaru (ea-r10).
+    # Patokan setiap perubahan rekognisi: lebih murah tapi lebih lambat mengenali
+    # bukan perbaikan (uji gerbang 16 Okt: 4-6 dtk -> 56 dtk).
+    identify_delays: Deque[float] = field(default_factory=lambda: deque(maxlen=IDENTIFY_DELAY_SAMPLES))
 
 
 class PresenceAssembler:
@@ -203,6 +212,9 @@ class PresenceAssembler:
             return None
 
         clock = self.clock_for(presence.camera_id)
+        if presence.person_id is None or presence.reid:
+            # Wajah pertama untuk track ini (label ReID sebelumnya tidak dihitung).
+            self.metrics.identify_delays.append(max(0.0, pts - presence.track_started_pts))
         presence.person_id = person_id
         presence.reid = False
         presence.confidence = confidence

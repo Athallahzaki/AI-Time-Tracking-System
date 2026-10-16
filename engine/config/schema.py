@@ -293,6 +293,10 @@ class RecognitionConfig:
     # menyamping tidak dikirim ke glintr100 (bagian termahal per wajah). None = mati.
     # Uji 4060 15 Okt: worker rekognisi jenuh di ±18 wajah/dtk (54 ms/wajah) dan
     # membuang 35% permintaan pada 6 fps × 5 kamera.
+    # PERINGATAN (uji 16 Okt, ea-r10): pada video CCTV uji, 92% wajah < 56 px dan
+    # gerbang ukuran 56 membuat NOL orang dikenali; skor 0,6 + samping 0,5 menurunkan
+    # beban (54 -> 29 ms) tetapi waktu sampai dikenali naik 4-6 -> ±56 dtk. Jangan
+    # nyalakan tanpa mengukur log "identifikasi: ... median" sebelum dan sesudahnya.
     embed_min_face_px: Optional[float] = None
     embed_min_score: Optional[float] = None
     embed_max_yaw: Optional[float] = None
