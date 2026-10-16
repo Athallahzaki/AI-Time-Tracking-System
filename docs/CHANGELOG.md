@@ -7,6 +7,55 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-10-16 · paket ea-r12 — Scheduler rekognisi: giliran per kamera, umur dengan jam bersama
+
+Dasar: ea-r11. Jalur EA + EB. Kontrak, `engine/ports/`, dan `backend/` tidak disentuh. **Perilaku runtime
+berubah dengan sengaja** (perbaikan bug, tanpa flag: perilaku lama hanya membuang giliran). Jalur satu
+kamera/bench (`factory.py`) tidak berubah: tanpa `clock`, umur tetap dalam PTS.
+
+**Bug.** `runtime/service.py` membuat SATU `RecognitionScheduler` untuk semua kamera, tetapi setiap kamera
+memanggil `pop()` dari loop-nya sendiri dan consumer-nya adalah `EngineBinding` kamera itu, yang hanya
+mengenal track kamera itu. `pop()` tidak memfilter kamera, jadi kamera B mengambil permintaan track kamera A;
+binding B tidak menemukan track-nya dan memanggil `complete(produced_evidence=False)`. Wajah tidak pernah
+diproses, tetapi `pop()` sudah menaikkan `attempts`: setelah 5 giliran palsu track A masuk backoff 5 dtk.
+Kedua, umur dan urutan permintaan dihitung dari PTS, padahal PTS direbase ke 0 per kamera per epoch: kamera
+yang baru reconnect membuang permintaan kamera lain sebagai "basi" atau menang urutan karena PTS-nya kecil.
+
+**Besarnya (simulasi kelas asli, 5 kamera × 4 track, 6 fps, 30 dtk, worker tanpa batas).**
+
+| Kasus | Kode lama | ea-r12 |
+|---|---|---|
+| PTS kelima kamera sama | 74 percobaan nyata, 122 giliran nyasar dibuang; c2 **0** percobaan | 200 percobaan, 0 nyasar |
+| c1 baru reconnect (PTS 0, lain 5000) | 110 nyata, 90 nyasar, 2 basi palsu; c3 **0** percobaan | 200, 0 nyasar, 0 basi |
+
+**Akibat untuk angka lama.** Biaya 54 ms/wajah dan "ditolak-penuh" (antrean WORKER) tetap nyata: track
+nyasar ditolak binding sebelum sampai worker. Yang tercemar: siapa yang kebagian giliran, backoff palsu,
+sebagian "basi", dan karena itu **waktu sampai dikenali** (ea-r10: "4–6 dtk", "56 dtk") serta vonis gerbang
+ea-r10. Sesudah paket ini worker menerima lebih banyak percobaan nyata, jadi **"ditolak-penuh" bisa NAIK di
+gladi; itu bukan regresi**. Patokannya `identifikasi: ... median`.
+
+**Apa yang berubah**
+
+- `identity/admission.py`: `RecognitionScheduler(clock=None)`; bila diberi jam, umur (`max_age_seconds`),
+  urutan dalam prioritas yang sama, dan `metrics().oldest_queued_age` memakai jam itu, bukan PTS. Interval
+  per track (retry/backoff/reverify) tetap PTS (satu track = satu kamera). `pop(now_pts, camera_id=None)`:
+  dengan `camera_id`, permintaan kamera lain dikembalikan utuh ke antrean, tidak dinilai basi dengan PTS
+  kamera ini, dan `attempts`-nya tidak naik. `_Queued` kini `(priority, order_key, tiebreak)` +
+  `requested_pts`/`enqueued_at` di luar perbandingan.
+- `pipeline/zoning.py`: `ZonePriorityQueue.step` memanggil `pop(now_pts, camera_id=<kamera frame>)`.
+- `runtime/service.py`: scheduler bersama dibuat dengan `clock=time.monotonic`. Log health baru: WARNING
+  "rekognisi: N giliran untuk track yang tidak dikenal binding kameranya ..." bila angkanya naik (seharusnya
+  selalu 0); `_report_unknown_track_requests`.
+- `presence/binding.py`: `BindingMetrics.requests_unknown_track`. `runtime/camera.py`: `unknown_track_requests()`.
+- Baru `engine/tests/test_scheduler_lintas_kamera.py` (11 tes: rakitan 5 kamera dengan kelas asli, PTS beda
+  titik nol, umur/urutan/metrik dengan jam, perilaku lama tanpa `camera_id`, log WARNING).
+
+**Cara uji.** Cloud tanpa akses PyPI (pytest/fastapi tidak terpasang), jadi dijalankan dengan runner
+pengganti yang memanggil fungsi `test_*` tanpa fixture: tes baru 11/11 lulus; tes engine + kontrak + backend
+yang bisa jalan 618 lulus, daftar gagal (4, semuanya lingkungan: fastapi, cv2/pra-resize) dan dilewati (159,
+kebanyakan butuh fixture `monkeypatch`/`caplog`) **identik** dengan kode sebelum paket. `policy_grep` bersih.
+**Wajib** jalankan pytest penuh di laptop: `python -m pytest engine/tests contracts/tests backend/tests -q`.
+
 ## 2026-10-16 · paket ea-r11 — Persiapan percepatan rekognisi: TensorRT EP, SCRFD dinamis, alat ukur per wajah
 
 Dasar: ea-r10. Jalur EA + EB. Kontrak, `engine/ports/`, dan `backend/` tidak disentuh. **Default tidak

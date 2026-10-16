@@ -70,6 +70,9 @@ class BindingMetrics:
     recognitions_queued: int = 0
     recognitions_rejected: int = 0
     results_discarded: int = 0
+    # Giliran dari scheduler untuk track yang tidak dikenal binding ini (ea-r12).
+    # Seharusnya 0; sebelum ea-r12 ini giliran milik kamera lain.
+    requests_unknown_track: int = 0
 
     @property
     def ever_identified_anyone(self) -> bool:
@@ -222,6 +225,8 @@ class EngineBinding:
 
         track = self._track_by_uuid.get(uuid)
         frame = self._frame_by_camera.get(getattr(request, "camera_id", ""))
+        if track is None:
+            self.metrics.requests_unknown_track += 1
         if track is None or frame is None or self._recognize is None:
             self._complete(uuid, produced_evidence=False)
             return

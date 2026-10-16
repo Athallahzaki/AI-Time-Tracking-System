@@ -33,7 +33,7 @@ import enum
 import heapq
 import itertools
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from .ports import IdentityState, TrackIdentity
 
@@ -59,10 +59,16 @@ class Priority(enum.IntEnum):
 @dataclass(order=True)
 class _Queued:
     priority: int
-    requested_pts: float
+    # Kunci urut kedua (ea-r12): jam bersama bila scheduler punya `clock`, PTS bila
+    # tidak. PTS direbase ke 0 per kamera per epoch, jadi PTS dua kamera tidak bisa
+    # dibandingkan; dengan banyak kamera PTS tidak boleh menentukan siapa duluan.
+    order_key: float
     tiebreak: int
     track_uuid: str = field(compare=False)
     camera_id: str = field(compare=False)
+    requested_pts: float = field(compare=False, default=0.0)
+    # Waktu `clock()` saat masuk antrean; None bila scheduler tanpa `clock`.
+    enqueued_at: Optional[float] = field(compare=False, default=None)
 
 
 @dataclass(frozen=True)
@@ -85,8 +91,19 @@ class RecognitionScheduler:
         attempts_before_backoff: int = DEFAULT_ATTEMPTS_BEFORE_BACKOFF,
         reverify_interval_seconds: float = DEFAULT_REVERIFY_INTERVAL_SECONDS,
         per_camera_quota: int = DEFAULT_PER_CAMERA_QUOTA,
+        clock: Optional[Callable[[], float]] = None,
     ) -> None:
+        """`clock` (ea-r12): jam bersama untuk UMUR dan URUTAN permintaan, mis.
+        `time.monotonic`. Wajib bila satu scheduler dipakai beberapa kamera: PTS
+        tiap kamera punya titik nol sendiri. None = perilaku lama (umur dari PTS),
+        dipakai jalur satu kamera/bench supaya angka antrean tetap dalam waktu
+        media dan sebanding antara mode throughput dan realtime.
+
+        Interval per track (retry, backoff, reverify) tetap dalam PTS: satu track
+        hanya pernah dilihat satu kamera, jadi PTS-nya konsisten.
+        """
         self._max_age = max_age_seconds
+        self._clock = clock
         self._retry_interval = retry_interval_seconds
         self._backoff_interval = backoff_interval_seconds
         self._attempts_before_backoff = attempts_before_backoff
@@ -170,6 +187,9 @@ class RecognitionScheduler:
         if track_uuid in self._in_flight:
             return False
 
+        enqueued_at = self._clock() if self._clock is not None else None
+        order_key = enqueued_at if enqueued_at is not None else now_pts
+
         existing = self._queued_tracks.get(track_uuid)
         if existing is not None:
             # Satu track, satu tempat di antrian. Permintaan yang lebih baru
@@ -178,19 +198,33 @@ class RecognitionScheduler:
             if priority <= existing.priority:
                 existing.priority = int(priority)
                 existing.requested_pts = now_pts
+                existing.enqueued_at = enqueued_at
+                existing.order_key = order_key
                 heapq.heapify(self._queue)
             return False
 
-        item = _Queued(int(priority), now_pts, next(self._counter), track_uuid, camera_id)
+        item = _Queued(int(priority), order_key, next(self._counter), track_uuid, camera_id,
+                       now_pts, enqueued_at)
         heapq.heappush(self._queue, item)
         self._queued_tracks[track_uuid] = item
         return True
 
-    def pop(self, now_pts: float) -> Optional[Request]:
-        """Ambil permintaan paling layak, buang yang sudah basi."""
+    def pop(self, now_pts: float, camera_id: Optional[str] = None) -> Optional[Request]:
+        """Ambil permintaan paling layak, buang yang sudah basi.
+
+        `camera_id` (ea-r12): hanya permintaan kamera ini yang boleh diambil. Wajib
+        bila satu scheduler dibagi beberapa kamera, karena yang memanggil `pop`
+        adalah loop kamera dan consumer-nya hanya mengenal track kamera itu.
+        Sebelum ea-r12 kamera B mengambil permintaan kamera A, binding B tidak
+        menemukan track-nya dan melepasnya tanpa bukti: giliran hilang, tetapi
+        `attempts` sudah naik sehingga track A masuk backoff tanpa pernah dicoba.
+        None = ambil dari semua kamera (satu pemanggil, perilaku lama).
+        """
+        now_clock = self._clock() if self._clock is not None else None
         in_flight_per_camera: Dict[str, int] = {}
-        for _, camera_id in self._in_flight.values():
-            in_flight_per_camera[camera_id] = in_flight_per_camera.get(camera_id, 0) + 1
+        # `kamera`, bukan `camera_id`: nama itu parameter pop (ea-r12).
+        for _, kamera in self._in_flight.values():
+            in_flight_per_camera[kamera] = in_flight_per_camera.get(kamera, 0) + 1
 
         deferred: List[_Queued] = []
         chosen: Optional[_Queued] = None
@@ -198,12 +232,17 @@ class RecognitionScheduler:
         while self._queue:
             item = heapq.heappop(self._queue)
 
-            if now_pts - item.requested_pts > self._max_age:
+            if self._is_stale(item, now_pts, now_clock, camera_id):
                 # Dibuang karena umur, bukan karena posisi di antrian. Orangnya
                 # masih di sana; crop berikutnya lebih berguna daripada crop
                 # dari tempat yang sudah ia tinggalkan.
                 self._queued_tracks.pop(item.track_uuid, None)
                 self._dropped_stale += 1
+                continue
+
+            if camera_id is not None and item.camera_id != camera_id:
+                # Milik kamera lain: dikembalikan utuh untuk loop kamera itu.
+                deferred.append(item)
                 continue
 
             used = in_flight_per_camera.get(item.camera_id, 0)
@@ -228,6 +267,16 @@ class RecognitionScheduler:
         self._attempts[chosen.track_uuid] = self._attempts.get(chosen.track_uuid, 0) + 1
 
         return Request(chosen.track_uuid, chosen.camera_id, Priority(chosen.priority), chosen.requested_pts)
+
+    def _is_stale(self, item: _Queued, now_pts: float, now_clock: Optional[float],
+                  camera_id: Optional[str]) -> bool:
+        if now_clock is not None and item.enqueued_at is not None:
+            return now_clock - item.enqueued_at > self._max_age
+        if camera_id is not None and item.camera_id != camera_id:
+            # Tanpa jam bersama, umur permintaan kamera lain tidak bisa dinilai
+            # dari PTS kamera ini. Biarkan kamera pemiliknya yang memutuskan.
+            return False
+        return now_pts - item.requested_pts > self._max_age
 
     def complete(self, track_uuid: str, produced_evidence: bool = True) -> None:
         """Hasil sudah kembali. Percobaan yang berhasil mereset backoff."""
@@ -264,7 +313,12 @@ class RecognitionScheduler:
         Diambil dari sini dan bukan dari worker pool karena di sinilah
         keputusannya dibuat; worker cuma menjalankannya.
         """
-        ages = [now_pts - item.requested_pts for item in self._queue]
+        if self._clock is not None:
+            # Jam bersama: `now_pts` diabaikan (service memanggil metrics(0.0)).
+            now = self._clock()
+            ages = [now - item.enqueued_at for item in self._queue if item.enqueued_at is not None]
+        else:
+            ages = [now_pts - item.requested_pts for item in self._queue]
         return {
             "queue_depth": float(len(self._queue)),
             "in_flight": float(len(self._in_flight)),

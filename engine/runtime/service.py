@@ -225,8 +225,12 @@ class EngineRuntime:
         self._shared_detector: Any = None
         self._detector_lock = threading.Lock()
 
+        # Satu scheduler untuk semua kamera (prioritas dan kuota per kamera bersifat
+        # global). ea-r12: umur/urutan permintaan memakai jam bersama, karena PTS
+        # direbase ke 0 per kamera per epoch dan tidak bisa dibandingkan antarkamera;
+        # `pop` dipanggil per kamera (pipeline/zoning.py).
         self._scheduler = _LockedScheduler(
-            RecognitionScheduler(**self.config.recognition.scheduler_kwargs())
+            RecognitionScheduler(**self.config.recognition.scheduler_kwargs(), clock=time.monotonic)
         )
         self._cameras: Dict[str, CameraSupervisor] = {}
         self._close_lock = threading.Lock()
@@ -255,6 +259,7 @@ class EngineRuntime:
         self.detector_busy_ratio: Optional[float] = None
         # Rekognisi: (waktu, diproses, ditolak-penuh, basi) pada laporan health terakhir.
         self._recognition_sample: Optional[Tuple[float, int, int, int]] = None
+        self._unknown_track_requests = 0
         self._stop_file_seen = False
         if self.options.stop_file and os.path.exists(self.options.stop_file):
             # Sisa permintaan stop dari run sebelumnya, bukan untuk run ini.
@@ -661,6 +666,7 @@ class EngineRuntime:
             )
             self._report_recognition_load(now, worker)
             self._report_identify_delay(cameras)
+            self._report_unknown_track_requests(cameras)
         if self._reid is not None:
             if not self._reid.worker.running:
                 degraded.append("reid_worker_stopped")
@@ -709,6 +715,21 @@ class EngineRuntime:
                 } or None,
             )
         )
+
+    def _report_unknown_track_requests(self, cameras: Sequence[CameraSupervisor]) -> int:
+        """WARNING bila binding kamera menerima giliran untuk track yang tidak ia kenal
+        (ea-r12). Seharusnya 0: angka yang naik berarti giliran rekognisi dibuang
+        tanpa dicoba, seperti bug scheduler lintas kamera sebelum ea-r12. Kembalikan
+        tambahan sejak laporan sebelumnya."""
+        total = sum(camera.unknown_track_requests() for camera in cameras)
+        added = total - self._unknown_track_requests
+        self._unknown_track_requests = total
+        if added > 0:
+            logger.warning(
+                "rekognisi: %d giliran untuk track yang tidak dikenal binding kameranya sejak "
+                "laporan sebelumnya (seharusnya 0); giliran itu dibuang tanpa dicoba.", added,
+            )
+        return max(0, added)
 
     def _report_identify_delay(self, cameras: Sequence[CameraSupervisor]) -> Optional[Dict[str, float]]:
         """Median/p90 detik dari track lahir sampai dikenali, semua kamera (ea-r10).

@@ -161,6 +161,11 @@ class ZonePriorityQueue:
     behave differently in a throughput benchmark than in production — the two
     modes of §13.2 would stop being comparable in the one place where the number
     being compared is a queue depth.
+
+    ea-r12: itu hanya berlaku untuk SATU kamera. Runtime membagi satu scheduler ke
+    semua kamera, dan PTS tiap kamera punya titik nol sendiri, jadi service
+    memberi scheduler jam bersama (`clock=time.monotonic`) untuk umur dan urutan
+    permintaan. `pop` di sini selalu menyebut kamera ini.
     """
 
     def __init__(
@@ -233,7 +238,10 @@ class ZonePriorityQueue:
             return handed
 
         for _ in range(self._max_per_frame):
-            request = self._scheduler.pop(now_pts)
+            # ea-r12: hanya permintaan kamera ini. Scheduler-nya dibagi lima kamera,
+            # sedangkan consumer di sini (binding kamera ini) hanya mengenal track
+            # kamera ini; permintaan kamera lain yang diambil di sini hilang.
+            request = self._scheduler.pop(now_pts, camera_id=camera_id)
             if request is None:
                 break
             handed.append(request)

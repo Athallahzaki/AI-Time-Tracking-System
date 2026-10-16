@@ -888,6 +888,11 @@ class CameraSupervisor:
         """Rentang camera.degraded(kind=lag) sedang terbuka."""
         return self._lag.degraded
 
+    def unknown_track_requests(self) -> int:
+        """Giliran rekognisi untuk track yang tidak dikenal binding kamera ini (ea-r12)."""
+        binding = self._binding
+        return int(binding.metrics.requests_unknown_track) if binding is not None else 0
+
     def identify_delays(self) -> List[float]:
         """Detik dari track lahir sampai dikenali, identifikasi terbaru kamera ini (ea-r10)."""
         assembler = self._assembler

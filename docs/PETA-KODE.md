@@ -1,7 +1,7 @@
 # Peta Kode
 
 Untuk menemukan file tanpa menjelajah repo. Perbarui saat menambah/memindah modul.
-Per 16 Oktober 2026 (paket ea-r10).
+Per 16 Oktober 2026 (paket ea-r12).
 
 ## Alur data
 
@@ -24,7 +24,8 @@ frontend (Vue + Vite): dashboard, overlay kotak, enrollment, pengaturan
 | Penjadwal berdetak (TickClock, TickGate, kerangka TickScheduler) | `runtime/tick_scheduler.py` |
 | Langkah pipeline per frame, decimation PTS | `pipeline/engine.py` |
 | Worker rekognisi asinkron | `pipeline/recognition_worker.py` |
-| Antrean rekognisi berprioritas zona | `pipeline/zoning.py` |
+| Antrean rekognisi berprioritas zona; `pop` per kamera dari scheduler bersama (ea-r12) | `pipeline/zoning.py` (tes `test_scheduler_lintas_kamera.py`) |
+| Scheduler rekognisi: prioritas, kuota per kamera, umur dengan jam bersama (`clock`), `pop(camera_id=)` | `identity/admission.py` (tes `test_admission.py`, `test_scheduler_lintas_kamera.py`) |
 | Decode RTSP/file (PyAV, slot frame terbaru, hwaccel) | `ingest/pyav_source.py` |
 | Mailbox frame terbaru generik | `ingest/mailbox.py` |
 | NVDEC (kerangka, menunggu spike) | `ingest/nvdec_source.py` |
