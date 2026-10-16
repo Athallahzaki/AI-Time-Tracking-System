@@ -96,10 +96,14 @@ python prepare_randperson.py --src D:\data\randperson_subset --out D:\data\rp256
 ```
 
 Hasil: `D:\data\rp256\images\<pid>\*.jpg`, `manifest.csv` (path, pid, camid, split), `summary.json`.
-Split **per identitas** (±90% train / ±10% val, `--seed 0`); di val, satu gambar acak per
-(pid, kamera) jadi query dan sisanya gallery. `camid` = gabungan scene+kamera. Bisa dihentikan dan
-diulang: gambar yang sudah ada dilewati (`--overwrite` untuk menulis ulang).
-Periksa tabel ringkasan: jumlah id/gambar/kamera harus masuk akal sebelum melatih.
+Split **per identitas** (±90% train / ±10% val, `--seed 0`). Di val hanya id yang terlihat di
+>= 2 kamera yang diberi query: satu gambar acak per (pid, kamera) yang punya >= 2 gambar, atau
+bila tidak ada (subset 132.145 berisi <= 1 gambar per orang per kamera) satu gambar acak per id;
+sisanya gallery. `camid` = gabungan scene+kamera. Bisa dihentikan dan diulang: gambar yang sudah
+ada dilewati (`--overwrite` untuk menulis ulang), manifest selalu ditulis ulang.
+Periksa tabel ringkasan sebelum melatih. Subset 132.145 (seed 0): train 7.200 id / ±119.000 gambar,
+**query ±800**, gallery ±12.300, 19 kamera. `query 0` = manifest lama (sebelum ea-r13): jalankan
+ulang `prepare` (cepat, hanya manifest); `train_osnet.py` menolak start dengan query kosong.
 
 ## 6. Bobot ImageNet (hanya untuk `--init imagenet`)
 

@@ -6,9 +6,11 @@ Keluaran: <out>/images/<pid>/<nama>.jpg (JPG kualitas 95), <out>/manifest.csv,
           <out>/summary.json.
 
 Split berdasarkan IDENTITAS (bukan gambar): ±90% id → train, ±10% id → val.
-Di val, untuk setiap (pid, kamera) yang punya >=2 gambar, satu gambar acak jadi
-query, sisanya gallery. (pid, kamera) yang hanya punya 1 gambar masuk gallery
-saja, supaya tidak ada query tanpa pasangan di kamera lain.
+Di val hanya id yang terlihat di >= 2 kamera yang diberi query (query butuh
+pasangan di kamera LAIN; evaluasi membuang orang sama di kamera sama). Untuk id
+itu: setiap (pid, kamera) yang punya >= 2 gambar menyumbang satu query acak; bila
+tidak ada sama sekali (subset RandPerson 132.145: <= 1 gambar per orang per
+kamera), satu gambar acak dari id itu jadi query. Sisanya gallery.
 camid = indeks gabungan (scene, kamera) → unik per kamera fisik.
 
 Tidak butuh torch. Contoh:
@@ -87,12 +89,25 @@ def bagi_split(rekaman: list[dict], val_fraction: float, seed: int):
             per_grup[(r["pid"], r["camid"])].append(r)
         else:
             r["split"] = "train"
+    kamera_per_pid: dict[int, set] = defaultdict(set)
+    for pid, camid in per_grup:
+        kamera_per_pid[pid].add(camid)
+    punya_query: set = set()
     for kunci in sorted(per_grup):
         grup = per_grup[kunci]
         for r in grup:
             r["split"] = "gallery"
-        if len(grup) >= 2:
+        if len(grup) >= 2 and len(kamera_per_pid[kunci[0]]) >= 2:
             rng.choice(grup)["split"] = "query"
+            punya_query.add(kunci[0])
+    # ea-r13: subset RandPerson berisi <= 1 gambar per (pid, kamera), sehingga aturan
+    # di atas tidak pernah memberi query (dulu: "query 0", dan latihan crash di akhir
+    # epoch 1). Setiap id yang terlihat di >= 2 kamera wajib punya satu query.
+    for pid in sorted(kamera_per_pid):
+        if pid in punya_query or len(kamera_per_pid[pid]) < 2:
+            continue
+        semua = [r for kunci, grup in sorted(per_grup.items()) if kunci[0] == pid for r in grup]
+        rng.choice(semua)["split"] = "query"
     return val
 
 
@@ -153,6 +168,11 @@ def main(argv=None) -> int:
         return 2
 
     val = bagi_split(rekaman, a.val_fraction, a.seed)
+    if not any(r["split"] == "query" for r in rekaman):
+        print("Tidak ada query: tidak ada id val yang terlihat di >= 2 kamera, jadi evaluasi "
+              "lintas kamera mustahil. Periksa data (kamera per orang) atau --val-fraction.",
+              file=sys.stderr)
+        return 3
     out.mkdir(parents=True, exist_ok=True)
     with open(out / "manifest.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)

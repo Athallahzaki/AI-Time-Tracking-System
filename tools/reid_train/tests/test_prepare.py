@@ -51,3 +51,49 @@ def test_camid_unik_per_scene_dan_kamera(tmp_path):
                 cv2.imwrite(str(src / f"{pid}_s{scene}_c{cam}_f{f}.jpg"), np.zeros((20, 10, 3), np.uint8))
     assert pr.main(["--src", str(src), "--out", str(out), "--workers", "1"]) == 0
     assert len({r["camid"] for r in _baca(out / "manifest.csv")}) == 3
+
+
+def _satu_gambar_per_kamera(src, n_id, kamera_per_id):
+    """Struktur subset RandPerson asli: <= 1 gambar per (orang, kamera)."""
+    import cv2
+    import numpy as np
+    src.mkdir(parents=True, exist_ok=True)
+    for pid in range(n_id):
+        for cam in range(kamera_per_id(pid)):
+            cv2.imwrite(str(src / f"{pid}_s1_c{cam}_f0.jpg"), np.full((20, 10, 3), pid * 10, np.uint8))
+
+
+def test_satu_gambar_per_kamera_tetap_menghasilkan_query(tmp_path):
+    """Regresi ea-r13: subset RandPerson asli menghasilkan 'query 0' dan latihan crash
+    di akhir epoch 1. Setiap id val yang terlihat di >= 2 kamera wajib punya satu query,
+    dan pasangannya ada di kamera lain di gallery."""
+    src, out = tmp_path / "src", tmp_path / "out"
+    _satu_gambar_per_kamera(src, n_id=20, kamera_per_id=lambda pid: 4)
+    assert pr.main(["--src", str(src), "--out", str(out), "--workers", "1",
+                    "--val-fraction", "0.25"]) == 0
+    baris = _baca(out / "manifest.csv")
+    q = [r for r in baris if r["split"] == "query"]
+    g = [r for r in baris if r["split"] == "gallery"]
+    val_ids = {r["pid"] for r in q} | {r["pid"] for r in g}
+    assert len(val_ids) == 5
+    assert len(q) == 5 and {r["pid"] for r in q} == val_ids, "tepat satu query per id val"
+    for r in q:
+        lain = [x for x in g if x["pid"] == r["pid"] and x["camid"] != r["camid"]]
+        assert len(lain) == 3, "pasangan query ada di kamera lain"
+
+
+def test_id_satu_kamera_tidak_diberi_query(tmp_path):
+    src, out = tmp_path / "src", tmp_path / "out"
+    _satu_gambar_per_kamera(src, n_id=8, kamera_per_id=lambda pid: 1 if pid % 2 else 3)
+    assert pr.main(["--src", str(src), "--out", str(out), "--workers", "1",
+                    "--val-fraction", "0.5"]) == 0
+    baris = _baca(out / "manifest.csv")
+    for r in baris:
+        if r["split"] == "query":
+            assert int(r["pid"]) % 2 == 0, "id yang hanya di satu kamera tidak punya pasangan"
+
+
+def test_tanpa_query_sama_sekali_ditolak(tmp_path):
+    src, out = tmp_path / "src", tmp_path / "out"
+    _satu_gambar_per_kamera(src, n_id=6, kamera_per_id=lambda pid: 1)
+    assert pr.main(["--src", str(src), "--out", str(out), "--workers", "1"]) == 3

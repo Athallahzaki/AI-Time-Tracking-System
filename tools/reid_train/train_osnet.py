@@ -229,6 +229,11 @@ def main(argv=None) -> int:
     gallery_ds = RandPerson(root=root, transform=transform_eval(), mode="gallery", verbose=False)
     n_id = train_ds.num_train_pids
     print(f"Train: {n_id} id, {len(train_ds)} gambar | val query {len(query_ds)}, gallery {len(gallery_ds)}")
+    if len(query_ds) == 0 or len(gallery_ds) == 0:
+        # Tanpa ini latihan berjalan satu epoch penuh lalu crash di evaluasi (torch.cat
+        # list kosong). Manifest dari prepare_randperson.py sebelum ea-r13: query 0.
+        raise SystemExit("Val query/gallery kosong: jalankan ulang prepare_randperson.py "
+                         "(gambar yang sudah di-resize dilewati, hanya manifest ditulis ulang).")
     if n_id < a.batch // a.num_instances:
         raise SystemExit(f"Identitas train ({n_id}) kurang dari batch/num-instances "
                          f"({a.batch // a.num_instances}); kecilkan --batch.")

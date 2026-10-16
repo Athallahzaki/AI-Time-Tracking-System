@@ -7,6 +7,31 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-10-16 · paket ea-r13 — Kit latih ReID: query val kosong pada subset RandPerson asli
+
+Dasar: ea-r12. Jalur EA. Hanya `tools/reid_train/` (di luar engine); engine, kontrak, backend tidak disentuh.
+
+**Bug.** `prepare_randperson.py` hanya memberi query pada (pid, kamera) yang punya >= 2 gambar. Subset
+RandPerson 132.145 berisi <= 1 gambar per orang per kamera, jadi di laptop: `query 0`, gallery 13.136. Latihan
+akan berjalan satu epoch penuh lalu crash di evaluasi (`torch.cat` pada list kosong di `ekstrak()`). Tes kit
+tidak menangkapnya karena data palsunya 5 gambar per kamera. Alasan lama di docstring ("query tanpa pasangan")
+keliru: pasangan query dicari di kamera LAIN.
+
+**Apa yang berubah**
+
+- `prepare_randperson.py`: query hanya untuk id val yang terlihat di >= 2 kamera; tiap (pid, kamera) dengan
+  >= 2 gambar tetap menyumbang satu query (perilaku lama), dan id yang belum punya query diberi satu query acak.
+  Tidak ada query sama sekali = keluar kode 3 dengan pesan. Simulasi bentuk data asli (8.000 id, 14-19 kamera
+  per id): query 800, gallery 12.397.
+- `train_osnet.py`: menolak start bila val query/gallery kosong (sebelum epoch 1, bukan sesudahnya).
+- `tests/test_prepare.py`: +3 tes (struktur 1 gambar per kamera, id satu kamera tanpa query, tolak tanpa
+  query). Dua di antaranya gagal di kode lama.
+- `README.md` kit §5: aturan query dan angka ringkasan yang diharapkan.
+
+**Cara uji.** Cloud (runner pengganti, tanpa torch): `tests/test_prepare.py` 5/5 lulus; kode lama 3/5.
+Laptop: `python prepare_randperson.py --src X:\data\randperson_subset --out X:\data\rp256 --workers 6`
+(gambar yang sudah ada dilewati) → tabel harus `query ±800`; `python -m pytest tools/reid_train/tests -q`.
+
 ## 2026-10-16 · paket ea-r12 — Scheduler rekognisi: giliran per kamera, umur dengan jam bersama
 
 Dasar: ea-r11. Jalur EA + EB. Kontrak, `engine/ports/`, dan `backend/` tidak disentuh. **Perilaku runtime
