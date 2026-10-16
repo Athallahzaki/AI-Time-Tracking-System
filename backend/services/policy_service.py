@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -23,13 +24,7 @@ class PolicyService:
             "daily_free_time_allowance_minutes": policy.daily_allowance_minutes,
             "warning_remaining_minutes": policy.warning_remaining_minutes,
             "qualification_seconds": policy.qualification_seconds,
-            "official_breaks": [
-                {
-                    "start": self._minutes_to_hhmm(start),
-                    "end": self._minutes_to_hhmm(end),
-                }
-                for start, end in policy.official_breaks
-            ],
+            "official_breaks": self._serialize_breaks(policy),
             "visit_merge_gap_seconds": policy.visit_merge_gap_seconds,
             "open_presence_stale_seconds": policy.open_presence_stale_seconds,
             "timezone": policy.timezone_name,
@@ -61,11 +56,7 @@ class PolicyService:
 
             try:
                 temp_path.write_text(
-                    yaml.safe_dump(
-                        data,
-                        sort_keys=False,
-                        allow_unicode=True,
-                    ),
+                    self._render(data),
                     encoding="utf-8",
                 )
 
@@ -85,6 +76,7 @@ class PolicyService:
                 new_policy.warning_remaining_minutes
             )
             break_policy.official_breaks = list(new_policy.official_breaks)
+            break_policy.official_breaks_by_weekday = dict(new_policy.official_breaks_by_weekday)
             break_policy.visit_merge_gap_seconds = (
                 new_policy.visit_merge_gap_seconds
             )
@@ -95,6 +87,53 @@ class PolicyService:
             free_time_ledger.invalidate()
             
         return self.get()
+
+    def update(self, changes: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            data = self._read_yaml()
+            data.update({key: value for key, value in changes.items() if value is not None})
+            temp_path = self.path.with_suffix(self.path.suffix + ".tmp")
+            try:
+                temp_path.write_text(
+                    yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8"
+                )
+                new_policy = load_break_policy(temp_path)
+                temp_path.replace(self.path)
+            finally:
+                if temp_path.exists():
+                    temp_path.unlink()
+            break_policy.timezone_name = new_policy.timezone_name
+            break_policy.qualification_seconds = new_policy.qualification_seconds
+            break_policy.daily_allowance_minutes = new_policy.daily_allowance_minutes
+            break_policy.warning_remaining_minutes = new_policy.warning_remaining_minutes
+            break_policy.official_breaks = list(new_policy.official_breaks)
+            break_policy.official_breaks_by_weekday = dict(new_policy.official_breaks_by_weekday)
+            break_policy.visit_merge_gap_seconds = new_policy.visit_merge_gap_seconds
+            break_policy.open_presence_stale_seconds = new_policy.open_presence_stale_seconds
+            break_policy.__post_init__()
+            free_time_ledger.invalidate()
+        return self.get()
+
+    def _render(self, data: dict[str, Any]) -> str:
+        """Teks YAML baru: ganti nilai di baris yang ada supaya komentar HRD tetap.
+
+        `yaml.safe_dump` membuang semua komentar di policy.yaml. Hanya kunci
+        tingkat atas yang diubah endpoint ini, jadi cukup mengganti nilainya di
+        baris `kunci: nilai`. Kunci yang belum ada ditambahkan di akhir; bila
+        file tidak bisa dibaca sebagai teks, jatuh ke safe_dump.
+        """
+        try:
+            text = self.path.read_text(encoding="utf-8")
+        except OSError:
+            return yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+        for key in ("daily_free_time_allowance_minutes", "warning_remaining_minutes"):
+            value = data[key]
+            pattern = re.compile(rf"^({re.escape(key)}[ \t]*:[ \t]*)([^#\n]*?)([ \t]*(#.*)?)$", re.M)
+            if pattern.search(text):
+                text = pattern.sub(lambda m: f"{m.group(1)}{value}{m.group(3)}", text, count=1)
+            else:
+                text = text.rstrip("\n") + f"\n{key}: {value}\n"
+        return text
 
     def _read_yaml(self) -> dict[str, Any]:
         if not self.path.exists():
@@ -116,6 +155,16 @@ class PolicyService:
         hour = minutes // 60
         minute = minutes % 60
         return f"{hour:02d}:{minute:02d}"
+
+    def _serialize_breaks(self, policy):
+        def windows(items):
+            return [{"start": self._minutes_to_hhmm(start),
+                     "end": self._minutes_to_hhmm(end)} for start, end in items]
+        if not policy.official_breaks_by_weekday:
+            return windows(policy.official_breaks)
+        names = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+        return {name: windows(policy.official_breaks_by_weekday.get(index, []))
+                for index, name in enumerate(names)}
 
 
 policy_service = PolicyService(settings.policy_yaml_path)

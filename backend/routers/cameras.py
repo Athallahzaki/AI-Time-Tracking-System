@@ -9,13 +9,14 @@ from backend.core.config import settings
 from backend.core.database import set_camera_override
 from backend.core.security import (
     require_admin,
+    require_user,
 )
 from backend.core.state import system_state
 from backend.services.camera_state import effective_cameras, set_cameras_message, source_allowed
 from backend.services.engine_client import EngineConnectionError, engine_client
 from backend.core.state import system_state
 
-router = APIRouter(prefix="/api/cameras", tags=["Cameras"])
+router = APIRouter(prefix="/api/cameras", tags=["Cameras"], dependencies=[Depends(require_user)])
 
 
 class SwitchSourceRequest(BaseModel):

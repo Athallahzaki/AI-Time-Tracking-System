@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from backend.core.security import require_admin
-from backend.schemas.settings import FreeTimePolicyUpdate
+from backend.core.security import require_admin, require_user
+from backend.core.database import get_app_setting, set_app_setting
+from backend.schemas.settings import (
+    CameraScheduleSettings, FreeTimePolicyUpdate, HRRecipientSettings,
+    ReportScheduleSettings,
+)
 from backend.services.policy_service import policy_service
 from backend.services.email_service import (
     EmailConfigurationError,
@@ -19,7 +23,7 @@ router = APIRouter(
 
 
 @router.get("/policy")
-def get_policy():
+def get_policy(_user=Depends(require_user)):
     try:
         return {
             "status": "success",
@@ -38,14 +42,7 @@ def get_policy():
 )
 def update_policy(req: FreeTimePolicyUpdate):
     try:
-        policy = policy_service.update_free_time(
-            daily_free_time_allowance_minutes=(
-                req.daily_free_time_allowance_minutes
-            ),
-            warning_remaining_minutes=(
-                req.warning_remaining_minutes
-            ),
-        )
+        policy = policy_service.update(req.model_dump(exclude_none=True))
     except ValueError as exc:
         raise HTTPException(
             status_code=400,
@@ -63,7 +60,7 @@ def update_policy(req: FreeTimePolicyUpdate):
     }
 
 @router.get("/email")
-def get_email_status():
+def get_email_status(_user=Depends(require_user)):
     return {
         "status": "success",
         "email": email_service.status(),
@@ -97,3 +94,54 @@ def test_email():
             "recipients"
         ],
     }
+
+
+@router.get("/hr-recipients")
+def get_hr_recipients(_admin=Depends(require_admin)):
+    return {"status": "success", "settings": get_app_setting("hr_recipients", {})}
+
+
+@router.put("/hr-recipients")
+def put_hr_recipients(req: HRRecipientSettings, _admin=Depends(require_admin)):
+    value = req.model_dump()
+    set_app_setting("hr_recipients", value)
+    return {"status": "success", "settings": value}
+
+
+@router.get("/report-schedule")
+def get_report_schedule(_admin=Depends(require_admin)):
+    return {"status": "success", "settings": get_app_setting("report_schedule", {})}
+
+
+@router.put("/report-schedule")
+def put_report_schedule(req: ReportScheduleSettings, _admin=Depends(require_admin)):
+    if req.enabled and not req.recipients:
+        raise HTTPException(status_code=400, detail="enabled report schedule needs recipients")
+    value = req.model_dump()
+    set_app_setting("report_schedule", value)
+    return {"status": "success", "settings": value}
+
+
+@router.get("/camera-schedule")
+def get_camera_schedule(_admin=Depends(require_admin)):
+    return {"status": "success", "settings": get_app_setting("camera_schedule", {})}
+
+
+@router.put("/camera-schedule")
+def put_camera_schedule(req: CameraScheduleSettings, _admin=Depends(require_admin)):
+    value = req.model_dump()
+    for camera_id, weekdays in value["cameras"].items():
+        from backend.core.config import settings
+        if camera_id not in settings.cameras:
+            raise HTTPException(status_code=400, detail=f"unknown camera: {camera_id}")
+        for day, windows in weekdays.items():
+            if day.lower() not in {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"}:
+                raise HTTPException(status_code=400, detail=f"unknown weekday: {day}")
+            ordered = sorted((item["start"], item["end"]) for item in windows)
+            for index, (start, end) in enumerate(ordered):
+                if start >= end:
+                    raise HTTPException(status_code=400, detail=f"invalid schedule window: {start}-{end}")
+                if index and ordered[index - 1][1] > start:
+                    raise HTTPException(status_code=400, detail=f"overlapping schedule for {camera_id}/{day}")
+    set_app_setting("camera_schedule", value)
+    return {"status": "success", "settings": value}

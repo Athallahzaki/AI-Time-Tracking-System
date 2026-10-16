@@ -1,5 +1,5 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
-import { apiFetch } from './useAuth';
+import { apiFetch, employeeIdOf, useAuth } from './useAuth';
 
 export interface NotificationItem {
   id: number;
@@ -8,12 +8,34 @@ export interface NotificationItem {
   title: string;
   message: string;
   event_at: number;
+  /** Turunan dari read_at; backend tidak mengirim field `read`. */
   read: boolean;
-  created_at: string;
+  read_at?: number | null;
+  created_at: number;
   payload?: any;
 }
 
+// Backend (/api/notifications dan SSE) mengirim `read_at` (epoch atau null),
+// bukan `read`. Tanpa pemetaan ini semua notifikasi terlihat belum dibaca
+// setelah halaman dimuat ulang.
+function normalize(raw: any): NotificationItem {
+  return { ...raw, read: raw?.read === true || (raw?.read_at !== null && raw?.read_at !== undefined) };
+}
+
 const notifications = ref<NotificationItem[]>([]);
+
+/**
+ * Akun viewer (karyawan) hanya boleh melihat notifikasi miliknya (dok. 12 §3.2).
+ * PENTING: ini hanya lapisan kosmetik. Penyaringan yang sesungguhnya WAJIB di
+ * backend (/api/notifications dan SSE disaring per sesi, dok. 12 §3.8) — selama
+ * BE belum melakukannya, data orang lain tetap terkirim ke browser.
+ */
+function visibleToCurrentUser(item: NotificationItem): boolean {
+  const { user } = useAuth();
+  if (!user.value || user.value.role === 'admin') return true;
+  const own = employeeIdOf(user.value);
+  return !!own && item.person_id === own;
+}
 const isLoading = ref<boolean>(false);
 const error = ref<string | null>(null);
 
@@ -32,7 +54,9 @@ export function useNotifications() {
       const res = await apiFetch(`/api/notifications?limit=${limit}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      notifications.value = data.notifications || [];
+      notifications.value = (data.notifications || [])
+        .map(normalize)
+        .filter(visibleToCurrentUser);
     } catch (err: any) {
       error.value = err.message || 'Gagal memuat notifikasi';
     } finally {
@@ -47,7 +71,10 @@ export function useNotifications() {
       });
       if (res.ok) {
         const item = notifications.value.find((n) => n.id === id);
-        if (item) item.read = true;
+        if (item) {
+          item.read = true;
+          item.read_at = Date.now() / 1000;
+        }
       }
     } catch (err) {
       console.error('Failed to mark notification as read:', err);
@@ -62,7 +89,8 @@ export function useNotifications() {
 
     eventSource.addEventListener('notification', (e: MessageEvent) => {
       try {
-        const data: NotificationItem = JSON.parse(e.data);
+        const data: NotificationItem = normalize(JSON.parse(e.data));
+        if (!visibleToCurrentUser(data)) return;
         const existingIdx = notifications.value.findIndex((n) => n.id === data.id);
         if (existingIdx !== -1) {
           notifications.value[existingIdx] = data;

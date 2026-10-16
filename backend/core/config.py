@@ -224,4 +224,13 @@ class Settings:
         )
     )
 
+    # Tautan di email pelanggaran (workplan demo D6: nama, tanggal, pemakaian,
+    # tautan dashboard). Isi dengan alamat yang dibuka supervisor.
+    dashboard_url: str = field(
+        default_factory=lambda: os.getenv(
+            "DASHBOARD_URL",
+            "http://localhost:5173",
+        ).rstrip("/")
+    )
+
 settings = Settings()

@@ -22,6 +22,14 @@ Di sini:
 
 Detector yang tidak punya `predict_images` / `postprocess` (MockDetector) tidak
 dibagi: `wrap_shared` mengembalikan None dan setiap kamera memuat miliknya.
+
+**Dengan penjadwal berdetak (`core.scheduler: tick`, `wait_for_all=True`).**
+Semua kamera dilepas pada detak yang sama, jadi permintaannya datang hampir
+serentak. Dispatcher lalu menunggu sampai SEMUA kamera terdaftar mengirim (atau
+`batch_wait_ms` habis), bukan berhenti di jendela tetap. Hasilnya satu batch
+berisi semua kamera per detak. Kamera yang sedang putus tetap terdaftar dan
+membuat detak itu menunggu sampai `batch_wait_ms`; batas itulah yang menjaga
+satu kamera mati tidak menahan yang lain lebih lama dari itu.
 """
 
 from __future__ import annotations
@@ -69,12 +77,14 @@ class SharedMetrics:
 
 
 class SharedDetector:
-    def __init__(self, inner: Any, max_batch: int = 8, batch_wait_ms: float = 4.0) -> None:
+    def __init__(self, inner: Any, max_batch: int = 8, batch_wait_ms: float = 4.0,
+                 wait_for_all: bool = False) -> None:
         if not supports_sharing(inner):
             raise TypeError(f"{type(inner).__name__} tidak punya predict_images/postprocess")
         self.inner = inner
         self._max_batch = max(1, int(max_batch))
         self._wait = max(0.0, float(batch_wait_ms)) / 1000.0
+        self._wait_for_all = bool(wait_for_all)
         self._requests: "queue.Queue[_Request]" = queue.Queue()
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -148,10 +158,13 @@ class SharedDetector:
 
     def _collect(self, first: _Request) -> List[_Request]:
         batch = [first]
+        expected = self.active_cameras
         # Satu kamera: tidak ada yang perlu ditunggu.
-        wait = self._wait if self.active_cameras > 1 else 0.0
+        wait = self._wait if expected > 1 else 0.0
         deadline = time.monotonic() + wait
-        while len(batch) < self._max_batch:
+        # Penjadwal berdetak: berhenti begitu semua kamera sudah masuk.
+        limit = min(self._max_batch, expected) if self._wait_for_all and expected > 0 else self._max_batch
+        while len(batch) < limit:
             remaining = deadline - time.monotonic()
             try:
                 batch.append(self._requests.get(timeout=remaining) if remaining > 0

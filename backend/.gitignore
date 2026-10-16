@@ -45,5 +45,5 @@ data/*.db-shm
 data/*.db-wal
 data/
 
-tests/
+configs/cameras.*.yaml
 

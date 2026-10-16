@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any, Dict
 
 from backend.services.violation_service import violation_service
-from backend.core.database import save_protocol_event
+from backend.core.database import mark_report_dirty, save_attribution, save_protocol_event
+from backend.core.database import get_employee_by_employee_id
+from backend.services.break_policy import break_policy
 from backend.core.state import system_state
 from backend.services.free_time import free_time_ledger
 from backend.services.protocol_adapter import protocol_adapter
-from backend.core.state import system_state
+
+logger = logging.getLogger(__name__)
 
 
 def _timestamp(value: str) -> float:
@@ -40,15 +44,38 @@ class EventIngestionService:
             outbox_id=outbox_id,
         )
         if inserted:
+            local_date = datetime.fromtimestamp(_timestamp(event_time), break_policy.timezone).date().isoformat()
+            mark_report_dirty(local_date)
+            if event_type == "track.identity_changed":
+                target = validated.get("to_person_id")
+                employee = get_employee_by_employee_id(str(target or ""))
+                save_attribution({
+                    "event_outbox_id": outbox_id,
+                    "event_seq": seq,
+                    "original_person_id": validated.get("from_person_id"),
+                    "employee_internal_id": employee.get("id") if employee else None,
+                    "attribution_source": "identity_changed",
+                    "attribution_confidence": validated.get("confidence"),
+                    "needs_hr_review": employee is None,
+                    "review_reason": "missing_employee" if employee is None else None,
+                })
             free_time_ledger.apply_event(validated)
 
-            violation_service.evaluate_event(
-                validated
-            )
+            # Event sudah tersimpan dan sudah masuk ledger. Kegagalan menilai
+            # pelanggaran (DB, notifikasi) tidak boleh membuat event itu
+            # dicatat sebagai dead letter oleh engine_client, dan tidak boleh
+            # melewatkan record_event di bawah.
+            try:
+                violation_service.evaluate_event(validated)
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "Evaluasi pelanggaran gagal untuk %s seq=%s", event_type, seq
+                )
 
             system_state.record_event(
                 event_type,
                 validated,
             )
+        return inserted
 
 event_ingestion_service = EventIngestionService()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import threading
 from datetime import datetime, timezone
 
@@ -29,6 +30,7 @@ class EngineConnectionManager:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._last_warning = ""
+        self._last_cameras_payload = ""
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -52,13 +54,26 @@ class EngineConnectionManager:
 
     def sync_desired_state(self) -> None:
         # Operator overrides (persisted) + cameras.yaml, one function for both paths.
-        self.client.send(set_cameras_message())
+        message = set_cameras_message()
+        self.client.send(message)
+        self._last_cameras_payload = json.dumps(message["cameras"], sort_keys=True)
         self.sync_roster()
 
     def _run(self) -> None:
         while not self._stop.is_set():
 
             if self.client.connected:
+                # Re-evaluate weekday/time windows while connected. A boundary
+                # therefore changes desired state without touching the engine.
+                message = set_cameras_message()
+                payload = json.dumps(message["cameras"], sort_keys=True)
+                if payload != self._last_cameras_payload:
+                    try:
+                        self.client.send(message)
+                        self._last_cameras_payload = payload
+                    except EngineConnectionError:
+                        self.client.close()
+                        continue
                 read_timed_out = getattr(
                     self.client,
                     "read_timed_out",

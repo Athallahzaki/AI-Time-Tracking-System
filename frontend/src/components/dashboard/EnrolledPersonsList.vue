@@ -8,13 +8,28 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
+import { listEmployees } from '@/api/employees';
 
 const { enrolledPersons, isLoadingList, listError, fetchEnrolledPersons } =
   useEnrollment();
 
 const searchQuery = ref('');
 
-onMounted(fetchEnrolledPersons);
+// Nama dari data master karyawan (enrollment di backend masih per ID).
+const namesById = ref({});
+async function loadNames() {
+  try {
+    const items = await listEmployees({ status: 'all' });
+    namesById.value = Object.fromEntries(items.map((e) => [e.employee_id, e.name]));
+  } catch {
+    namesById.value = {};
+  }
+}
+
+onMounted(() => {
+  fetchEnrolledPersons();
+  loadNames();
+});
 
 function formatDateTime(iso) {
   if (!iso) return '-';
@@ -30,7 +45,7 @@ const filteredPersons = computed(() => {
   const q = searchQuery.value.trim().toLowerCase();
   if (!q) return enrolledPersons;
   return enrolledPersons.filter((p) =>
-    p.person_id.toLowerCase().includes(q),
+    `${p.person_id} ${namesById.value[p.person_id] || ''}`.toLowerCase().includes(q),
   );
 });
 </script>
@@ -78,7 +93,7 @@ const filteredPersons = computed(() => {
           v-model="searchQuery"
           type="search"
           aria-label="Cari karyawan"
-          placeholder="Cari berdasarkan ID karyawan..."
+          placeholder="Cari ID atau nama karyawan..."
           class="h-8 bg-white pl-8 text-xs md:text-xs"
         />
       </div>
@@ -144,6 +159,7 @@ const filteredPersons = computed(() => {
           <div>
             <div class="flex items-center gap-2">
               <span class="text-sm font-semibold text-slate-900">{{ p.person_id }}</span>
+              <span v-if="namesById[p.person_id]" class="text-xs text-slate-500">{{ namesById[p.person_id] }}</span>
               <Badge variant="secondary" class="rounded bg-indigo-50 px-1.5 text-[10px] text-indigo-700">
                 v{{ p.enrollment_version }}
               </Badge>

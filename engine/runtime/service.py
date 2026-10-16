@@ -138,6 +138,19 @@ class EngineRuntime:
             import dataclasses
             self.config = dataclasses.replace(
                 self.config, target_fps=float(self.options.target_fps))
+        # Penjadwal berdetak tahap 1 (dokumen 04 §14). Detak = fps analisis:
+        # target_fps disamakan supaya tracker dan decimation file memakai irama
+        # yang sama dengan detaknya.
+        from .tick_scheduler import TickGate, tick_fps_for
+        tick_fps = tick_fps_for(self.config.scheduler, self.config.tick_fps, self.config.target_fps)
+        self._tick_gate: Optional[TickGate] = None
+        if tick_fps is not None:
+            if self.config.target_fps != tick_fps:
+                import dataclasses
+                logger.info("core.scheduler tick: target_fps %s -> %.2f (mengikuti tick_fps)",
+                            self.config.target_fps, tick_fps)
+                self.config = dataclasses.replace(self.config, target_fps=tick_fps)
+            self._tick_gate = TickGate(tick_fps)
         # Sebelum detector/recognizer dimuat, supaya variabel lingkungan
         # masih berlaku untuk pustaka yang belum diimpor.
         from .threads import apply_cpu_threads
@@ -254,6 +267,9 @@ class EngineRuntime:
             # Berurutan berarti 5 kamera x batas tunggu masing-masing.
             for camera in cameras:
                 camera.request_stop()
+            if self._tick_gate is not None:
+                # Kamera yang sedang menunggu detak langsung dibangunkan.
+                self._tick_gate.stop()
             for camera in cameras:
                 camera.stop()
             if self._worker is not None:
@@ -325,7 +341,10 @@ class EngineRuntime:
             loop_files=self.options.loop_files,
             recognition_executor=self._worker,
             detector_provider=self._detector_for,
+            tick_gate=self._tick_gate,
         )
+        if self._tick_gate is not None and not self._tick_gate.running:
+            self._tick_gate.start()
         self._cameras[spec.camera_id] = camera
         camera.start()
         return camera
@@ -348,7 +367,8 @@ class EngineRuntime:
                 if not supports_sharing(inner):
                     return inner
                 shared = SharedDetector(inner, max_batch=config.detector.max_batch,
-                                        batch_wait_ms=config.detector.batch_wait_ms)
+                                        batch_wait_ms=config.detector.batch_wait_ms,
+                                        wait_for_all=self._tick_gate is not None)
                 if config.auto_warmup:
                     shared.warmup()
                 self._shared_detector = shared.start()

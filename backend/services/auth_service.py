@@ -10,6 +10,7 @@ from backend.core.database import (
     create_auth_session,
     create_user,
     delete_auth_session,
+    get_employee_by_id,
     get_user_by_session,
     get_user_by_username,
 )
@@ -92,6 +93,7 @@ class AuthService:
         username: str,
         password: str,
         role: str,
+        employee_internal_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         username = username.strip()
 
@@ -108,12 +110,22 @@ class AuthService:
                 "username already exists"
             )
 
+        if role == "viewer" and employee_internal_id is None:
+            raise ValueError("viewer must be linked to an employee")
+        if employee_internal_id is not None:
+            employee = get_employee_by_id(employee_internal_id)
+            if employee is None:
+                raise ValueError("employee not found")
+            if role == "viewer" and employee["status"] != "active":
+                raise ValueError("viewer must be linked to an active employee")
+
         return create_user(
             username=username,
             password_hash=self.hash_password(
                 password
             ),
             role=role,
+            employee_internal_id=employee_internal_id,
         )
 
     def login(
@@ -163,6 +175,7 @@ class AuthService:
                 "id": user["id"],
                 "username": user["username"],
                 "role": user["role"],
+                "employee_internal_id": user.get("employee_internal_id"),
             },
         }
 

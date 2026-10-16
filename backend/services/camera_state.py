@@ -10,10 +10,23 @@ fungsi yang sama.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Any, Dict, List
 
 from backend.core.config import CameraConfig, settings
-from backend.core.database import get_camera_overrides
+from backend.core.database import get_app_setting, get_camera_overrides
+
+
+def _schedule_allows(camera_id: str, now: datetime | None = None) -> bool:
+    schedule = get_app_setting("camera_schedule", {}) or {}
+    camera_schedule = (schedule.get("cameras") or {}).get(camera_id)
+    if camera_schedule is None:
+        return True
+    zone = ZoneInfo(schedule.get("timezone", "Asia/Jakarta"))
+    local_now = (now or datetime.now(timezone.utc)).astimezone(zone)
+    windows = camera_schedule.get(local_now.strftime("%A").lower(), [])
+    clock = local_now.strftime("%H:%M")
+    return any(item["start"] <= clock < item["end"] for item in windows)
 
 
 def effective_cameras() -> List[Dict[str, Any]]:
@@ -29,7 +42,7 @@ def effective_cameras() -> List[Dict[str, Any]]:
             "config": config,
             "camera_id": camera_id,
             "source_uri": source_uri,
-            "enabled": bool(override.get("enabled", config.enabled_by_default)),
+            "enabled": bool(override.get("enabled", config.enabled_by_default)) and _schedule_allows(camera_id),
         })
     return result
 

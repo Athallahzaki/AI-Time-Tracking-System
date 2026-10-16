@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import queue
+from datetime import datetime
 import smtplib
 import ssl
 import threading
@@ -9,6 +10,7 @@ from email.message import EmailMessage
 from typing import Any, Dict, Optional
 
 from backend.core.config import settings
+from backend.core.database import get_app_setting, get_employee_by_employee_id
 
 
 logger = logging.getLogger(__name__)
@@ -194,30 +196,66 @@ class EmailService:
         self,
         notification: Dict[str, Any],
     ) -> None:
-        person_id = notification.get(
-            "person_id",
-            "unknown",
-        )
-
-        subject = (
-            "[AI Time Tracking] "
-            "Batas jatah waktu terlampaui"
-        )
-
-        message = (
-            f"{notification.get('title', 'Notification')}\n\n"
-            f"Person ID: {person_id}\n"
-            f"Pesan: {notification.get('message', '')}\n"
-            f"Jenis: {notification.get('type', '')}\n"
-            f"Event time: {notification.get('event_at', '')}\n\n"
-            "Pesan ini dikirim otomatis oleh "
-            "AI Time Tracking System."
-        )
-
+        subject, body = self.compose_notification(notification)
+        employee = get_employee_by_employee_id(str(notification.get("person_id") or ""))
+        routing = get_app_setting("hr_recipients", {}) or {}
+        routing_enabled = routing.get("enabled", True)
+        primary = list(routing.get("primary", [])) if routing_enabled else []
+        cc = list(routing.get("cc", [])) if routing_enabled else []
+        fallback = routing.get("fallback") if routing_enabled else None
+        employee_email = employee.get("email") if employee else None
+        recipients = [employee_email] if employee_email else ([fallback] if fallback else primary)
+        if not recipients:
+            recipients = list(settings.smtp_to)
         self._send(
             subject=subject,
-            body=message,
+            body=body,
+            recipients=recipients,
+            cc=([*primary, *cc] if employee_email else cc),
         )
+
+    @staticmethod
+    def compose_notification(
+        notification: Dict[str, Any],
+    ) -> tuple[str, str]:
+        """Subjek dan isi email: siapa, kapan (jam lokal kebijakan), pemakaian, tautan.
+
+        Tanpa foto (02-ARSITEKTUR-BACKEND §6): email bisa diteruskan ke siapa
+        saja, bukti hanya terlihat setelah login di dashboard.
+        """
+        from backend.services.break_policy import break_policy
+
+        person_id = notification.get("person_id") or "unknown"
+        payload = notification.get("payload") or {}
+        when = "-"
+        event_at = notification.get("event_at")
+        if isinstance(event_at, (int, float)):
+            when = datetime.fromtimestamp(
+                float(event_at), tz=break_policy.timezone
+            ).strftime("%d-%m-%Y %H:%M:%S %Z")
+
+        lines = [
+            notification.get("title", "Notifikasi"),
+            "",
+            f"Karyawan (ID): {person_id}",
+            f"Tanggal: {payload.get('date', '-')}",
+            f"Waktu kejadian: {when}",
+        ]
+        used = payload.get("used_seconds")
+        allowance = payload.get("allowance_seconds")
+        if isinstance(used, (int, float)) and isinstance(allowance, (int, float)):
+            lines.append(
+                f"Pemakaian: {used / 60.0:.1f} dari {allowance / 60.0:.1f} menit"
+            )
+        lines += [
+            f"Jenis: {notification.get('type', '-')}",
+            "",
+            f"Lihat di dashboard: {settings.dashboard_url}",
+            "",
+            "Pesan ini dikirim otomatis oleh AI Time Tracking System.",
+        ]
+        subject = f"[AI Time Tracking] {notification.get('title', 'Notifikasi')}: {person_id}"
+        return subject, "\n".join(lines)
 
     def send_test_email(self) -> None:
         self._send(
@@ -235,6 +273,9 @@ class EmailService:
         self,
         subject: str,
         body: str,
+        recipients: Optional[list[str]] = None,
+        cc: Optional[list[str]] = None,
+        attachment: Optional[tuple[str, bytes, str, str]] = None,
     ) -> None:
         self._validate_configuration()
 
@@ -243,13 +284,21 @@ class EmailService:
             or settings.smtp_username
         )
 
-        recipients = list(settings.smtp_to)
+        recipients = list(recipients or settings.smtp_to)
+        cc = list(cc or [])
+        if not recipients:
+            raise EmailConfigurationError("At least one recipient is required")
 
         email = EmailMessage()
         email["Subject"] = subject
         email["From"] = sender
         email["To"] = ", ".join(recipients)
+        if cc:
+            email["Cc"] = ", ".join(cc)
         email.set_content(body)
+        if attachment:
+            filename, content, maintype, subtype = attachment
+            email.add_attachment(content, maintype=maintype, subtype=subtype, filename=filename)
 
         context = ssl.create_default_context()
 
@@ -301,6 +350,12 @@ class EmailService:
                 str(exc)
             ) from exc
 
+    def send_report(self, subject: str, body: str, filename: str, content: bytes,
+                    recipients: list[str], cc: Optional[list[str]] = None) -> None:
+        self._send(subject, body, recipients=recipients, cc=cc,
+                   attachment=(filename, content, "application",
+                               "vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+
     def _login_if_required(
         self,
         smtp: smtplib.SMTP,
@@ -348,11 +403,6 @@ class EmailService:
                 "is required"
             )
 
-        if not settings.smtp_to:
-            raise EmailConfigurationError(
-                "SMTP_TO must contain at least "
-                "one recipient"
-            )
 
 
 email_service = EmailService()

@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
+from backend.core.security import require_admin, require_user
 
 from backend.core.database import get_dead_letters, get_integration_state
 from backend.services.detection_stats import writer_stats
@@ -8,12 +9,12 @@ router = APIRouter(prefix="/api/system", tags=["System"])
 
 
 @router.get("/")
-def system_info():
+def system_info(_user=Depends(require_user)):
     return {"name": "AI Time Tracking System API", "version": "2.1.0", "status": "online"}
 
 
 @router.get("/status")
-def system_status():
+def system_status(_user=Depends(require_user)):
     return {
         "backend": "online",
         "engine": "connected" if engine_client.connected else "disconnected",
@@ -25,7 +26,7 @@ def system_status():
 
 
 @router.get("/dead-letters")
-def dead_letters(limit: int = Query(100, ge=1, le=1000)):
+def dead_letters(limit: int = Query(100, ge=1, le=1000), _admin=Depends(require_admin)):
     """Durable events the backend could not process. Never silently discarded."""
     items = get_dead_letters(limit)
     return {"status": "success", "count": len(items), "dead_letters": items}
