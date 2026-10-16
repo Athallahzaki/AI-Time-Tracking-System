@@ -7,6 +7,61 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-10-16 · paket ea-r11 — Persiapan percepatan rekognisi: TensorRT EP, SCRFD dinamis, alat ukur per wajah
+
+Dasar: ea-r10. Jalur EA + EB. Kontrak, `engine/ports/`, dan `backend/` tidak disentuh. **Default tidak
+berubah**: TensorRT mati, model SCRFD tetap yang lama; profil demo tidak menyalakan apa pun.
+**Belum ada angka**: 4060 sedang tidak tersedia, jadi paket ini menyiapkan env + alat supaya uji di 4060
+langsung jalan. Yang diuji di cloud hanya logika (onnxruntime CPU, model SCRFD tiruan).
+
+**Alasan.** Uji 15–16 Okt: rekognisi = 54 ms per wajah (SCRFD 640 ±21 + glintr100 ±33), worker jenuh di
+±18 wajah/dtk, 35% permintaan dibuang; gerbang kualitas gugur (ea-r10). Jalan yang tersisa adalah biaya
+per wajah: TensorRT EP FP16 untuk kedua model, lalu SCRFD 320 yang butuh model berdimensi dinamis.
+
+**Apa yang berubah**
+
+- `identity/face_onnx.py`:
+  - `recognition.onnx_tensorrt` → `TensorrtExecutionProvider` di depan CUDA EP (`provider_list(..., tensorrt=)`,
+    `tensorrt_options`, `recognition_providers`).
+  - Cache engine + timing wajib, di subfolder `ort<versi>-trt<versi>-fp16|fp32`, karena onnxruntime memakai
+    ulang cache lama tanpa memeriksa versi/presisi. Prefix per model dan per ukuran SCRFD.
+  - DLL nvinfer dari paket pip `tensorrt_libs` dimuat sebelum sesi dibuat (`preload_dlls` ORT tidak mengurusnya).
+  - Peringatan sebelum build engine bila cache kosong; log lama pembuatan sesi.
+  - **TensorRT diminta tapi tidak aktif = `ProviderUnavailable`** (turunan `ModelConfigMismatch` → kode keluar 2).
+    onnxruntime sendiri hanya menulis "falling back" lalu jalan di CUDA EP, jadi tanpa ini angka "TensorRT"
+    bisa saja angka CUDA.
+  - `head_crop()` dipisah dari `OnnxFaceRecognizer.__call__` (perilaku sama) supaya alat ukur memotong persis seperti runtime.
+- `config/schema.py`, `loader.py`: `onnx_tensorrt` (false), `onnx_tensorrt_fp16` (true),
+  `onnx_tensorrt_cache_dir` ("engine/data/trt-cache", di-ignore git). Ditolak: TensorRT dengan daftar provider
+  CPU saja, atau cache kosong. `demo-4060.yaml` hanya mendapat komentar langkah menyalakan (blok
+  `recognition` harus sama dengan `demo-1060.yaml`).
+- Baru `engine/tools/face_bench.py`: potongan kepala dari kotak orang D-FINE (atau folder `--potongan`), lalu
+  per varian (`cuda`, `trt16`, `trt32` × `--ukuran`) mengukur ms SCRFD, ms glintr100, dan waktu bangun sesi.
+  Dibandingkan dengan CUDA EP di ukuran config: kosinus embedding pada wajah ter-align yang sama (FP16 sehat
+  ≥ 0,99), wajah hilang/baru, IoU. Varian yang gagal dimuat dilaporkan, tidak menggugurkan laporan. JSON
+  ditulis sebelum print, keluaran ASCII. Menjalankannya juga mengisi cache TensorRT engine.
+- Baru `engine/tools/scrfd_dynamic.py`: tinggi/lebar input dan jumlah anchor keluaran jadi simbolik,
+  `value_info` dibuang, konstanta Reshape berisi jumlah anchor 640 diganti -1 bila aman (bila tidak aman:
+  berhenti tanpa menulis). Diverifikasi dengan onnxruntime: keluaran 640 sama dengan model asli (≤ 1e-4) dan
+  jumlah anchor benar di setiap `--cek-ukuran`. Model asli tidak diubah.
+- Baru `scripts/setup-env-trt.ps1`: kloning `vision-engine` → `vision-engine-trt`, pilih TensorRT dari versi
+  onnxruntime-gpu (1.21 → 10.8; 1.22–1.23 → 10.9; 1.24–1.26 → 10.14, dibaca dari konfigurasi CI onnxruntime
+  per tag), `pip install tensorrt-cu12-libs` + `onnx`, lalu `check_gpu_env.py --tensorrt`. Env kerja tidak disentuh.
+- `scripts/check_gpu_env.py --tensorrt`: pasangan versi onnxruntime/TensorRT (`TRT_FOR_ORT`), folder DLL, dan
+  sesi SCRFD sungguhan lewat `face_onnx.ScrfdDetector` di TensorRT FP16 (sekaligus mengisi cache SCRFD 640).
+- `docs/SETUP-GPU.md`: bagian "Env uji TensorRT".
+
+**Belum diketahui sampai diukur di 4060**: apakah pasangan versi jalan di Windows, berapa ms/wajah TensorRT,
+apakah embedding FP16 setara, apakah SCRFD asli tim memang hanya terkunci di bentuk keluaran (yang ditangani
+alat ini) atau juga di dalam graf (alat akan menolak), dan berapa wajah hilang di 320.
+
+**Cara uji**
+
+- Cloud: engine 708 lulus / 10 dilewati (+22: `test_tensorrt_rekognisi.py` 16, `test_check_gpu_env.py` +6);
+  `test_scrfd_dinamis.py` 5 lulus dengan paket `onnx` (dilewati tanpa); kontrak 151; `policy_grep` bersih;
+  `setup-env-trt.ps1` lolos parser PowerShell 7.4 dan disimulasikan (conda/python tiruan) untuk 4 jalur.
+- 4060: `docs/SERAH-TERIMA.md` "Uji manual di laptop" #2–#4.
+
 ## 2026-10-16 · paket ea-r10 — Hasil uji gerbang rekognisi; metrik waktu sampai dikenali
 
 Dasar: ea-r9. Jalur EA + EB. Kontrak, `engine/ports/`, dan `backend/` tidak disentuh. Default tidak berubah.

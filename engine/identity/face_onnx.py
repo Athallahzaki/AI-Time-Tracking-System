@@ -18,7 +18,9 @@ Kontrak ke sisa engine sama dengan yang sudah diuji di `presence/binding.py`:
 from __future__ import annotations
 
 import logging
+import os
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -54,6 +56,18 @@ class ModelConfigMismatch(RecognizerUnavailable):
     (config salah), bukan 1."""
 
 
+class ProviderUnavailable(ModelConfigMismatch):
+    """Config meminta TensorRT EP tetapi env ini tidak bisa mengaktifkannya (ea-r11).
+
+    Biasanya pustaka TensorRT (nvinfer) tidak terpasang atau versinya tidak cocok
+    dengan build onnxruntime-gpu. Menyalakan ulang tidak menolong; perbaiki env
+    (scripts/setup-env-trt.ps1) atau matikan `recognition.onnx_tensorrt` -> kode 2."""
+
+
+TENSORRT = "TensorrtExecutionProvider"
+CUDA = "CUDAExecutionProvider"
+
+
 @dataclass
 class FaceDetection:
     bbox: Tuple[float, float, float, float]  # x1, y1, x2, y2 (pixels, frame coords)
@@ -86,7 +100,8 @@ class FaceAnalysis:
 
 def _session(path: str, providers: Optional[Sequence[str]], *,
              purpose: str = "recognition.recognizer=onnx_face",
-             providers_key: str = "recognition.onnx_providers"):
+             providers_key: str = "recognition.onnx_providers",
+             cache_prefix: Optional[str] = None):
     """Sesi onnxruntime; `purpose`/`providers_key` hanya untuk pesan galat
     (dipakai ulang oleh embedder ReID, `identity/reid/embedder_onnx.py`)."""
     try:
@@ -100,12 +115,26 @@ def _session(path: str, providers: Optional[Sequence[str]], *,
         raise RecognizerUnavailable(f"berkas model tidak ditemukan: {path}")
     available = ort.get_available_providers()
     # Entri boleh berupa nama atau (nama, opsi) -- opsi dipakai untuk batas VRAM.
+    wants_trt = any(_provider_name(p) == TENSORRT for p in (providers or ()))
+    if wants_trt and TENSORRT not in available:
+        raise ProviderUnavailable(
+            f"{TENSORRT} diminta untuk {Path(path).name} tetapi build onnxruntime ini tidak membawanya "
+            f"(tersedia: {available}, onnxruntime {getattr(ort, '__version__', '?')}). "
+            "Pakai onnxruntime-gpu, atau matikan recognition.onnx_tensorrt."
+        )
     chosen = [p for p in (providers or available) if _provider_name(p) in available] or available
     names = [_provider_name(p) for p in chosen]
     if "CUDAExecutionProvider" in names:
         _preload_cuda_dlls(ort)
+    started = time.perf_counter()
+    if wants_trt:
+        chosen = _with_cache_prefix(chosen, cache_prefix or Path(path).stem)
+        _preload_tensorrt_dlls()
+        _announce_tensorrt_build(path, chosen)
     session = ort.InferenceSession(path, providers=chosen)
     active = list(session.get_providers())
+    if wants_trt:
+        logger.info("onnx %s: sesi TensorRT siap dalam %.1f dtk", Path(path).name, time.perf_counter() - started)
     if "CUDAExecutionProvider" in names and "CUDAExecutionProvider" not in active:
         # onnxruntime TIDAK error saat DLL CUDA/cuDNN tidak cocok: ia menulis
         # peringatan lalu jalan di CPU. Rekognisi di CPU berarti setiap wajah
@@ -115,6 +144,15 @@ def _session(path: str, providers: Optional[Sequence[str]], *,
             f"(aktif: {active}, onnxruntime {getattr(ort, '__version__', '?')}). Biasanya DLL CUDA/cuDNN "
             "tidak cocok dengan build onnxruntime-gpu; lihat pesan [E:onnxruntime] di atas. "
             f"Kalau memang ingin CPU, set {providers_key}: [\"CPUExecutionProvider\"]."
+        )
+    if wants_trt and TENSORRT not in active:
+        # Sama seperti CUDA: onnxruntime hanya menulis "EP Error ... falling back" lalu
+        # jalan di CUDA EP. Angka uji TensorRT yang ternyata CUDA tidak ada artinya.
+        raise ProviderUnavailable(
+            f"{TENSORRT} diminta untuk {Path(path).name} tetapi tidak aktif (aktif: {active}, "
+            f"onnxruntime {getattr(ort, '__version__', '?')}, pustaka TensorRT: {_TRT_DLL_DIR or 'tidak ditemukan'}). "
+            "Biasanya nvinfer tidak terpasang atau versinya tidak cocok; jalankan "
+            "`python scripts/check_gpu_env.py --tensorrt`, atau matikan recognition.onnx_tensorrt."
         )
     logger.info("onnx %s: provider aktif %s", Path(path).name, active)
     return session
@@ -127,18 +165,147 @@ def _provider_name(entry) -> str:
     return entry[0] if isinstance(entry, (tuple, list)) else str(entry)
 
 
-def provider_list(names: Optional[Sequence[str]], gpu_mem_limit_mb: Optional[int]) -> Optional[list]:
+def provider_list(names: Optional[Sequence[str]], gpu_mem_limit_mb: Optional[int],
+                  tensorrt: Optional[Dict[str, Any]] = None) -> Optional[list]:
     """Nama provider dari config -> daftar untuk onnxruntime, dengan batas VRAM CUDA.
 
     `kSameAsRequested`: arena tumbuh sebesar yang diminta, bukan berlipat dua;
     bersama `gpu_mem_limit`, ORT tidak lagi memakan VRAM yang dibutuhkan D-FINE.
+
+    `tensorrt` (opsi dari `tensorrt_options`, ea-r11): TensorRT EP ditaruh paling
+    depan. CUDA EP tetap di belakangnya untuk node yang tidak didukung TensorRT.
     """
-    if not gpu_mem_limit_mb:
+    if not gpu_mem_limit_mb and tensorrt is None:
         return list(names) if names else None
-    options = {"gpu_mem_limit": int(gpu_mem_limit_mb) * 1024 * 1024,
-               "arena_extend_strategy": "kSameAsRequested"}
-    base = list(names) if names else ["CUDAExecutionProvider", "CPUExecutionProvider"]
-    return [(name, options) if name == "CUDAExecutionProvider" else name for name in base]
+    base = [n for n in (names or ["CUDAExecutionProvider", "CPUExecutionProvider"]) if n != TENSORRT]
+    if tensorrt is not None and CUDA not in base:
+        base.insert(0, CUDA)
+    entries: list = list(base)
+    if gpu_mem_limit_mb:
+        options = {"gpu_mem_limit": int(gpu_mem_limit_mb) * 1024 * 1024,
+                   "arena_extend_strategy": "kSameAsRequested"}
+        entries = [(name, options) if name == CUDA else name for name in base]
+    if tensorrt is not None:
+        entries.insert(0, (TENSORRT, dict(tensorrt)))
+    return entries
+
+
+def tensorrt_options(cache_dir: str, fp16: bool = True, workspace_mb: Optional[int] = None) -> Dict[str, Any]:
+    """Opsi TensorRT EP. Cache engine WAJIB: membangun engine glintr100 bisa memakan
+    menit; tanpa cache itu terjadi setiap start dan watchdog bisa menganggap engine macet.
+
+    Subfolder per versi onnxruntime + TensorRT + presisi: ORT tidak memasukkan
+    ketiganya ke nama berkas cache dan memakai ulang engine lama begitu saja
+    (dokumentasinya menyuruh menghapus cache manual bila salah satunya berubah)."""
+    path = Path(cache_dir) / tensorrt_cache_tag(fp16)
+    path.mkdir(parents=True, exist_ok=True)
+    options: Dict[str, Any] = {
+        "trt_fp16_enable": bool(fp16),
+        "trt_engine_cache_enable": True,
+        "trt_engine_cache_path": str(path),
+        "trt_timing_cache_enable": True,
+        "trt_timing_cache_path": str(path),
+    }
+    if workspace_mb:
+        options["trt_max_workspace_size"] = int(workspace_mb) * 1024 * 1024
+    return options
+
+
+def _dist_version(*names: str) -> str:
+    from importlib import metadata
+
+    for name in names:
+        try:
+            return metadata.version(name)
+        except metadata.PackageNotFoundError:
+            continue
+    return "lokal"
+
+
+def tensorrt_cache_tag(fp16: bool) -> str:
+    """Nama subfolder cache, mis. `ort1.23.2-trt10.9.0.34-fp16`."""
+    ort = _dist_version("onnxruntime-gpu", "onnxruntime")
+    trt = _dist_version("tensorrt-cu12-libs", "tensorrt-cu13-libs", "tensorrt-libs", "tensorrt")
+    return f"ort{ort}-trt{trt}-{'fp16' if fp16 else 'fp32'}"
+
+
+_TRT_DLL_DIR: Optional[str] = None
+# Nama pustaka TensorRT 10 yang dimuat TensorRT EP onnxruntime.
+_TRT_LIBS_WINDOWS = ("nvinfer_10.dll", "nvinfer_plugin_10.dll", "nvonnxparser_10.dll")
+_TRT_LIBS_LINUX = ("libnvinfer.so.10", "libnvinfer_plugin.so.10", "libnvonnxparser.so.10")
+
+
+def find_tensorrt_libs() -> Optional[Path]:
+    """Folder pustaka TensorRT dari paket pip `tensorrt-cu12-libs` (modul `tensorrt_libs`)."""
+    import importlib.util
+
+    spec = importlib.util.find_spec("tensorrt_libs")
+    if spec is None or not spec.submodule_search_locations:
+        return None
+    folder = Path(list(spec.submodule_search_locations)[0])
+    names = _TRT_LIBS_WINDOWS if os.name == "nt" else _TRT_LIBS_LINUX
+    return folder if (folder / names[0]).is_file() else None
+
+
+def _preload_tensorrt_dlls() -> Optional[str]:
+    """Muat nvinfer dari paket pip sebelum sesi dibuat.
+
+    `onnxruntime.preload_dlls()` hanya mengurus CUDA/cuDNN. TensorRT EP mencari
+    nvinfer_10.dll lewat PATH; DLL dari pip ada di site-packages/tensorrt_libs, yang
+    tidak di PATH. Dimuat dengan path lengkap, pemanggilan berikutnya memakai modul
+    yang sudah dimuat. TensorRT yang dipasang manual (di PATH) tetap jalan tanpa ini.
+    """
+    global _TRT_DLL_DIR
+    if _TRT_DLL_DIR is not None:
+        return _TRT_DLL_DIR
+    folder = find_tensorrt_libs()
+    if folder is None:
+        logger.info("paket tensorrt_libs tidak ditemukan; TensorRT dicari di PATH")
+        return None
+    import ctypes
+
+    if os.name == "nt":
+        os.environ["PATH"] = str(folder) + os.pathsep + os.environ.get("PATH", "")
+        if hasattr(os, "add_dll_directory"):
+            os.add_dll_directory(str(folder))
+    names = _TRT_LIBS_WINDOWS if os.name == "nt" else _TRT_LIBS_LINUX
+    for name in names:
+        candidate = folder / name
+        if candidate.is_file():
+            try:
+                ctypes.CDLL(str(candidate), mode=getattr(ctypes, "RTLD_GLOBAL", 0))
+            except OSError as error:  # yang menentukan tetap provider aktif sesudahnya
+                logger.warning("gagal memuat %s: %s", candidate, error)
+    _TRT_DLL_DIR = str(folder)
+    logger.info("pustaka TensorRT dimuat dari %s", folder)
+    return _TRT_DLL_DIR
+
+
+def _with_cache_prefix(chosen: Sequence[Any], name: str) -> list:
+    """Prefix berkas cache per model (dan ukuran input SCRFD), supaya cache SCRFD dan
+    glintr100 bisa dibedakan (nama bawaan ORT hanya hash graf)."""
+    prefix = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
+    out = []
+    for entry in chosen:
+        if isinstance(entry, (tuple, list)) and entry[0] == TENSORRT:
+            options = dict(entry[1])
+            if options.get("trt_engine_cache_enable"):
+                options.setdefault("trt_engine_cache_prefix", prefix)
+            entry = (TENSORRT, options)
+        out.append(entry)
+    return out
+
+
+def _announce_tensorrt_build(path: str, chosen: Sequence[Any]) -> None:
+    """Peringatan sebelum build engine TensorRT yang lama (cache masih kosong)."""
+    options = next((p[1] for p in chosen if isinstance(p, (tuple, list)) and p[0] == TENSORRT), {})
+    cache = options.get("trt_engine_cache_path")
+    prefix = options.get("trt_engine_cache_prefix", "")
+    if not cache or not any(Path(cache).glob(f"{prefix}*.engine")):
+        logger.warning(
+            "onnx %s: TensorRT membangun engine (cache %s kosong). Pertama kali bisa beberapa menit; "
+            "jalankan `python -m engine.tools.face_bench` dulu supaya cache terisi sebelum watchdog.",
+            Path(path).name, cache or "tidak dipakai")
 
 
 def _preload_cuda_dlls(ort) -> None:
@@ -165,7 +332,9 @@ class ScrfdDetector:
 
     def __init__(self, model_path: str, providers: Optional[Sequence[str]] = None,
                  input_size: int = 640, threshold: float = 0.5, nms: float = 0.4) -> None:
-        self._session = _session(model_path, providers)
+        # Model berdimensi dinamis: engine TensorRT dibangun untuk ukuran yang dipakai,
+        # jadi cache per ukuran (ganti 640 <-> 320 tidak menimpa engine yang lain).
+        self._session = _session(model_path, providers, cache_prefix=f"{Path(model_path).stem}_{int(input_size)}")
         self._input_name = self._session.get_inputs()[0].name
         self._size = int(input_size)
         self._threshold = float(threshold)
@@ -355,16 +524,10 @@ class OnnxFaceRecognizer:
     # -- runtime: one track in one frame --------------------------------
     def __call__(self, track: Any, frame: Any) -> Optional[Evidence]:
         image = frame.image
-        height, width = image.shape[:2]
-        box = track.bbox
-        x1, y1 = max(0, int(box.x1)), max(0, int(box.y1))
-        x2, y2 = min(width, int(box.x2)), min(height, int(box.y2))
-        if x2 - x1 < self._min_face or y2 - y1 < self._min_face:
+        cut = head_crop(image, track.bbox, self._min_face, self._head_fraction)
+        if cut is None:
             return None
-        # The face is in the upper part of a person box; searching only there
-        # is cheaper and avoids picking up a second person's face.
-        head_y2 = y1 + max(int((y2 - y1) * self._head_fraction), int(self._min_face))
-        crop = np.ascontiguousarray(image[y1:head_y2, x1:x2])
+        crop, (x1, y1) = cut
         with self._lock:
             faces = self._detector.detect(crop)
             faces = [f for f in faces if min(f.width, f.height) >= self._min_face]
@@ -427,6 +590,34 @@ class OnnxFaceRecognizer:
         )
 
 
+def recognition_providers(recognition_config: Any) -> Optional[list]:
+    """Daftar provider recognizer wajah dari `RecognitionConfig` (dipakai juga face_bench)."""
+    tensorrt = None
+    if getattr(recognition_config, "onnx_tensorrt", False):
+        tensorrt = tensorrt_options(
+            getattr(recognition_config, "onnx_tensorrt_cache_dir", "engine/data/trt-cache"),
+            fp16=getattr(recognition_config, "onnx_tensorrt_fp16", True),
+        )
+    return provider_list(recognition_config.onnx_providers,
+                         getattr(recognition_config, "onnx_gpu_mem_limit_mb", None), tensorrt)
+
+
+def head_crop(image: np.ndarray, box: Any, min_face_px: float, head_fraction: float = 0.45):
+    """Potongan kepala dari kotak orang, persis yang dikirim runtime ke SCRFD.
+
+    -> (crop, (x1, y1)) atau None bila kotaknya terlalu kecil. Dipakai juga oleh
+    tools/face_bench supaya yang diukur sama dengan input runtime."""
+    height, width = image.shape[:2]
+    x1, y1 = max(0, int(box.x1)), max(0, int(box.y1))
+    x2, y2 = min(width, int(box.x2)), min(height, int(box.y2))
+    if x2 - x1 < min_face_px or y2 - y1 < min_face_px:
+        return None
+    # The face is in the upper part of a person box; searching only there
+    # is cheaper and avoids picking up a second person's face.
+    head_y2 = y1 + max(int((y2 - y1) * head_fraction), int(min_face_px))
+    return np.ascontiguousarray(image[y1:head_y2, x1:x2]), (x1, y1)
+
+
 def build_recognizer(recognition_config: Any) -> Optional[OnnxFaceRecognizer]:
     """None when the config says so; RecognizerUnavailable when it cannot load."""
     kind = getattr(recognition_config, "recognizer", "none") or "none"
@@ -440,8 +631,7 @@ def build_recognizer(recognition_config: Any) -> Optional[OnnxFaceRecognizer]:
         raise RecognizerUnavailable(
             "recognition.face_detector_model dan recognition.face_embedder_model wajib diisi"
         )
-    providers = provider_list(recognition_config.onnx_providers,
-                              getattr(recognition_config, "onnx_gpu_mem_limit_mb", None))
+    providers = recognition_providers(recognition_config)
     detector = ScrfdDetector(
         detector_path, providers,
         input_size=getattr(recognition_config, "face_detector_input_size", 640),

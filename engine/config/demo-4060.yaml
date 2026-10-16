@@ -108,6 +108,17 @@ recognition:
   reference_db_path: "engine/data/references.sqlite3"
   onnx_providers: ["CUDAExecutionProvider", "CPUExecutionProvider"]
   onnx_gpu_mem_limit_mb: null     # batas VRAM ORT per sesi, mis. 1024 di 4060 8 GB dengan 5 kamera
+  # TensorRT EP untuk SCRFD + glintr100 (ea-r11), BELUM DIUKUR -> mati. Urutan menyalakan:
+  #   1. scripts/setup-env-trt.ps1 (env kloningan vision-engine-trt), lalu
+  #      python scripts/check_gpu_env.py --tensorrt
+  #   2. python -m engine.tools.face_bench --config <salinan config ini> --source <video> --varian cuda,trt16
+  #      (mengisi cache + membandingkan embedding dengan CUDA EP)
+  #   3. baru tambahkan ke SALINAN config ini, gladi, bandingkan "rata2 ms" + "identifikasi: ... median":
+  #        onnx_tensorrt: true
+  #        onnx_tensorrt_fp16: true
+  #        onnx_tensorrt_cache_dir: "engine/data/trt-cache"   # di-ignore git (engine/.gitignore: data/)
+  #   Tidak ditulis di sini: profil ini harus sama dengan demo-1060.yaml di blok recognition
+  #   (tes test_demo_4060_config), dan defaultnya memang mati.
   face_detection_threshold: 0.5
   face_detector_input_size: 640
   min_face_px: 40

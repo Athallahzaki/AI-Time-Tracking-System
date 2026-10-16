@@ -2,6 +2,7 @@
 
     python scripts/check_gpu_env.py
     python scripts/check_gpu_env.py --json bench-out/env.json
+    python scripts/check_gpu_env.py --tensorrt      # env TensorRT (scripts/setup-env-trt.ps1)
 
 Setiap baris OK / PERINGATAN / GAGAL. Exit 1 bila ada GAGAL. Yang diperiksa
 adalah jebakan yang sudah pernah terjadi di proyek ini: torch CPU-only dari
@@ -26,6 +27,14 @@ ROOT = Path(__file__).resolve().parents[1]
 TORCH_EXPECTED = "2.14.1+cu126"
 LIBREYOLO_MIN = (1, 6)
 ORT_CUDA13_FROM = (1, 27)
+# Versi TensorRT yang dipakai CI onnxruntime untuk membangun onnxruntime-gpu (CUDA 12).
+# Sumber: dokumen TensorRT EP (1.20) dan tools/ci_build/github/azure-pipelines/templates/
+# common-variables.yml di tiap tag rilis (1.21-1.26), dibaca 16 Okt 2026.
+TRT_FOR_ORT = {
+    (1, 20): "10.4", (1, 21): "10.8", (1, 22): "10.9", (1, 23): "10.9",
+    (1, 24): "10.14", (1, 25): "10.14", (1, 26): "10.14",
+}
+TRT_PACKAGES = ("tensorrt-cu12-libs", "tensorrt-libs", "tensorrt-cu12", "tensorrt")
 DRIVER_MIN = 560
 FACE_MODEL = ROOT / "models" / "scrfd_10g_bnkps.onnx"
 # Tempat lain yang dipakai di mesin tim (laptop 1060: engine/models/recognition/).
@@ -132,6 +141,66 @@ def check_onnxruntime(version: Optional[str], providers: List[str], gpu_package:
     return Check("OK", "onnxruntime", f"onnxruntime-gpu {version}")
 
 
+def expected_tensorrt(ort_version: Optional[str]) -> Optional[str]:
+    return TRT_FOR_ORT.get(version_tuple(ort_version)[:2]) if ort_version else None
+
+
+def check_tensorrt_version(ort_version: Optional[str], trt_version: Optional[str]) -> Check:
+    """Pasangan onnxruntime-gpu + pustaka TensorRT (paket ea-r11)."""
+    expected = expected_tensorrt(ort_version)
+    hint = f"tensorrt-cu12-libs=={expected}.*" if expected else "tensorrt-cu12-libs>=10,<11"
+    if not trt_version:
+        return Check("GAGAL", "tensorrt", f"pustaka TensorRT tidak terpasang. scripts/setup-env-trt.ps1, "
+                     f"atau pip install \"{hint}\"")
+    if version_tuple(trt_version)[0] != 10:
+        return Check("GAGAL", "tensorrt", f"TensorRT {trt_version}; onnxruntime-gpu {ort_version} butuh TensorRT 10")
+    if expected is None:
+        return Check("PERINGATAN", "tensorrt", f"TensorRT {trt_version}; pasangan untuk onnxruntime {ort_version} "
+                     "tidak tercatat di TRT_FOR_ORT. Penentunya sesi uji di bawah")
+    if version_tuple(trt_version)[:2] != version_tuple(expected)[:2]:
+        return Check("PERINGATAN", "tensorrt", f"TensorRT {trt_version}, sedangkan onnxruntime {ort_version} "
+                     f"dibangun dengan {expected}. Sesama 10.x sering jalan tapi tidak dijamin; lebih aman "
+                     f"pip install \"{hint}\"")
+    return Check("OK", "tensorrt", f"TensorRT {trt_version} cocok dengan onnxruntime-gpu {ort_version} ({expected})")
+
+
+def collect_tensorrt(ort: Any, ort_version: Optional[str]) -> List[Check]:
+    """Versi + sesi SCRFD sungguhan lewat jalur engine (face_onnx.ScrfdDetector).
+
+    Sesi ini juga mengisi cache engine SCRFD 640 di engine/data/trt-cache."""
+    trt_version = next((v for v in (_dist_version(n) for n in TRT_PACKAGES) if v), None)
+    checks = [check_tensorrt_version(ort_version, trt_version)]
+    if ort is None:
+        return checks
+    if "TensorrtExecutionProvider" not in ort.get_available_providers():
+        checks.append(Check("GAGAL", "tensorrt-ep", "build onnxruntime ini tidak membawa TensorrtExecutionProvider"))
+        return checks
+    sys.path.insert(0, str(ROOT))
+    from engine.identity import face_onnx  # noqa: WPS433 -- hanya untuk --tensorrt
+
+    folder = face_onnx.find_tensorrt_libs()
+    checks.append(Check("OK" if folder else "PERINGATAN", "tensorrt-dll",
+                        str(folder) if folder else "tensorrt_libs tidak ditemukan; nvinfer_10.dll harus ada di PATH"))
+    face_model = find_face_model()
+    if face_model is None:
+        checks.append(Check("PERINGATAN", "tensorrt-sesi", "scrfd_10g_bnkps.onnx tidak ditemukan: sesi TensorRT tidak diuji"))
+        return checks
+    import time
+
+    providers = face_onnx.provider_list(None, None, face_onnx.tensorrt_options(str(ROOT / "engine" / "data" / "trt-cache")))
+    started = time.perf_counter()
+    try:
+        detector = face_onnx.ScrfdDetector(str(face_model), providers, input_size=640)
+        import numpy as np
+
+        detector.detect(np.zeros((200, 160, 3), dtype=np.uint8))
+        checks.append(Check("OK", "tensorrt-sesi", f"{face_model.name} jalan di TensorRT FP16 "
+                            f"({time.perf_counter() - started:.0f} dtk termasuk build/baca cache)"))
+    except Exception as exc:  # noqa: BLE001
+        checks.append(Check("GAGAL", "tensorrt-sesi", f"{face_model.name}: {exc}"))
+    return checks
+
+
 def check_driver(text: Optional[str]) -> Check:
     if not text:
         return Check("PERINGATAN", "driver", "nvidia-smi tidak ditemukan")
@@ -158,7 +227,7 @@ def check_conflicts(installed: Callable[[str], Optional[str]]) -> List[Check]:
 
 # -- pengumpulan dari mesin sungguhan ----------------------------------------
 
-def collect() -> List[Check]:
+def collect(tensorrt: bool = False) -> List[Check]:
     checks = [check_python(sys.version_info[:2])]
 
     torch = _module("torch")
@@ -207,6 +276,9 @@ def collect() -> List[Check]:
         except Exception as exc:  # noqa: BLE001
             checks.append(Check("GAGAL", "onnx-sesi", f"{face_model.name}: {exc}"))
 
+    if tensorrt:
+        checks.extend(collect_tensorrt(ort, getattr(ort, "__version__", None)))
+
     av = _module("av")
     if av is None:
         checks.append(Check("GAGAL", "av", "PyAV tidak terpasang"))
@@ -233,8 +305,11 @@ def collect() -> List[Check]:
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--json", default=None)
+    parser.add_argument("--tensorrt", action="store_true",
+                        help="periksa juga TensorRT EP (env vision-engine-trt, paket ea-r11); "
+                             "pertama kali bisa +-1 menit karena engine SCRFD dibangun")
     args = parser.parse_args(argv)
-    checks = collect()
+    checks = collect(tensorrt=args.tensorrt)
     width = max(len(c.name) for c in checks)
     for c in checks:
         print(f"{c.status:<10} {c.name:<{width}}  {c.detail}")

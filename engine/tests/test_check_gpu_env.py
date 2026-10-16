@@ -77,3 +77,18 @@ def test_model_wajah_dicari_di_beberapa_tempat(tmp_path):
     assert env.find_face_model((first, second)) == second
     first.write_bytes(b"x")
     assert env.find_face_model((first, second)) == first
+
+
+@pytest.mark.parametrize("ort, trt, status", [
+    ("1.23.2", None, "GAGAL"),
+    ("1.23.2", "10.9.0.34", "OK"),
+    ("1.24.4", "10.14.1.48", "OK"),
+    ("1.24.4", "10.9.0.34", "PERINGATAN"),
+    ("1.23.2", "8.6.1", "GAGAL"),
+    ("1.30.0", "10.15.0", "PERINGATAN"),
+])
+def test_pasangan_onnxruntime_tensorrt(ort, trt, status):
+    check = env.check_tensorrt_version(ort, trt)
+    assert check.status == status
+    if trt is None:
+        assert "tensorrt-cu12-libs==10.9.*" in check.detail and "setup-env-trt.ps1" in check.detail

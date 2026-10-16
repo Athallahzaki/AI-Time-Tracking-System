@@ -34,7 +34,7 @@ frontend (Vue + Vite): dashboard, overlay kotak, enrollment, pengaturan
 | Pengenal error CUDA fatal (`is_fatal_gpu_error`, pola teks) | `perception/gpu_fatal.py` (tes `test_gpu_fatal.py`) |
 | Tracker | `perception/bytetrack_tracker.py`, `perception/iou_tracker.py` |
 | Crop orang/kepala | `perception/person_cropper.py` |
-| Wajah (SCRFD + AuraFace ONNX), gerbang kualitas sebelum embedding (`embed_*`, `yaw_ratio`), cek bentuk model SCRFD (`_check_static_size`) | `identity/face_onnx.py` (tes `test_rekognisi_beban.py`) |
+| Wajah (SCRFD + AuraFace ONNX), gerbang kualitas sebelum embedding (`embed_*`, `yaw_ratio`), cek bentuk model SCRFD (`_check_static_size`), TensorRT EP + cache (`recognition_providers`, `tensorrt_options`, `ProviderUnavailable`), potongan kepala (`head_crop`) | `identity/face_onnx.py` (tes `test_rekognisi_beban.py`, `test_tensorrt_rekognisi.py`) |
 | Matcher, arbiter identitas, admission, enrollment | `identity/matcher.py`, `identity/arbiter.py`, `identity/admission.py`, `identity/enrollment.py` |
 | ReID berjangkar wajah (logika): pesan antrean, galeri harian, aturan gabung, ANON-xxxx | `identity/reid/messages.py`, `identity/reid/gallery.py`, `identity/reid/merge.py`, `identity/reid/pending.py` (tes `test_reid_*.py`) |
 | ReID model + gerbang crop (dimuat hanya bila `reid.enabled`): OSNet ONNX, pra-proses = kit latih, SHA-256 | `identity/reid/embedder_onnx.py`, `identity/reid/quality.py` (tes `test_reid_embedder.py`) |
@@ -91,6 +91,9 @@ generator `.xlsx`, halaman report, penyaringan per peran di semua endpoint.
 | VPS WebRTC | `deploy/vps/nginx-stream-webrtc.conf` |
 | Uji lag/gladi, ringkasan (`lag_probe.py --events-out` = rekam event NDJSON untuk validator; kolom `identify_s` = waktu sampai dikenali) | `scripts/lag_probe.py`, `scripts/summarize_gladi.py` |
 | Spike NVDEC | `scripts/spike_nvdec.py` |
+| Ukur rekognisi per wajah: CUDA vs TensorRT EP, ukuran SCRFD, kosinus embedding (juga mengisi cache TensorRT) | `engine/tools/face_bench.py` |
+| SCRFD bentuk tetap 640 -> berdimensi dinamis + verifikasi onnxruntime | `engine/tools/scrfd_dynamic.py` (tes `test_scrfd_dinamis.py`, butuh paket `onnx`) |
+| Env kloningan uji TensorRT (Windows) + pemeriksaannya (`check_gpu_env.py --tensorrt`) | `scripts/setup-env-trt.ps1`, `scripts/check_gpu_env.py`, `docs/SETUP-GPU.md` |
 | Zip ramping untuk sesi Claude | `scripts/pack_for_claude.py` |
 | Kit latih ReID OSNet dari RandPerson (laptop; torch di luar runtime engine) | `tools/reid_train/` — `README.md` (langkah dari nol), `prepare_randperson.py`, `randperson_dataset.py`, `train_osnet.py`, `export_onnx.py`, `eval_reid.py`, `reid_common.py`, `MODEL-CARD.md`, `requirements-train*.txt`, tes di `tests/` (jalankan terpisah: `python -m pytest tools/reid_train/tests -q`) |
 

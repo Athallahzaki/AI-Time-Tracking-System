@@ -55,9 +55,51 @@ Angka 3050 belum ada: jalankan `docs/UJI-LAG.md` langkah 3b dan 3c di sana dulu.
 VRAM 3050 laptop 4 GB: setiap ukuran batch dengan CUDA graph menyimpan graph
 sendiri, jadi `max_batch` besar memakan VRAM.
 
+## Env uji TensorRT (RTX 4060, paket ea-r11)
+
+Untuk mengukur rekognisi wajah lewat TensorRT EP onnxruntime (glintr100 33 ms + SCRFD
+21 ms per wajah di CUDA EP, uji 15 Okt). Dipasang di **env kloningan**: env kerja
+`vision-engine` tidak berubah, dan kalau hasilnya buruk cukup `conda env remove -n vision-engine-trt`.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup-env-trt.ps1
+conda activate vision-engine-trt
+python -m engine.tools.face_bench --config engine/config/demo-4060.yaml --source C:\video\uji-siap.mp4 --varian cuda,trt16 --simpan-potongan bench-out\potongan --json bench-out\face-bench-trt.json
+python -m engine.tools.scrfd_dynamic --input engine/models/recognition/scrfd_10g_bnkps.onnx --output engine/models/recognition/scrfd_10g_bnkps_dinamis.onnx
+python -m engine.tools.face_bench --config engine/config/demo-4060.yaml --potongan bench-out\potongan --varian cuda,trt16 --ukuran 640,320 --model-detektor engine/models/recognition/scrfd_10g_bnkps_dinamis.onnx --json bench-out\face-bench-320.json
+```
+
+TensorRT EP butuh pustaka TensorRT 10 (nvinfer) yang cocok dengan build onnxruntime-gpu.
+Skrip memilihnya dari versi onnxruntime-gpu di env (paket pip `tensorrt-cu12-libs`):
+
+| onnxruntime-gpu | TensorRT build CI |
+|---|---|
+| 1.21 | 10.8 |
+| 1.22, 1.23 | 10.9 |
+| 1.24, 1.25, 1.26 | 10.14 |
+
+Sumber: `tools/ci_build/github/azure-pipelines/templates/common-variables.yml` di tiap tag
+rilis onnxruntime (dokumentasi resmi TensorRT EP hanya mencatat sampai 1.22). Penentu
+akhirnya baris `tensorrt-sesi` di `check_gpu_env.py --tensorrt`: sesi SCRFD sungguhan.
+
+Yang perlu diketahui:
+
+- Build engine TensorRT pertama memakan waktu (SCRFD ±1 menit, glintr100 bisa beberapa
+  menit). Cache di `engine/data/trt-cache/ort<versi>-trt<versi>-fp16/` (tidak di-commit),
+  dipisah per versi + presisi karena onnxruntime memakai ulang cache lama tanpa memeriksa.
+  Jalankan `face_bench` sebelum engine dinyalakan watchdog supaya cache sudah terisi
+  (watchdog `-StartupGraceSeconds` 240).
+- `recognition.onnx_tensorrt: true` yang tidak bisa aktif = engine menolak start, kode 2
+  (watchdog menunggu config berubah), bukan diam-diam jalan di CUDA EP.
+- Model SCRFD dinamis dari `scrfd_dynamic` baru dipakai engine kalau
+  `face_detector_model` diarahkan ke berkas itu; berkas asli tidak diubah.
+- GTX 1060 (Pascal) tidak masuk jalur ini.
+
 ## Sumber versi
 
 - Wheel torch cu126 Windows: https://download.pytorch.org/whl/cu126/torch/ (2.14.1, cp310-cp314)
 - Penghapusan CUDA 12.6 / Pascal di 2.15: https://github.com/pytorch/pytorch/issues/190385
 - cu128 ke atas tanpa Maxwell/Pascal: https://dev-discuss.pytorch.org/t/cuda-toolkit-version-and-architecture-support-update-maxwell-and-pascal-architecture-support-removed-in-cuda-12-8-and-12-9-builds/3128
 - Riwayat onnxruntime-gpu: https://pypi.org/project/onnxruntime-gpu/#history
+- TensorRT EP (opsi, tabel versi s.d. 1.22): https://onnxruntime.ai/docs/execution-providers/TensorRT-ExecutionProvider.html
+- Versi TensorRT build per rilis: https://github.com/microsoft/onnxruntime/blob/v1.26.0/tools/ci_build/github/azure-pipelines/templates/common-variables.yml

@@ -273,6 +273,15 @@ class RecognitionConfig:
     # ORT: arena membesar dan tidak dikembalikan). Di GPU 8 GB yang dipakai
     # bersama PyTorch untuk 5 kamera, batas ini mencegah ORT memakan VRAM.
     onnx_gpu_mem_limit_mb: Optional[int] = None
+    # TensorRT EP untuk SCRFD + glintr100 (paket ea-r11). MATI secara default.
+    # Butuh pustaka TensorRT 10 yang cocok dengan build onnxruntime-gpu
+    # (scripts/setup-env-trt.ps1). Diminta tapi tidak aktif = engine menolak start
+    # (kode 2), bukan diam-diam jalan di CUDA EP. Build engine pertama bisa memakan
+    # menit; cache di `onnx_tensorrt_cache_dir` (jangan di-commit) dipakai ulang.
+    # Isi cache dulu dengan `python -m engine.tools.face_bench` sebelum watchdog.
+    onnx_tensorrt: bool = False
+    onnx_tensorrt_fp16: bool = True
+    onnx_tensorrt_cache_dir: str = "engine/data/trt-cache"
     face_detection_threshold: float = 0.5
     # SCRFD input canvas (pixels, multiple of 32). Runtime crops are head
     # regions of ~60-150 px, so 640 mostly upscales; 320 is the candidate for
@@ -323,6 +332,11 @@ class RecognitionConfig:
             raise ValueError("recognition.worker_queue must be >= 1.")
         if self.onnx_gpu_mem_limit_mb is not None and self.onnx_gpu_mem_limit_mb < 64:
             raise ValueError("recognition.onnx_gpu_mem_limit_mb must be >= 64 (or unset).")
+        if self.onnx_tensorrt and not str(self.onnx_tensorrt_cache_dir or "").strip():
+            raise ValueError("recognition.onnx_tensorrt needs onnx_tensorrt_cache_dir (engine cache).")
+        if self.onnx_tensorrt and self.onnx_providers and "CPUExecutionProvider" in self.onnx_providers \
+                and "CUDAExecutionProvider" not in self.onnx_providers:
+            raise ValueError("recognition.onnx_tensorrt needs CUDAExecutionProvider, not a CPU-only provider list.")
         if self.embed_min_face_px is not None and self.embed_min_face_px < 0:
             raise ValueError("recognition.embed_min_face_px must be >= 0 (or unset).")
         if self.embed_min_score is not None and not 0.0 <= self.embed_min_score <= 1.0:

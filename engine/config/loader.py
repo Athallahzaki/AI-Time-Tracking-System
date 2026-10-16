@@ -228,6 +228,9 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
                 tuple(str(p) for p in rec["onnx_providers"]) if rec.get("onnx_providers") else None
             ),
             onnx_gpu_mem_limit_mb=_optional_int(rec.get("onnx_gpu_mem_limit_mb")),
+            onnx_tensorrt=bool(rec.get("onnx_tensorrt", False)),
+            onnx_tensorrt_fp16=bool(rec.get("onnx_tensorrt_fp16", True)),
+            onnx_tensorrt_cache_dir=str(rec.get("onnx_tensorrt_cache_dir") or "engine/data/trt-cache"),
             face_detection_threshold=float(rec.get("face_detection_threshold", 0.5)),
             face_detector_input_size=int(rec.get("face_detector_input_size", 640)),
             execution=str(rec.get("execution", "async")),
