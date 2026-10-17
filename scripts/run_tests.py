@@ -54,6 +54,7 @@ TEST_MODULES = [
     "backend.tests.test_policy_config",
     "backend.tests.test_process_boundaries",
     "backend.tests.test_sessions",
+    "backend.tests.test_update_plan_completion",
 ]
 
 

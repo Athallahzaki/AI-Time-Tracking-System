@@ -44,6 +44,7 @@ class BreakPolicy:
     warning_remaining_minutes: float = 5.0
     # Pauses in which presence is never charged, as (start_minute, end_minute).
     official_breaks: List[Tuple[int, int]] = field(default_factory=lambda: [(12 * 60, 13 * 60)])
+    official_breaks_by_weekday: Dict[int, List[Tuple[int, int]]] = field(default_factory=dict)
     # Two presence segments of the same person closer than this are ONE visit
     # (occlusion, re-ID, walking between two cameras of the same facility).
     visit_merge_gap_seconds: float = 30.0
@@ -53,9 +54,15 @@ class BreakPolicy:
 
     def __post_init__(self) -> None:
         self.timezone = ZoneInfo(self.timezone_name)
-        for start, end in self.official_breaks:
-            if not 0 <= start < end <= 24 * 60:
-                raise ValueError("official break must satisfy start < end within one day")
+        schedules = list(self.official_breaks_by_weekday.values()) or [self.official_breaks]
+        for windows in schedules:
+            previous_end = -1
+            for start, end in sorted(windows):
+                if not 0 <= start < end <= 24 * 60:
+                    raise ValueError("official break must satisfy start < end within one day")
+                if start < previous_end:
+                    raise ValueError("official break windows cannot overlap")
+                previous_end = end
 
     # --- compatibility accessors (whole hours of the first break) -----------
     @property
@@ -164,7 +171,12 @@ class BreakPolicy:
     def in_official_break(self, timestamp: float) -> bool:
         local = datetime.fromtimestamp(timestamp, self.timezone)
         minute = local.hour * 60 + local.minute
-        return any(start <= minute < end for start, end in self.official_breaks)
+        return any(start <= minute < end for start, end in self.breaks_for_date(local.date()))
+
+    def breaks_for_date(self, day: date_type) -> List[Tuple[int, int]]:
+        if self.official_breaks_by_weekday:
+            return self.official_breaks_by_weekday.get(day.weekday(), [])
+        return self.official_breaks
 
     def countable_by_date(self, start: float, end: float) -> dict[str, float]:
         """Seconds of [start, end) per local date, minus official breaks."""
@@ -178,7 +190,7 @@ class BreakPolicy:
             next_day = datetime.combine(day + timedelta(days=1), dt_time.min, self.timezone)
             segment_end = min(end_dt, next_day)
             total = (segment_end - cursor).total_seconds()
-            for break_start, break_end in self.official_breaks:
+            for break_start, break_end in self.breaks_for_date(day):
                 b0 = datetime.combine(day, dt_time.min, self.timezone) + timedelta(minutes=break_start)
                 b1 = datetime.combine(day, dt_time.min, self.timezone) + timedelta(minutes=break_end)
                 overlap = (min(segment_end, b1) - max(cursor, b0)).total_seconds()
@@ -222,7 +234,26 @@ def load_break_policy(path: Path) -> BreakPolicy:
     if raw_breaks is None:
         single = data.get("official_break") or {"start": "12:00", "end": "13:00"}
         raw_breaks = [single] if single else []
-    breaks = [(_minutes(item["start"]), _minutes(item["end"])) for item in raw_breaks]
+    weekday_names = {
+        "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+        "friday": 4, "saturday": 5, "sunday": 6,
+    }
+    breaks_by_weekday: Dict[int, List[Tuple[int, int]]] = {}
+    if isinstance(raw_breaks, dict):
+        unknown = set(raw_breaks) - set(weekday_names)
+        if unknown:
+            raise ValueError(f"Unknown weekday(s): {', '.join(sorted(unknown))}")
+        for name, items in raw_breaks.items():
+            if not isinstance(items, list):
+                raise ValueError(f"official_breaks.{name} must be a list")
+            breaks_by_weekday[weekday_names[name]] = [
+                (_minutes(item["start"]), _minutes(item["end"])) for item in items
+            ]
+        breaks: List[Tuple[int, int]] = []
+    elif isinstance(raw_breaks, list):
+        breaks = [(_minutes(item["start"]), _minutes(item["end"])) for item in raw_breaks]
+    else:
+        raise ValueError("official_breaks must be a list or weekday mapping")
 
     return BreakPolicy(
         timezone_name=str(data.get("timezone", "Asia/Jakarta")),
@@ -230,6 +261,7 @@ def load_break_policy(path: Path) -> BreakPolicy:
         daily_allowance_minutes=allowance,
         warning_remaining_minutes=warning,
         official_breaks=breaks,
+        official_breaks_by_weekday=breaks_by_weekday,
         visit_merge_gap_seconds=merge_gap,
         open_presence_stale_seconds=stale,
     )

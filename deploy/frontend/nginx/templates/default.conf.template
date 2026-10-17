@@ -75,6 +75,17 @@ server {
         proxy_pass $backend_upstream;
     }
 
+    # Internal authorization subrequest for MediaMTX and local demo videos.
+    location = /_video_auth {
+        internal;
+        proxy_pass $backend_upstream/api/auth/video-authorize;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header Authorization $http_authorization;
+        proxy_set_header Cookie $http_cookie;
+        proxy_set_header X-Original-URI $request_uri;
+    }
+
     # FastAPI docs (opsional, berguna untuk debugging lewat satu port).
     location ~ ^/(docs|redoc|openapi\.json)$ {
         include /etc/nginx/snippets/proxy-common.conf;
@@ -86,6 +97,7 @@ server {
     # Low-Latency HLS memakai long-poll (_HLS_msn), jadi buffering dimatikan.
     # ------------------------------------------------------------------
     location /hls/ {
+        auth_request /_video_auth;
         include /etc/nginx/snippets/proxy-common.conf;
         proxy_buffering off;
         proxy_read_timeout 60s;
@@ -99,6 +111,7 @@ server {
     # ke host MediaMTX — lihat MEDIAMTX_WEBRTC_ADDITIONAL_HOSTS.
     # ------------------------------------------------------------------
     location /whep/ {
+        auth_request /_video_auth;
         include /etc/nginx/snippets/proxy-common.conf;
         proxy_buffering off;
         proxy_read_timeout 60s;
@@ -114,6 +127,7 @@ server {
     # Range request didukung bawaan, jadi seek di <video> berfungsi.
     # ------------------------------------------------------------------
     location /videos/ {
+        auth_request /_video_auth;
         alias /usr/share/nginx/html/videos/;
         add_header Cache-Control "no-cache";
         add_header Accept-Ranges bytes;
@@ -122,6 +136,7 @@ server {
 
     # cameras.demo.yaml memakai path gaya repo (frontend/public/videos/...).
     location /frontend/public/videos/ {
+        auth_request /_video_auth;
         alias /usr/share/nginx/html/videos/;
         add_header Accept-Ranges bytes;
         include /etc/nginx/snippets/security-headers.conf;

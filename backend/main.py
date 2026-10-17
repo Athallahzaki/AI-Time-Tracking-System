@@ -12,8 +12,13 @@ from backend.routers import (
     attendance,
     auth,
     cameras,
+    employees,
     enrollments,
     notifications,
+    reports,
+    hr_review,
+    reviews,
+    me,
     settings as settings_router,
     stats,
     streams,
@@ -34,6 +39,7 @@ from backend.services.engine_integration import (
     detection_writer,
     engine_integration,
 )
+from backend.services.report_service import report_scheduler
 
 
 logging.basicConfig(
@@ -70,6 +76,7 @@ async def lifespan(app: FastAPI):
     engine_integration.configure()
     
     email_service.start()
+    report_scheduler.start()
     engine_connection_manager.start()
 
     yield
@@ -80,6 +87,7 @@ async def lifespan(app: FastAPI):
 
     
     engine_connection_manager.stop()
+    report_scheduler.stop()
     email_service.stop()
     detection_writer.stop()
 
@@ -103,6 +111,7 @@ app.add_middleware(
 
 app.include_router(attendance.router)
 app.include_router(cameras.router)
+app.include_router(employees.router)
 app.include_router(enrollments.router)
 app.include_router(settings_router.router)
 app.include_router(stats.router)
@@ -111,6 +120,10 @@ app.include_router(system.router)
 app.include_router(violations.router)
 app.include_router(notifications.router)
 app.include_router(auth.router)
+app.include_router(reports.router)
+app.include_router(hr_review.router)
+app.include_router(reviews.router)
+app.include_router(me.router)
 
 @app.get("/")
 def root():

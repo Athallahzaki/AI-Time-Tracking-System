@@ -6,10 +6,12 @@ from datetime import datetime
 import smtplib
 import ssl
 import threading
+import time
 from email.message import EmailMessage
 from typing import Any, Dict, Optional
 
 from backend.core.config import settings
+from backend.core.database import get_app_setting, get_employee_by_employee_id
 
 
 logger = logging.getLogger(__name__)
@@ -196,9 +198,21 @@ class EmailService:
         notification: Dict[str, Any],
     ) -> None:
         subject, body = self.compose_notification(notification)
+        employee = get_employee_by_employee_id(str(notification.get("person_id") or ""))
+        routing = get_app_setting("hr_recipients", {}) or {}
+        routing_enabled = routing.get("enabled", True)
+        primary = list(routing.get("primary", [])) if routing_enabled else []
+        cc = list(routing.get("cc", [])) if routing_enabled else []
+        fallback = routing.get("fallback") if routing_enabled else None
+        employee_email = employee.get("email") if employee else None
+        recipients = [employee_email] if employee_email else ([fallback] if fallback else primary)
+        if not recipients:
+            recipients = list(settings.smtp_to)
         self._send(
             subject=subject,
             body=body,
+            recipients=recipients,
+            cc=([*primary, *cc] if employee_email else cc),
         )
 
     @staticmethod
@@ -260,6 +274,9 @@ class EmailService:
         self,
         subject: str,
         body: str,
+        recipients: Optional[list[str]] = None,
+        cc: Optional[list[str]] = None,
+        attachment: Optional[tuple[str, bytes, str, str]] = None,
     ) -> None:
         self._validate_configuration()
 
@@ -268,63 +285,64 @@ class EmailService:
             or settings.smtp_username
         )
 
-        recipients = list(settings.smtp_to)
+        recipients = list(recipients or settings.smtp_to)
+        cc = list(cc or [])
+        if not recipients:
+            raise EmailConfigurationError("At least one recipient is required")
 
         email = EmailMessage()
         email["Subject"] = subject
         email["From"] = sender
         email["To"] = ", ".join(recipients)
+        if cc:
+            email["Cc"] = ", ".join(cc)
         email.set_content(body)
+        if attachment:
+            filename, content, maintype, subtype = attachment
+            email.add_attachment(content, maintype=maintype, subtype=subtype, filename=filename)
 
+        last_error = None
+        for attempt in range(1, 4):
+            try:
+                self._deliver_message(email)
+                return
+            except (smtplib.SMTPAuthenticationError, smtplib.SMTPRecipientsRefused) as exc:
+                # Permanent errors: retrying risks account lockout or duplicate noise.
+                raise EmailDeliveryError(str(exc)) from exc
+            except (smtplib.SMTPException, OSError) as exc:
+                last_error = exc
+                if attempt < 3:
+                    logger.warning("SMTP attempt %s/3 failed; retrying", attempt)
+                    time.sleep(0.5 * (2 ** (attempt - 1)))
+        logger.exception("SMTP send failed after retries", exc_info=last_error)
+        raise EmailDeliveryError(str(last_error)) from last_error
+
+    def _deliver_message(self, email: EmailMessage) -> None:
         context = ssl.create_default_context()
+        if settings.smtp_security == "ssl":
+            with smtplib.SMTP_SSL(
+                settings.smtp_host, settings.smtp_port,
+                timeout=settings.smtp_timeout_seconds, context=context,
+            ) as smtp:
+                self._login_if_required(smtp)
+                smtp.send_message(email)
+            return
+        with smtplib.SMTP(
+            settings.smtp_host, settings.smtp_port,
+            timeout=settings.smtp_timeout_seconds,
+        ) as smtp:
+            smtp.ehlo()
+            if settings.smtp_security == "starttls":
+                smtp.starttls(context=context)
+                smtp.ehlo()
+            self._login_if_required(smtp)
+            smtp.send_message(email)
 
-        try:
-            if settings.smtp_security == "ssl":
-                with smtplib.SMTP_SSL(
-                    settings.smtp_host,
-                    settings.smtp_port,
-                    timeout=settings.smtp_timeout_seconds,
-                    context=context,
-                ) as smtp:
-                    if settings.smtp_username:
-                        smtp.login(
-                            settings.smtp_username,
-                            settings.smtp_password,
-                        )
-
-                    smtp.send_message(email)
-
-            else:
-                with smtplib.SMTP(
-                    settings.smtp_host,
-                    settings.smtp_port,
-                    timeout=settings.smtp_timeout_seconds,
-                ) as smtp:
-                    smtp.ehlo()
-
-                    if settings.smtp_security == "starttls":
-                        smtp.starttls(context=context)
-                        smtp.ehlo()
-
-                    if settings.smtp_username:
-                        smtp.login(
-                            settings.smtp_username,
-                            settings.smtp_password,
-                        )
-
-                    smtp.send_message(email)
-
-        except (
-            smtplib.SMTPException,
-            OSError,
-        ) as exc:
-            logger.exception(
-                "SMTP send failed"
-            )
-
-            raise EmailDeliveryError(
-                str(exc)
-            ) from exc
+    def send_report(self, subject: str, body: str, filename: str, content: bytes,
+                    recipients: list[str], cc: Optional[list[str]] = None) -> None:
+        self._send(subject, body, recipients=recipients, cc=cc,
+                   attachment=(filename, content, "application",
+                               "vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
 
     def _login_if_required(
         self,
@@ -373,11 +391,6 @@ class EmailService:
                 "is required"
             )
 
-        if not settings.smtp_to:
-            raise EmailConfigurationError(
-                "SMTP_TO must contain at least "
-                "one recipient"
-            )
 
 
 email_service = EmailService()

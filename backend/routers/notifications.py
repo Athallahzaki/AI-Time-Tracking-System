@@ -15,9 +15,11 @@ from sse_starlette.sse import EventSourceResponse
 
 from backend.core.database import (
     get_notifications,
+    get_notification,
     mark_notification_read,
 )
-from backend.core.security import require_api_key
+from backend.core.security import require_stream_user, require_user, scoped_person_id
+from fastapi import HTTPException
 from backend.services.notification_service import (
     notification_service,
 )
@@ -38,7 +40,9 @@ def list_notifications(
         ge=1,
         le=1000,
     ),
+    user=Depends(require_user),
 ):
+    person_id = scoped_person_id(user, person_id)
     notifications = get_notifications(
         person_id=person_id,
         unread_only=unread_only,
@@ -55,6 +59,7 @@ def list_notifications(
 @router.get("/stream")
 async def notification_stream(
     request: Request,
+    user=Depends(require_stream_user),
 ):
     queue = notification_service.subscribe_async()
 
@@ -70,6 +75,10 @@ async def notification_stream(
                         timeout=1.0,
                     )
                 except asyncio.TimeoutError:
+                    continue
+
+                own = scoped_person_id(user)
+                if own and str(notification.get("person_id") or "") != own:
                     continue
 
                 yield {
@@ -91,13 +100,15 @@ async def notification_stream(
 
 @router.patch(
     "/{notification_id}/read",
-    dependencies=[
-        Depends(require_api_key)
-    ],
 )
 def read_notification(
     notification_id: int,
+    user=Depends(require_user),
 ):
+    notification = get_notification(notification_id)
+    if notification is None:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    scoped_person_id(user, str(notification.get("person_id") or ""))
     changed = mark_notification_read(
         notification_id
     )

@@ -15,8 +15,23 @@ warning_remaining_minutes: 5.0
 # Jeda istirahat resmi: kehadiran di jam ini tidak dihitung. Menit dihormati
 # (mis. "12:30"). Boleh lebih dari satu.
 official_breaks:
-  - start: "12:00"
-    end: "13:00"
+  monday:
+    - start: "12:00"
+      end: "13:00"
+  tuesday:
+    - start: "12:00"
+      end: "13:00"
+  wednesday:
+    - start: "12:00"
+      end: "13:00"
+  thursday:
+    - start: "12:00"
+      end: "13:00"
+  friday:
+    - start: "12:00"
+      end: "13:00"
+  saturday: []
+  sunday: []
 
 # Dua potongan kehadiran orang yang sama yang berjarak <= ini dianggap SATU
 # kunjungan (oklusi, track putus, pindah antar dua kamera di ruang yang sama).

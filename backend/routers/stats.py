@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from backend.core.security import require_user
 from backend.core.config import settings
 from backend.core.state import system_state
 
-router = APIRouter(prefix="/api/stats", tags=["Stats"])
+router = APIRouter(prefix="/api/stats", tags=["Stats"], dependencies=[Depends(require_user)])
 
 
 @router.get("")

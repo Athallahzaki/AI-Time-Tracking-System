@@ -6,16 +6,18 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from backend.core.database import get_corrections, save_correction
+from backend.core.database import get_corrections, mark_report_dirty, save_correction
 from backend.core.state import system_state
 from backend.core.security import (
+    require_user,
     require_admin,
+    scoped_person_id,
 )
 from backend.schemas.corrections import CorrectionCreate
 from backend.services.break_policy import break_policy
 from backend.services.free_time import free_time_ledger
 
-router = APIRouter(prefix="/api/attendance", tags=["Attendance"])
+router = APIRouter(prefix="/api/attendance", tags=["Attendance"], dependencies=[Depends(require_user)])
 
 # new_classification values that mean "this visit was not free time".
 EXCLUDING_CLASSIFICATIONS = {
@@ -74,9 +76,12 @@ def _usage_payload(person_id: str, target_date: str) -> Dict[str, Any]:
     }
 
 @router.get("/active")
-def get_active_sessions():
+def get_active_sessions(user=Depends(require_user)):
     """Live tracks on screen (display), with allowance fields from the ledger."""
     sessions = system_state.get_active_sessions()
+    own = scoped_person_id(user)
+    if own is not None:
+        sessions = [item for item in sessions if str(item.get("identity") or item.get("person_id") or "") == own]
     return {"status": "success", "count": len(sessions), "sessions": sessions}
 
 
@@ -110,6 +115,8 @@ def create_manual_correction(req: CorrectionCreate):
         "notes": req.notes or "",
     }
     save_correction(payload)
+    if target_date:
+        mark_report_dirty(target_date)
     free_time_ledger.invalidate()
     system_state.record_event("ManualCorrectionEvent", payload)
     return {"status": "success", "message": "Manual correction recorded", "correction": payload}
@@ -117,35 +124,39 @@ def create_manual_correction(req: CorrectionCreate):
 
 @router.get("/corrections")
 def list_corrections(person_id: Optional[str] = None, date: Optional[str] = None,
-                     limit: int = Query(200, ge=1, le=1000)):
-    return {"status": "success", "corrections": get_corrections(person_id, date, limit)}
+                     limit: int = Query(200, ge=1, le=1000), user=Depends(require_user)):
+    return {"status": "success", "corrections": get_corrections(scoped_person_id(user, person_id), date, limit)}
 
 
 @router.get("/derived")
-def get_derived_attendance(person_id: Optional[str] = None, date: Optional[str] = None):
+def get_derived_attendance(person_id: Optional[str] = None, date: Optional[str] = None,
+                           user=Depends(require_user)):
     """Per-person facility visits for one local date (merged across cameras)."""
     target_date = _target_date(date)
+    person_id = scoped_person_id(user, person_id)
     person_ids = [person_id] if person_id else sorted(free_time_ledger.known_person_ids())
     people = {pid: free_time_ledger.usage(pid, target_date) for pid in person_ids}
     return {"status": "success", "date": target_date, "people": people}
 
 
 @router.get("/break-usage")
-def get_break_usage(person_id: str, date: Optional[str] = None):
+def get_break_usage(person_id: str, date: Optional[str] = None, user=Depends(require_user)):
     """Daily free-time usage for one person (time present in the facility)."""
-    return _usage_payload(person_id, _target_date(date))
+    return _usage_payload(scoped_person_id(user, person_id), _target_date(date))
 
 
 @router.get("/breaks")
-def get_all_break_usage(date: Optional[str] = None):
+def get_all_break_usage(date: Optional[str] = None, user=Depends(require_user)):
     """Daily free-time usage for every known person."""
     target_date = _target_date(date)
-    data = [_usage_payload(pid, target_date) for pid in sorted(free_time_ledger.known_person_ids())]
+    own = scoped_person_id(user)
+    people = [own] if own else sorted(free_time_ledger.known_person_ids())
+    data = [_usage_payload(pid, target_date) for pid in people]
     return {"status": "success", "data": data}
 
 
 @router.get("/events")
-def get_recent_events(limit: int = Query(50, ge=1, le=200)):
+def get_recent_events(limit: int = Query(50, ge=1, le=200), user=Depends(require_user)):
     """Recent events; manual corrections are read from the database so the
     audit log survives backend restarts."""
     events = [e for e in system_state.get_recent_events(limit=limit)
@@ -157,13 +168,19 @@ def get_recent_events(limit: int = Query(50, ge=1, le=200)):
             "payload": correction,
         })
     events.sort(key=lambda e: e["timestamp"])
+    own = scoped_person_id(user)
+    if own:
+        events = [event for event in events if str(event.get("payload", {}).get("person_id") or "") == own]
     events = events[-limit:]
     return {"status": "success", "count": len(events), "events": events}
 
 
 @router.get("/summary")
-def get_attendance_summary():
+def get_attendance_summary(user=Depends(require_user)):
     sessions = system_state.get_active_sessions()
+    own = scoped_person_id(user)
+    if own:
+        sessions = [item for item in sessions if str(item.get("identity") or item.get("person_id") or "") == own]
     breakdown: Dict[str, int] = {"VERIFYING": 0, "CONFIRMED": 0, "WARNING": 0, "LIMIT": 0}
     for sess in sessions:
         status = sess.get("presence_status", "VERIFYING")

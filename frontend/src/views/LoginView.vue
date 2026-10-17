@@ -46,18 +46,6 @@ async function handleSubmit() {
     class="flex min-h-svh flex-col items-center justify-center bg-slate-50 px-4 py-10"
   >
     <div class="w-full max-w-sm">
-      <!-- Brand: sama dengan header sidebar -->
-      <div class="mb-6 flex flex-col items-center gap-3 text-center">
-        <div
-          class="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-900 text-white shadow-xs"
-        >
-          <ShieldCheck class="h-6 w-6" />
-        </div>
-        <div class="leading-tight">
-          <p class="text-base font-semibold text-slate-900">Hotel Murah</p>
-          <p class="text-xs text-slate-500">AI Time Tracking System</p>
-        </div>
-      </div>
 
       <Card class="gap-6 shadow-xs">
         <CardHeader class="text-center">

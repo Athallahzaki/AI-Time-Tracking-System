@@ -4,11 +4,12 @@ import asyncio
 import json
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sse_starlette.sse import EventSourceResponse
 
 from backend.core.config import settings
 from backend.core.database import get_detection_observations
+from backend.core.security import require_stream_user, require_user, scoped_person_id
 from backend.services.view_stream import view_stream_service
 
 router = APIRouter(tags=["Streams"])
@@ -19,7 +20,9 @@ def detections_history(
     camera_id: str | None = None,
     person_id: str | None = None,
     limit: int = Query(500, ge=1, le=5000),
+    user=Depends(require_user),
 ):
+    person_id = scoped_person_id(user, person_id)
     data = get_detection_observations(camera_id, person_id, limit)
     return {"status": "success", "count": len(data), "detections": data}
 
@@ -29,6 +32,7 @@ async def detections_sse_stream(
     request: Request,
     camera_id: Optional[str] = Query(None, description="Camera ID (default: first configured)"),
     replay: bool = Query(False, description="Replay buffered PTS frames for direct MP4 sync"),
+    user=Depends(require_stream_user),
 ):
     """SSE stream for engine view.frame messages (no worker thread per client)."""
     selected_camera = camera_id or next(iter(settings.cameras), None)
@@ -46,6 +50,11 @@ async def detections_sse_stream(
                     frame = await asyncio.wait_for(client_queue.get(), timeout=1.0)
                 except asyncio.TimeoutError:
                     continue
+                own = scoped_person_id(user)
+                if own:
+                    frame = dict(frame)
+                    frame["boxes"] = [box for box in frame.get("boxes", [])
+                                      if str(box.get("person_id") or "") == own]
                 yield {"event": "detection", "data": json.dumps(frame)}
         finally:
             view_stream_service.unsubscribe_async(selected_camera, client_queue)

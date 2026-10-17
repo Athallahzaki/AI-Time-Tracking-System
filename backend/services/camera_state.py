@@ -10,10 +10,43 @@ fungsi yang sama.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Any, Dict, List
 
 from backend.core.config import CameraConfig, settings
-from backend.core.database import get_camera_overrides
+from backend.core.database import get_app_setting, get_camera_overrides
+
+
+def _schedule_allows(camera_id: str, now: datetime | None = None) -> bool:
+    global_schedule = get_app_setting("engine_schedule", {}) or {}
+    if global_schedule.get("days"):
+        if not engine_schedule_status(global_schedule, now).get("now_active"):
+            return False
+    schedule = get_app_setting("camera_schedule", {}) or {}
+    camera_schedule = (schedule.get("cameras") or {}).get(camera_id)
+    if camera_schedule is None:
+        return True
+    zone = ZoneInfo(schedule.get("timezone", "Asia/Jakarta"))
+    local_now = (now or datetime.now(timezone.utc)).astimezone(zone)
+    windows = camera_schedule.get(local_now.strftime("%A").lower(), [])
+    clock = local_now.strftime("%H:%M")
+    return any(item["start"] <= clock < item["end"] for item in windows)
+
+
+def engine_schedule_status(schedule: Dict[str, Any], now: datetime | None = None) -> Dict[str, Any]:
+    zone = ZoneInfo("Asia/Jakarta")
+    local_now = (now or datetime.now(timezone.utc)).astimezone(zone)
+    keys = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+    rule = (schedule.get("days") or {}).get(keys[local_now.weekday()], {})
+    if not rule.get("enabled"):
+        return {"now_active": False, "next_change_at": None}
+    clock = local_now.strftime("%H:%M")
+    start, end = rule.get("start", "00:00"), rule.get("end", "00:00")
+    if clock < start:
+        return {"now_active": False, "next_change_at": start}
+    if clock < end:
+        return {"now_active": True, "next_change_at": end}
+    return {"now_active": False, "next_change_at": None}
 
 
 def effective_cameras() -> List[Dict[str, Any]]:
@@ -29,7 +62,7 @@ def effective_cameras() -> List[Dict[str, Any]]:
             "config": config,
             "camera_id": camera_id,
             "source_uri": source_uri,
-            "enabled": bool(override.get("enabled", config.enabled_by_default)),
+            "enabled": bool(override.get("enabled", config.enabled_by_default)) and _schedule_allows(camera_id),
         })
     return result
 

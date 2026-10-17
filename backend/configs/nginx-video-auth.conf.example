@@ -1,0 +1,22 @@
+# Protect MediaMTX HLS/WHEP paths with the backend session.
+# The browser must forward `Authorization: Bearer <session-token>`.
+location = /_video_auth {
+    internal;
+    proxy_pass http://127.0.0.1:8000/api/auth/video-authorize;
+    proxy_pass_request_body off;
+    proxy_set_header Content-Length "";
+    proxy_set_header Authorization $http_authorization;
+    proxy_set_header Cookie $http_cookie;
+    proxy_set_header X-Original-URI $request_uri;
+}
+
+location /hls/ {
+    auth_request /_video_auth;
+    proxy_pass http://127.0.0.1:8888/;
+}
+
+location /whep/ {
+    auth_request /_video_auth;
+    proxy_pass http://127.0.0.1:8889/;
+    proxy_http_version 1.1;
+}

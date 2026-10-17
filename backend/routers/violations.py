@@ -3,14 +3,16 @@ from __future__ import annotations
 from datetime import date as date_type
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend.core.database import get_violations
+from backend.core.security import require_user, scoped_person_id
 
 
 router = APIRouter(
     prefix="/api/violations",
     tags=["Violations"],
+    dependencies=[Depends(require_user)],
 )
 
 
@@ -23,7 +25,9 @@ def list_violations(
         ge=1,
         le=1000,
     ),
+    user=Depends(require_user),
 ):
+    person_id = scoped_person_id(user, person_id)
     if date is not None:
         try:
             date_type.fromisoformat(date)
