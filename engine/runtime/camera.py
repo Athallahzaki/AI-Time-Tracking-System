@@ -196,6 +196,9 @@ class CameraSupervisor:
         self._assembler: Optional[PresenceAssembler] = None
 
         self._epoch: Optional[int] = None
+        # ea-r14: epoch terakhir yang diumumkan lewat camera.online, bertahan lintas
+        # pembukaan ulang (_build baru = sumber + assembler baru yang mulai dari 0).
+        self._epoch_announced: Optional[int] = None
         # P17: analisis tertinggal dari kamera. Diisi per frame, dibaca health.
         self._lag = LagMonitor()
         # P18: koreksi bertahap offset jam, hanya dengan thread pembaca.
@@ -477,12 +480,14 @@ class CameraSupervisor:
                 self._detector = factory.build_detector(config)
                 if config.auto_warmup:
                     self._detector.warmup()
+        epoch_base = 0 if self._epoch_announced is None else self._epoch_announced + 1
         engine, source, source_fps = factory.build_engine(
             config,
             source_id=camera_id,
             max_frames=self._max_frames,
             wrap_source=wrap_source,
             detector=self._detector,
+            stream_epoch_base=epoch_base,
         )
         self._detector = engine._detector
         engine._zoner = self._zoner
@@ -501,16 +506,25 @@ class CameraSupervisor:
             engine.external_pacing = True
         engine.start()
 
-        self._announce(source_fps, wallclock=self._offset_of(source))
+        # Epoch yang benar-benar dibawa frame sumber (PyAV: epoch_base). Sumber tanpa
+        # timeline (mock/OpenCV) selalu 0: perilaku lama.
+        timeline = getattr(source, "timeline", None)
+        source_epoch = getattr(timeline, "epoch", None) if timeline is not None else None
+        self._announce(source_fps, wallclock=self._offset_of(source),
+                       stream_epoch=source_epoch if isinstance(source_epoch, int) else None)
 
-    def _announce(self, fps: float, wallclock: float) -> None:
+    def _announce(self, fps: float, wallclock: float, stream_epoch: Optional[int] = None) -> None:
         """`camera.online` carries the offset the stream was actually anchored with."""
-        self._assembler.camera_online(
+        clock = self._assembler.camera_online(
             self.spec.camera_id,
             wallclock_now=wallclock,
             fps=fps,
             door_region=self.spec.door_region,
+            stream_epoch=stream_epoch,
         )
+        epoch = getattr(clock, "stream_epoch", None)
+        if isinstance(epoch, int):
+            self._epoch_announced = epoch
 
     def _offset_of(self, source: Any) -> float:
         """
@@ -580,6 +594,7 @@ class CameraSupervisor:
         self._announce(
             self.stats.measured_fps,
             wallclock=frame.metadata.pts_wallclock_offset or time.time(),
+            stream_epoch=epoch if isinstance(epoch, int) else None,
         )
 
     def _remember_live(self, frame: Frame, tracks: Sequence[Track], pts: float) -> None:

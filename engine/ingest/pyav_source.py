@@ -153,6 +153,7 @@ class PyAVSource(BaseFrameSource):
         live_buffer: str = "none",
         av_module: Any = None,
         hwaccel: str = "none",
+        stream_epoch_base: int = 0,
     ) -> None:
         if hwaccel not in ("none", "cuda"):
             raise ValueError(f"Unknown hwaccel {hwaccel!r}. Expected 'none' or 'cuda'.")
@@ -210,7 +211,9 @@ class PyAVSource(BaseFrameSource):
         self._declared_frames: int = 0
         self._duration_seconds: float = 0.0
 
-        self.timeline = StreamTimeline(source_id=source_id)
+        # ea-r14: sumber yang dibuat ulang supervisor (kamera dibuka ulang) mulai dari
+        # epoch terakhir + 1, bukan 0. begin_epoch() pertama tidak menaikkan epoch.
+        self.timeline = StreamTimeline(source_id=source_id, epoch=int(stream_epoch_base))
         self.fidelity = TimelineFidelity() if measure_timeline_fidelity else None
 
     # -- lifecycle --------------------------------------------------------

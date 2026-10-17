@@ -7,6 +7,47 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-10-17 · paket ea-r14 — stream_epoch saat kamera dibuka ulang, penjaga onnxruntime CPU, cek NVRTC, alat diagnosis OSNet
+
+Dasar: ea-r13. Jalur EA + EB (menyentuh `ingest/` dan `factory.py` milik EB). Kontrak dan `backend/` tidak
+disentuh; `engine/ports/` tidak disentuh. Default tidak berubah kecuali dua perbaikan bug di bawah.
+
+**Hasil uji pipa ReID 16–17 Okt (RTX 4060, 5 kamera, 15 menit, model `ain_cepat` 5 epoch).** ReID jalan
+ujung ke ujung (embedding, 55 kelompok ANON berinterval, `person.unidentified_present`), cannot-link 0
+pelanggaran. Dua masalah: (1) validator kontrak GAGAL: `camera.online` cam03 `stream_epoch` 0 -> 0
+setelah `open_failed`, diikuti puluhan "pts mundur 723 -> 0"; (2) worker ReID ±12,9 dtk/batch.
+Diagnosis (2): OSNet di onnxruntime CUDA ±260 ms (batch 1–3) / ±9.500 ms (batch >= 4) vs PyTorch GPU
+±32 ms; bukan CPU fallback, bukan pencarian algoritma, bukan optimasi graf; NVRTC yang hilang
+menambah spam peringatan tetapi bukan penyebab. Tersangka: InstanceNormalization (OSNet-AIN), belum
+dibuktikan (profil per operasi menunggu 4060/1060).
+
+**Apa yang berubah**
+
+- Bug kontrak (EA+EB): `runtime/camera.py` mengingat epoch terakhir yang diumumkan (`_epoch_announced`) dan
+  membuat sumber baru dengan `stream_epoch_base` = epoch itu + 1 (`factory.build_engine/build_source`,
+  `ingest/pyav_source.py`, `StreamTimeline(epoch=...)`); `camera.online` memakai epoch sumber yang sebenarnya
+  (`PresenceAssembler.camera_online(stream_epoch=...)`). Dulu `_build()` membuat sumber PyAV dan assembler
+  baru yang sama-sama mulai dari 0. Sumber tanpa timeline (mock/OpenCV) berperilaku lama. `build_engine`
+  meneruskan argumen baru hanya bila bukan 0. Batasan: epoch disimpan per supervisor; kamera yang dihapus
+  lalu ditambah lagi lewat `set_cameras` tetap mulai dari 0.
+- Bug: `identity/face_onnx.py::_session` menolak start bila CUDA diminta tetapi onnxruntime tidak membawanya
+  (`RecognizerUnavailable`, pesan "tidak membawanya"). Dulu CUDA yang tidak tersedia dibuang diam-diam dan
+  sesi jalan di CPU (kejadian 17 Okt: engine dari env latihan). `onnx_providers: null` tetap bebas.
+- `scripts/check_gpu_env.py`: baris `nvrtc` (OK bila di PATH; PERINGATAN bila hanya di torch/lib, nvidia
+  pip, atau CUDA_PATH, atau tidak ada). Bukan GAGAL.
+- Baru `tools/reid_train/ganti_instancenorm.py` (+ tes): ganti InstanceNormalization di ONNX dengan operasi
+  dasar setara, verifikasi CPU batch 1 dan 4, tolak menulis bila tidak setara, cetak SHA-256, `--ukur-cuda`.
+  BELUM pernah dijalankan (sesi tanpa paket `onnx`). Baru `tools/reid_train/diag_reid_ort.py`,
+  `diag_reid_profile.py`, `diag_reid_torch.py`.
+- Dokumen: `tools/reid_train/README.md` §9a, `docs/SETUP-GPU.md` (dua env, NVRTC), `docs/PETA-KODE.md`.
+
+**Cara uji.** Cloud tanpa PyPI (runner pengganti, kini dengan `monkeypatch` sederhana): engine + kontrak +
+backend 668 lulus / 11 gagal / 121 dilewati; kode sebelum ea-r12 dengan runner yang sama 649 / 11 / 121,
+daftar gagal IDENTIK (fastapi, libreyolo, uji timing). +19 tes: `test_epoch_buka_ulang.py` 3 (kode lama
+menghasilkan epoch `[0, 0, 0]`), `test_onnx_provider_check.py` +3, `test_check_gpu_env.py` +2, ditambah
+11 tes ea-r12. `policy_grep` bersih. Laptop: `python -m pytest engine/tests contracts/tests -q` dan
+`python -m pytest tools/reid_train/tests -q` (reid-env).
+
 ## 2026-10-16 · paket ea-r13 — Kit latih ReID: query val kosong pada subset RandPerson asli
 
 Dasar: ea-r12. Jalur EA. Hanya `tools/reid_train/` (di luar engine); engine, kontrak, backend tidak disentuh.

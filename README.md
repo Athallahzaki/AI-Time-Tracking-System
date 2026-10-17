@@ -17,6 +17,7 @@ backend menyimpan event mentah dan menurunkan sesi/gap.
 | `docs/DEMO-1060.md` | Profil demo GTX 1060 |
 | `docs/DEMO-REMOTE.md` | Deploy terpisah: engine + MediaMTX di laptop, backend + frontend di Portainer lewat NetBird; uji A/B 4060 |
 | `docs/UJI-LAG.md` | Cara mengukur lag kamera dan umur kotak |
+| `docs/UJI-REID-1060.md` | Uji ReID dari awal di laptop GTX 1060 (latih singkat bila ONNX tidak ada, diagnosis OSNet, uji stream_epoch) |
 | `deploy/README.md` | Topologi deployment dan compose |
 | `docs/arsip/` | Catatan perubahan lama dan dokumen status basi, disimpan apa adanya |
 

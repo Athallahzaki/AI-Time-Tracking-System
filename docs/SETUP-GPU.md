@@ -95,6 +95,21 @@ Yang perlu diketahui:
   `face_detector_model` diarahkan ke berkas itu; berkas asli tidak diubah.
 - GTX 1060 (Pascal) tidak masuk jalur ini.
 
+## Dua env, jangan tertukar (temuan 17 Okt)
+
+Env latihan ReID (`reid-env`, `tools/reid_train/README.md`) memasang `onnxruntime` **CPU**. Engine yang
+dijalankan dari env itu dulu diam-diam memakai CPU untuk rekognisi dan ReID; sejak ea-r14 engine
+menolak start ("onnxruntime ini tidak membawanya"). Pakai dua jendela PowerShell terpisah dan cek
+nama env di prompt. Mencampur aktivasi venv/conda di satu jendela juga bisa merusak Python
+(`No module named 'encodings'`, `sys.prefix` menunjuk folder repo): buka jendela baru.
+
+**NVRTC.** cuDNN 9 mencari `nvrtc64_120_0.dll` lewat PATH (salinan di `torch\lib` tidak cukup).
+Tanpa itu, onnxruntime menulis puluhan "Could not locate nvrtc64_120_0.dll" per panggilan.
+`check_gpu_env.py` memeriksanya (baris `nvrtc`). Perbaikan: tambahkan folder yang memuatnya ke PATH
+(mis. `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin`), atau
+`pip install nvidia-cuda-nvrtc-cu12` lalu tambahkan folder `bin`-nya. NVRTC menghilangkan peringatan
+tetapi TIDAK membuat OSNet di onnxruntime cepat (lihat `tools/reid_train/README.md` §9a).
+
 ## Sumber versi
 
 - Wheel torch cu126 Windows: https://download.pytorch.org/whl/cu126/torch/ (2.14.1, cp310-cp314)

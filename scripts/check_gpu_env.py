@@ -201,6 +201,53 @@ def collect_tensorrt(ort: Any, ort_version: Optional[str]) -> List[Check]:
     return checks
 
 
+NVRTC_POLA_WINDOWS = "nvrtc64_12*.dll"
+NVRTC_POLA_LINUX = "libnvrtc.so.12*"
+
+
+def nvrtc_candidate_dirs(path_env: str, torch_dir: Optional[Path], site_dirs: List[Path],
+                         cuda_path: Optional[str]) -> Tuple[List[Path], List[Path]]:
+    """(folder di PATH, folder lain yang sering memuat NVRTC: torch/lib, nvidia/cuda_nvrtc, CUDA_PATH)."""
+    import os
+    on_path = [Path(p) for p in path_env.split(os.pathsep) if p]
+    others: List[Path] = []
+    if torch_dir is not None:
+        others.append(torch_dir / "lib")
+    for site in site_dirs:
+        others += [site / "nvidia" / "cuda_nvrtc" / "bin", site / "nvidia" / "cuda_nvrtc" / "lib"]
+    if cuda_path:
+        others.append(Path(cuda_path) / "bin")
+    return on_path, others
+
+
+def find_nvrtc(dirs: List[Path], pattern: str) -> Optional[Path]:
+    for folder in dirs:
+        try:
+            hits = sorted(folder.glob(pattern))
+        except OSError:
+            continue
+        if hits:
+            return hits[0]
+    return None
+
+
+def check_nvrtc(on_path: Optional[Path], elsewhere: Optional[Path]) -> Check:
+    """NVRTC (kompiler runtime CUDA) dicari cuDNN 9 untuk sebagian algoritma konvolusi.
+
+    Uji 17 Okt (4060): tanpa NVRTC di PATH, setiap panggilan OSNet di onnxruntime menulis
+    puluhan "Could not locate nvrtc64_120_0.dll". Bukan GAGAL: dengan NVRTC pun OSNet di
+    onnxruntime tetap lambat (lihat CHANGELOG ea-r14), dan model lain jalan tanpanya.
+    """
+    if on_path is not None:
+        return Check("OK", "nvrtc", f"{on_path}")
+    if elsewhere is not None:
+        return Check("PERINGATAN", "nvrtc", f"ada di {elsewhere.parent} tetapi TIDAK di PATH; cuDNN tidak "
+                     "menemukannya. Tambahkan folder itu ke PATH sebelum menjalankan engine.")
+    return Check("PERINGATAN", "nvrtc", "nvrtc64_12*.dll tidak ditemukan. cuDNN akan menulis "
+                 "'Could not locate nvrtc...' berulang. pip install nvidia-cuda-nvrtc-cu12, lalu "
+                 "tambahkan folder bin-nya ke PATH.")
+
+
 def check_driver(text: Optional[str]) -> Check:
     if not text:
         return Check("PERINGATAN", "driver", "nvidia-smi tidak ditemukan")
@@ -278,6 +325,18 @@ def collect(tensorrt: bool = False) -> List[Check]:
 
     if tensorrt:
         checks.extend(collect_tensorrt(ort, getattr(ort, "__version__", None)))
+
+    import os
+    import site
+    pattern = NVRTC_POLA_WINDOWS if os.name == "nt" else NVRTC_POLA_LINUX
+    torch_dir = Path(torch.__file__).parent if torch is not None and getattr(torch, "__file__", None) else None
+    try:
+        site_dirs = [Path(p) for p in site.getsitepackages()]
+    except Exception:  # noqa: BLE001
+        site_dirs = []
+    on_path_dirs, other_dirs = nvrtc_candidate_dirs(os.environ.get("PATH", ""), torch_dir, site_dirs,
+                                                    os.environ.get("CUDA_PATH"))
+    checks.append(check_nvrtc(find_nvrtc(on_path_dirs, pattern), find_nvrtc(other_dirs, pattern)))
 
     av = _module("av")
     if av is None:

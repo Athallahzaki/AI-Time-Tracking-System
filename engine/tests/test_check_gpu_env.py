@@ -92,3 +92,28 @@ def test_pasangan_onnxruntime_tensorrt(ort, trt, status):
     assert check.status == status
     if trt is None:
         assert "tensorrt-cu12-libs==10.9.*" in check.detail and "setup-env-trt.ps1" in check.detail
+
+
+def test_nvrtc_di_path_ok_di_tempat_lain_peringatan(tmp_path):
+    """ea-r14: cuDNN 9 mencari NVRTC lewat PATH; di torch/lib saja tidak cukup (uji 17 Okt)."""
+    di_path, lain = tmp_path / "a", tmp_path / "b"
+    di_path.mkdir(); lain.mkdir()
+    (lain / "nvrtc64_120_0.dll").write_bytes(b"x")
+    assert env.find_nvrtc([di_path], "nvrtc64_12*.dll") is None
+    temuan = env.find_nvrtc([di_path, lain], "nvrtc64_12*.dll")
+    assert temuan is not None and temuan.name == "nvrtc64_120_0.dll"
+    assert env.check_nvrtc(temuan, None).status == "OK"
+    hasil = env.check_nvrtc(None, temuan)
+    assert hasil.status == "PERINGATAN" and "PATH" in hasil.detail
+    assert env.check_nvrtc(None, None).status == "PERINGATAN"
+
+
+def test_folder_kandidat_nvrtc(tmp_path):
+    import os
+    x, y, cuda = tmp_path / "x", tmp_path / "y", tmp_path / "cuda"
+    di_path, lain = env.nvrtc_candidate_dirs(os.pathsep.join([str(x), "", str(y)]), tmp_path / "torch",
+                                             [tmp_path / "site"], str(cuda))
+    assert di_path == [x, y]
+    assert tmp_path / "torch" / "lib" in lain
+    assert tmp_path / "site" / "nvidia" / "cuda_nvrtc" / "bin" in lain
+    assert cuda / "bin" in lain

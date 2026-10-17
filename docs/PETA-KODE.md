@@ -1,7 +1,7 @@
 # Peta Kode
 
 Untuk menemukan file tanpa menjelajah repo. Perbarui saat menambah/memindah modul.
-Per 16 Oktober 2026 (paket ea-r12).
+Per 17 Oktober 2026 (paket ea-r14). Uji ReID di 1060: `docs/UJI-REID-1060.md`.
 
 ## Alur data
 
@@ -26,10 +26,10 @@ frontend (Vue + Vite): dashboard, overlay kotak, enrollment, pengaturan
 | Worker rekognisi asinkron | `pipeline/recognition_worker.py` |
 | Antrean rekognisi berprioritas zona; `pop` per kamera dari scheduler bersama (ea-r12) | `pipeline/zoning.py` (tes `test_scheduler_lintas_kamera.py`) |
 | Scheduler rekognisi: prioritas, kuota per kamera, umur dengan jam bersama (`clock`), `pop(camera_id=)` | `identity/admission.py` (tes `test_admission.py`, `test_scheduler_lintas_kamera.py`) |
-| Decode RTSP/file (PyAV, slot frame terbaru, hwaccel) | `ingest/pyav_source.py` |
+| Decode RTSP/file (PyAV, slot frame terbaru, hwaccel), epoch awal dari supervisor (`stream_epoch_base`) | `ingest/pyav_source.py` |
 | Mailbox frame terbaru generik | `ingest/mailbox.py` |
 | NVDEC (kerangka, menunggu spike) | `ingest/nvdec_source.py` |
-| PTS, epoch, offset jam | `ingest/timeline.py` |
+| PTS, epoch, offset jam; epoch bertahan saat kamera dibuka ulang (`camera.py::_epoch_announced`, ea-r14) | `ingest/timeline.py` (tes `test_epoch_buka_ulang.py`) |
 | D-FINE (LibreYOLO), pra-proses GPU, CUDA graph | `perception/dfine_detector.py` |
 | Satu detector untuk semua kamera, batching, berhenti memanggil model sesudah error GPU fatal (`fatal_error`) | `perception/shared_detector.py` |
 | Pengenal error CUDA fatal (`is_fatal_gpu_error`, pola teks) | `perception/gpu_fatal.py` (tes `test_gpu_fatal.py`) |

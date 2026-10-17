@@ -122,6 +122,18 @@ def _session(path: str, providers: Optional[Sequence[str]], *,
             f"(tersedia: {available}, onnxruntime {getattr(ort, '__version__', '?')}). "
             "Pakai onnxruntime-gpu, atau matikan recognition.onnx_tensorrt."
         )
+    requested = [_provider_name(p) for p in (providers or ())]
+    if "CUDAExecutionProvider" in requested and "CUDAExecutionProvider" not in available:
+        # ea-r14: dulu CUDA yang TIDAK TERSEDIA dibuang diam-diam dari daftar, jadi
+        # pemeriksaan "diminta tapi tidak aktif" di bawah tidak pernah terpicu dan sesi
+        # jalan di CPU (kejadian 17 Okt: engine dijalankan dari env latihan yang
+        # memasang onnxruntime CPU).
+        raise RecognizerUnavailable(
+            f"CUDAExecutionProvider diminta untuk {Path(path).name} tetapi onnxruntime ini tidak "
+            f"membawanya (tersedia: {available}, onnxruntime {getattr(ort, '__version__', '?')}). "
+            "Biasanya env yang salah (onnxruntime CPU, mis. env latihan ReID) atau onnxruntime-gpu "
+            f"tertimpa onnxruntime. Kalau memang ingin CPU, set {providers_key}: [\"CPUExecutionProvider\"]."
+        )
     chosen = [p for p in (providers or available) if _provider_name(p) in available] or available
     names = [_provider_name(p) for p in chosen]
     if "CUDAExecutionProvider" in names:

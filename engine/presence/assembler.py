@@ -127,14 +127,21 @@ class PresenceAssembler:
     # ---------------- kamera ----------------
 
     def camera_online(self, camera_id: str, wallclock_now: float, fps: float,
-                      door_region: Optional[Sequence[float]] = None) -> PtsClock:
-        """Stream baru: epoch naik, offset ditetapkan ulang, pts kembali nol."""
+                      door_region: Optional[Sequence[float]] = None,
+                      stream_epoch: Optional[int] = None) -> PtsClock:
+        """Stream baru: epoch naik, offset ditetapkan ulang, pts kembali nol.
+
+        `stream_epoch` (ea-r14): epoch yang sebenarnya dibawa frame sumber. Wajib
+        diisi pemanggil yang membuat assembler baru per pembukaan stream (supervisor
+        kamera), karena assembler baru tidak tahu epoch sebelumnya.
+        """
         previous = self._clocks.get(camera_id)
-        clock = (
-            previous.reconnect(wallclock_now)
-            if previous is not None
-            else PtsClock(camera_id=camera_id, stream_epoch=0, offset=wallclock_now)
-        )
+        if stream_epoch is not None:
+            clock = PtsClock(camera_id=camera_id, stream_epoch=int(stream_epoch), offset=wallclock_now)
+        elif previous is not None:
+            clock = previous.reconnect(wallclock_now)
+        else:
+            clock = PtsClock(camera_id=camera_id, stream_epoch=0, offset=wallclock_now)
         self._clocks[camera_id] = clock
 
         if door_region is not None:

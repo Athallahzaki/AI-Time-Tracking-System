@@ -30,8 +30,14 @@ def build_source(
     config: EngineConfig,
     max_frames: Optional[int] = None,
     source_id: Optional[str] = None,
+    stream_epoch_base: int = 0,
 ) -> Any:
-    """Constructs the frame source named by the config."""
+    """Constructs the frame source named by the config.
+
+    `stream_epoch_base` (ea-r14): epoch pertama sumber PyAV baru. Supervisor kamera
+    yang membuka ulang stream meneruskan epoch terakhir + 1, supaya `stream_epoch`
+    tidak kembali ke 0 sementara PTS kembali ke 0 (kontrak §4.5).
+    """
     from . import ingest
 
     uri = config.source_uri
@@ -66,6 +72,7 @@ def build_source(
             colour_conversion=config.ingest.colour_conversion,
             live_buffer=config.ingest.live_buffer,
             hwaccel=config.ingest.hwaccel,
+            stream_epoch_base=stream_epoch_base,
         )
     elif config.source_type == "video_file":
         # realtime_pacing=False always. Pacing is a benchmark mode decision
@@ -260,6 +267,7 @@ def build_engine(
     source_id: Optional[str] = None,
     wrap_source: Optional[SourceWrapper] = None,
     detector: Any = None,
+    stream_epoch_base: int = 0,
 ) -> Tuple[Any, Any, float]:
     """
     Wires source, detector and tracker into a VisionEngine.
@@ -291,7 +299,10 @@ def build_engine(
             # jauh lebih murah daripada stream yang dibiarkan menumpuk.
             detector.warmup()
 
-    source = build_source(config, max_frames=max_frames, source_id=source_id)
+    # Hanya diteruskan bila bukan 0: pemanggilan bawaan tetap sama persis dengan
+    # sebelum ea-r14 (ada tes/alat yang mengganti build_source dengan tiruan).
+    extra = {"stream_epoch_base": stream_epoch_base} if stream_epoch_base else {}
+    source = build_source(config, max_frames=max_frames, source_id=source_id, **extra)
     source_fps = resolve_source_fps(config, source)
     # The tracker is always new: its state belongs to one run.
     tracker = build_tracker(config, source_fps=source_fps, detector=detector)

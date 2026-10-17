@@ -195,6 +195,35 @@ beda-orang. Dengan beberapa model, ada tabel perbandingan di akhir. Jumlah pasan
 bila data tim sedikit (puluhan orang), 1% hanyalah beberapa pasangan, jadi perlakukan ambang
 sebagai perkiraan kasar dan ulangi saat crop bertambah. Pakai `--cpu` untuk memaksa CPU.
 
+## 9a. OSNet lambat di onnxruntime (temuan 17 Okt) — diagnosis dan `ganti_instancenorm.py`
+
+Uji 17 Okt di RTX 4060 (onnxruntime-gpu 1.26, torch 2.14.1+cu126, cuDNN 9.10): ONNX hasil
+`export_onnx.py` butuh **±260 ms** per panggilan pada batch 1–3 dan **±9.500 ms** pada batch ≥ 4,
+sedangkan checkpoint yang SAMA di PyTorch GPU ±32 ms di semua batch. Semua node ada di CUDA EP;
+pencarian algoritma cuDNN (EXHAUSTIVE vs HEURISTIC) dan optimasi graf tidak berpengaruh. Akibat di
+gladi: worker ReID ±12,9 dtk/batch, ±10.000 crop ditolak dalam 15 menit.
+
+Alat ukur (simpan di luar repo atau jalankan dari sini; GPU harus kosong):
+
+| Skrip | Env | Isi |
+|---|---|---|
+| `diag_reid_ort.py [onnx]` | vision-engine | versi, penempatan node, waktu batch 1/2/3/4/8 untuk 3 konfigurasi ORT |
+| `diag_reid_profile.py [onnx]` | vision-engine | waktu per JENIS operasi pada batch 1 dan 4 (penentu penyebab) |
+| `diag_reid_torch.py <best.pth> [folder kit]` | reid-env | checkpoint yang sama di PyTorch GPU sebagai pembanding |
+
+Bila profil menunjuk `InstanceNormalization`, ganti operasinya langsung di ONNX (tanpa latih/ekspor
+ulang). Alat menolak menulis bila keluaran tidak setara dengan model asli (CPU, batch 1 dan 4):
+
+```powershell
+# env reid-env (punya onnx + onnxruntime)
+python ganti_instancenorm.py --input X:\data\onnx\osnet_ain_cepat.onnx --output X:\data\onnx\osnet_ain_cepat_tanpa_in.onnx
+# env vision-engine: ukur ulang kecepatannya
+python diag_reid_ort.py X:\data\onnx\osnet_ain_cepat_tanpa_in.onnx
+```
+
+SHA-256 baru dicetak: isi `reid.model_sha256`. Alat ini BELUM pernah dijalankan (sesi pembuatnya
+tanpa paket `onnx`); tesnya `tests/test_ganti_instancenorm.py` wajib dijalankan di reid-env.
+
 ## 10. Kartu model
 
 Untuk setiap ONNX yang akan dipertimbangkan, salin `MODEL-CARD.md`, isi, dan simpan di samping

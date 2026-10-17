@@ -79,3 +79,25 @@ def test_sesi_menerima_provider_beropsi(monkeypatch, tmp_path):
     providers = face_onnx.provider_list(["CUDAExecutionProvider", "CPUExecutionProvider"], 256)
     session = face_onnx._session(_model(tmp_path), providers)
     assert session.requested[0][0] == "CUDAExecutionProvider" and calls["preload"] == 1
+
+
+def test_cuda_diminta_tapi_onnxruntime_cpu_ditolak(monkeypatch, tmp_path):
+    """ea-r14: engine dijalankan dari env latihan ReID (onnxruntime CPU, 17 Okt). CUDA yang
+    tidak TERSEDIA dulu dibuang diam-diam dan sesi jalan di CPU tanpa peringatan."""
+    _fake_ort(monkeypatch, active=["CPUExecutionProvider"],
+              available=("AzureExecutionProvider", "CPUExecutionProvider"))
+    with pytest.raises(face_onnx.RecognizerUnavailable, match="tidak membawanya"):
+        face_onnx._session(_model(tmp_path), ["CUDAExecutionProvider", "CPUExecutionProvider"])
+
+
+def test_cuda_beropsi_juga_diperiksa_ketersediaannya(monkeypatch, tmp_path):
+    _fake_ort(monkeypatch, active=["CPUExecutionProvider"], available=("CPUExecutionProvider",))
+    providers = face_onnx.provider_list(["CUDAExecutionProvider", "CPUExecutionProvider"], 256)
+    with pytest.raises(face_onnx.RecognizerUnavailable, match="tidak membawanya"):
+        face_onnx._session(_model(tmp_path), providers)
+
+
+def test_tanpa_daftar_provider_tidak_ditolak(monkeypatch, tmp_path):
+    """onnx_providers: null (bawaan) = pakai yang tersedia; perilaku lama."""
+    _fake_ort(monkeypatch, active=["CPUExecutionProvider"], available=("CPUExecutionProvider",))
+    face_onnx._session(_model(tmp_path), None)
