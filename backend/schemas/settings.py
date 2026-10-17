@@ -99,3 +99,30 @@ class CameraScheduleSettings(BaseModel):
         except Exception as exc:
             raise ValueError("unknown timezone") from exc
         return value
+
+
+class WeeklySettingsRequest(BaseModel):
+    days: Dict[str, Any]
+
+
+class EmailRecapSettings(BaseModel):
+    recap_recipients: List[str] = Field(default_factory=list)
+    recap_send_time: str = "18:00"
+
+    @field_validator("recap_recipients")
+    @classmethod
+    def validate_recap_emails(cls, values):
+        if any("@" not in value for value in values):
+            raise ValueError("invalid email address")
+        return values
+
+    @field_validator("recap_send_time")
+    @classmethod
+    def validate_recap_time(cls, value):
+        parts = value.split(":")
+        if len(parts) != 2 or not all(part.isdigit() for part in parts):
+            raise ValueError("recap_send_time must use HH:MM")
+        hour, minute = map(int, parts)
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise ValueError("recap_send_time must use HH:MM")
+        return value

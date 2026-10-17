@@ -34,6 +34,8 @@ class UserCreateRequest(BaseModel):
     ]
 
     employee_internal_id: Optional[int] = Field(default=None, ge=1)
+    employee_id: Optional[str] = Field(default=None, min_length=1, max_length=50)
+    must_change_password: bool = False
 
 
 class UserUpdateRequest(BaseModel):
@@ -42,3 +44,8 @@ class UserUpdateRequest(BaseModel):
     role: Optional[Literal["admin", "viewer"]] = None
     enabled: Optional[bool] = None
     employee_internal_id: Optional[int] = Field(default=None, ge=1)
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=8, max_length=256)

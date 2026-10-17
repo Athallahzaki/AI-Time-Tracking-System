@@ -17,6 +17,7 @@ class EmployeeCreateRequest(BaseModel):
         min_length=1,
         max_length=200,
     )
+    division: Optional[str] = Field(default=None, max_length=100)
     email: Optional[str] = Field(
         default=None,
         max_length=254,
@@ -35,8 +36,9 @@ class EmployeeUpdateRequest(BaseModel):
         min_length=1,
         max_length=200,
     )
+    division: Optional[str] = Field(default=None, max_length=100)
     email: Optional[str] = Field(
-        default=...,
+        default=None,
         max_length=254,
         description="Set to null to clear email.",
     )

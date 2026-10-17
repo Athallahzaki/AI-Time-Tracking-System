@@ -17,6 +17,8 @@ from backend.routers import (
     notifications,
     reports,
     hr_review,
+    reviews,
+    me,
     settings as settings_router,
     stats,
     streams,
@@ -120,6 +122,8 @@ app.include_router(notifications.router)
 app.include_router(auth.router)
 app.include_router(reports.router)
 app.include_router(hr_review.router)
+app.include_router(reviews.router)
+app.include_router(me.router)
 
 @app.get("/")
 def root():

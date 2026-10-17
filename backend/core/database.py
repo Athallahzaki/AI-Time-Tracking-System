@@ -82,6 +82,9 @@ def _migrate_employees_schema(
             """
         )
 
+    if "division" not in columns:
+        conn.execute("ALTER TABLE employees ADD COLUMN division TEXT")
+
     if "status" not in columns:
         conn.execute(
             """
@@ -115,6 +118,8 @@ def _migrate_users_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN employee_internal_id INTEGER")
     if "updated_at" not in columns:
         conn.execute("ALTER TABLE users ADD COLUMN updated_at REAL")
+    if "must_change_password" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0")
     conn.execute("UPDATE users SET updated_at = created_at WHERE updated_at IS NULL")
 
 def init_database() -> None:
@@ -145,6 +150,7 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             employee_id TEXT UNIQUE NOT NULL,
             name TEXT NOT NULL,
+            division TEXT,
             email TEXT,
             status TEXT NOT NULL DEFAULT 'active',
             created_at REAL NOT NULL,
@@ -162,6 +168,7 @@ def _create_schema(conn: sqlite3.Connection) -> None:
         role TEXT NOT NULL,
         enabled INTEGER NOT NULL DEFAULT 1,
         employee_internal_id INTEGER,
+        must_change_password INTEGER NOT NULL DEFAULT 0,
         created_at REAL NOT NULL,
         updated_at REAL NOT NULL,
         FOREIGN KEY(employee_internal_id) REFERENCES employees(id) ON DELETE RESTRICT
@@ -359,10 +366,40 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             attributed_at REAL NOT NULL,
             needs_hr_review INTEGER NOT NULL DEFAULT 0,
             review_reason TEXT,
+            track_uuid TEXT,
+            camera_id TEXT,
+            window_start REAL,
+            window_end REAL,
+            evidence TEXT,
             reviewed_at REAL,
             reviewed_by TEXT,
             UNIQUE(event_outbox_id, event_seq),
             FOREIGN KEY(employee_internal_id) REFERENCES employees(id) ON DELETE RESTRICT
+        )
+    """)
+    attribution_columns = set(_columns(conn, "identity_attributions"))
+    for column, sql_type in (("track_uuid", "TEXT"), ("camera_id", "TEXT"),
+                             ("window_start", "REAL"), ("window_end", "REAL"),
+                             ("evidence", "TEXT")):
+        if column not in attribution_columns:
+            conn.execute(f"ALTER TABLE identity_attributions ADD COLUMN {column} {sql_type}")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS settings_audit (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            at REAL NOT NULL,
+            actor TEXT NOT NULL,
+            setting TEXT NOT NULL,
+            old_value TEXT,
+            new_value TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS review_decisions (
+            review_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            decided_by TEXT NOT NULL,
+            decided_at REAL NOT NULL,
+            note TEXT
         )
     """)
 
@@ -747,6 +784,7 @@ def get_enrollments() -> List[Dict[str, Any]]:
 def create_employee(
     employee_id: str,
     name: str,
+    division: Optional[str] = None,
     email: Optional[str] = None,
     status: str = "active",
 ) -> Dict[str, Any]:
@@ -757,16 +795,17 @@ def create_employee(
         cursor = conn.execute(
             """
             INSERT INTO employees (
-                employee_id, name, email, status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                employee_id, name, division, email, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (employee_id, name, email, status, now, now),
+            (employee_id, name, division, email, status, now, now),
         )
         internal_id = cursor.lastrowid
     return {
         "id": internal_id,
         "employee_id": employee_id,
         "name": name,
+        "division": division,
         "email": email,
         "status": status,
         "created_at": now,
@@ -780,7 +819,7 @@ def get_employees(
     """List all employees. Optionally filter by status ('active' / 'inactive')."""
     init_database()
     query = """
-        SELECT id, employee_id, name, email, status, created_at, updated_at
+        SELECT id, employee_id, name, division, email, status, created_at, updated_at
         FROM employees
     """
     params: List[Any] = []
@@ -795,10 +834,11 @@ def get_employees(
             "id": row[0],
             "employee_id": row[1],
             "name": row[2],
-            "email": row[3],
-            "status": row[4],
-            "created_at": row[5],
-            "updated_at": row[6],
+            "division": row[3],
+            "email": row[4],
+            "status": row[5],
+            "created_at": row[6],
+            "updated_at": row[7],
         }
         for row in rows
     ]
@@ -810,7 +850,7 @@ def get_employee_by_id(internal_id: int) -> Optional[Dict[str, Any]]:
     with connect() as conn:
         row = conn.execute(
             """
-            SELECT id, employee_id, name, email, status, created_at, updated_at
+            SELECT id, employee_id, name, division, email, status, created_at, updated_at
             FROM employees WHERE id = ?
             """,
             (int(internal_id),),
@@ -821,10 +861,11 @@ def get_employee_by_id(internal_id: int) -> Optional[Dict[str, Any]]:
         "id": row[0],
         "employee_id": row[1],
         "name": row[2],
-        "email": row[3],
-        "status": row[4],
-        "created_at": row[5],
-        "updated_at": row[6],
+        "division": row[3],
+        "email": row[4],
+        "status": row[5],
+        "created_at": row[6],
+        "updated_at": row[7],
     }
 
 
@@ -834,7 +875,7 @@ def get_employee_by_employee_id(employee_id: str) -> Optional[Dict[str, Any]]:
     with connect() as conn:
         row = conn.execute(
             """
-            SELECT id, employee_id, name, email, status, created_at, updated_at
+            SELECT id, employee_id, name, division, email, status, created_at, updated_at
             FROM employees WHERE employee_id = ?
             """,
             (str(employee_id),),
@@ -845,10 +886,11 @@ def get_employee_by_employee_id(employee_id: str) -> Optional[Dict[str, Any]]:
         "id": row[0],
         "employee_id": row[1],
         "name": row[2],
-        "email": row[3],
-        "status": row[4],
-        "created_at": row[5],
-        "updated_at": row[6],
+        "division": row[3],
+        "email": row[4],
+        "status": row[5],
+        "created_at": row[6],
+        "updated_at": row[7],
     }
 
 
@@ -856,6 +898,7 @@ def update_employee(
     internal_id: int,
     employee_id: Optional[str] = None,
     name: Optional[str] = None,
+    division: Optional[str] = ...,
     email: Optional[str] = ...,  # type: ignore[assignment]  # sentinel
     status: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
@@ -873,6 +916,9 @@ def update_employee(
     if name is not None:
         sets.append("name = ?")
         params.append(name)
+    if division is not ...:
+        sets.append("division = ?")
+        params.append(division)
     if email is not ...:
         sets.append("email = ?")
         params.append(email)
@@ -894,6 +940,20 @@ def update_employee(
         if cursor.rowcount == 0:
             return None
     return get_employee_by_id(internal_id)
+
+
+def disable_employee_access(internal_id: int, person_id: str) -> None:
+    """Deactivate linked login and remove current biometric references only.
+
+    Historical protocol events remain untouched.
+    """
+    init_database()
+    with connect() as conn:
+        conn.execute(
+            "UPDATE users SET enabled = 0, updated_at = ? WHERE employee_internal_id = ?",
+            (time.time(), int(internal_id)),
+        )
+        conn.execute("DELETE FROM enrollments WHERE person_id = ?", (person_id,))
 
 
 # ---------------------------------------------------------------------------
@@ -1076,6 +1136,17 @@ def get_protocol_events(
     ]
 
 
+def get_track_history(track_uuid: str, before_ts: float, lookback_seconds: float = 600.0) -> List[Dict[str, Any]]:
+    """Return immutable evidence candidates for conservative backward ReID."""
+    init_database()
+    with connect() as conn:
+        rows = conn.execute("""
+            SELECT timestamp, type, payload FROM protocol_events
+            WHERE timestamp BETWEEN ? AND ? AND payload LIKE ? ORDER BY timestamp ASC
+        """, (float(before_ts) - float(lookback_seconds), float(before_ts), f'%"track_uuid": "{track_uuid}"%')).fetchall()
+    return [{"timestamp": row[0], "type": row[1], "payload": json.loads(row[2])} for row in rows]
+
+
 def get_presence_intervals(
     start_ts: float,
     end_ts: float,
@@ -1085,16 +1156,31 @@ def get_presence_intervals(
     init_database()
     query = (
         "SELECT payload FROM protocol_events WHERE type = 'presence.interval' "
-        "AND person_id IS NOT NULL AND end_ts >= ? AND start_ts < ?"
+        "AND end_ts >= ? AND start_ts < ?"
     )
     params: List[Any] = [float(start_ts), float(end_ts)]
-    if person_id is not None:
-        query += " AND person_id = ?"
-        params.append(str(person_id))
     query += " ORDER BY start_ts ASC"
     with connect() as conn:
         rows = conn.execute(query, params).fetchall()
-    return [json.loads(row[0]) for row in rows]
+    items = [json.loads(row[0]) for row in rows]
+    attributions = get_effective_attributions(start_ts, end_ts)
+    for item in items:
+        item_start = _parse_ts(item.get("start_at")) or start_ts
+        item_end = _parse_ts(item.get("end_at")) or end_ts
+        for attribution in attributions:
+            same_track = attribution.get("track_uuid") and attribution["track_uuid"] == item.get("track_uuid")
+            same_original = attribution.get("original_person_id") is not None and str(attribution["original_person_id"]) == str(item.get("person_id"))
+            same_camera = not attribution.get("camera_id") or attribution["camera_id"] == item.get("camera_id")
+            overlaps = item_end >= float(attribution.get("window_start") or item_start) and item_start <= float(attribution.get("window_end") or item_end)
+            if same_camera and overlaps and (same_track or same_original):
+                item["original_person_id"] = item.get("person_id")
+                item["person_id"] = str(attribution["employee_id"])
+                item["identity_source"] = "reid_retro"
+                item["attribution_confidence"] = attribution.get("attribution_confidence")
+                break
+    if person_id is not None:
+        items = [item for item in items if str(item.get("person_id")) == str(person_id)]
+    return items
 
 
 def get_known_person_ids() -> List[str]:
@@ -1116,6 +1202,7 @@ def create_user(
     password_hash: str,
     role: str,
     employee_internal_id: Optional[int] = None,
+    must_change_password: bool = False,
 ) -> Dict[str, Any]:
     init_database()
 
@@ -1130,16 +1217,18 @@ def create_user(
                 role,
                 enabled,
                 employee_internal_id,
+                must_change_password,
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, ?, 1, ?, ?, ?)
+            VALUES (?, ?, ?, 1, ?, ?, ?, ?)
             """,
             (
                 username,
                 password_hash,
                 role,
                 employee_internal_id,
+                1 if must_change_password else 0,
                 now,
                 now,
             ),
@@ -1153,6 +1242,7 @@ def create_user(
         "role": role,
         "enabled": True,
         "employee_internal_id": employee_internal_id,
+        "must_change_password": must_change_password,
         "created_at": now,
         "updated_at": now,
     }
@@ -1173,6 +1263,7 @@ def get_user_by_username(
                 role,
                 enabled,
                 employee_internal_id,
+                must_change_password,
                 created_at,
                 updated_at
             FROM users
@@ -1191,8 +1282,9 @@ def get_user_by_username(
         "role": row[3],
         "enabled": bool(row[4]),
         "employee_internal_id": row[5],
-        "created_at": row[6],
-        "updated_at": row[7],
+        "must_change_password": bool(row[6]),
+        "created_at": row[7],
+        "updated_at": row[8],
     }
 
 
@@ -1202,7 +1294,7 @@ def get_users() -> List[Dict[str, Any]]:
     with connect() as conn:
         rows = conn.execute(
             """
-            SELECT id, username, role, enabled, employee_internal_id, created_at, updated_at
+            SELECT id, username, role, enabled, employee_internal_id, must_change_password, created_at, updated_at
             FROM users
             ORDER BY username
             """
@@ -1215,8 +1307,9 @@ def get_users() -> List[Dict[str, Any]]:
             "role": row[2],
             "enabled": bool(row[3]),
             "employee_internal_id": row[4],
-            "created_at": row[5],
-            "updated_at": row[6],
+            "must_change_password": bool(row[5]),
+            "created_at": row[6],
+            "updated_at": row[7],
         }
         for row in rows
     ]
@@ -1266,6 +1359,7 @@ def get_user_by_session(
                 u.role,
                 u.enabled,
                 u.employee_internal_id,
+                u.must_change_password,
                 s.expires_at
             FROM auth_sessions s
             JOIN users u ON u.id = s.user_id
@@ -1287,13 +1381,14 @@ def get_user_by_session(
         "role": row[2],
         "enabled": bool(row[3]),
         "employee_internal_id": row[4],
-        "expires_at": row[5],
+        "must_change_password": bool(row[5]),
+        "expires_at": row[6],
     }
 
 
 def get_user_by_id(user_id: int, include_password: bool = False) -> Optional[Dict[str, Any]]:
     init_database()
-    fields = "id, username, role, enabled, employee_internal_id, created_at, updated_at"
+    fields = "id, username, role, enabled, employee_internal_id, must_change_password, created_at, updated_at"
     if include_password:
         fields += ", password_hash"
     with connect() as conn:
@@ -1303,10 +1398,10 @@ def get_user_by_id(user_id: int, include_password: bool = False) -> Optional[Dic
     result = {
         "id": row[0], "username": row[1], "role": row[2],
         "enabled": bool(row[3]), "employee_internal_id": row[4],
-        "created_at": row[5], "updated_at": row[6],
+        "must_change_password": bool(row[5]), "created_at": row[6], "updated_at": row[7],
     }
     if include_password:
-        result["password_hash"] = row[7]
+        result["password_hash"] = row[8]
     return result
 
 
@@ -1329,6 +1424,7 @@ def update_user(
     role: Optional[str] = None,
     enabled: Optional[bool] = None,
     employee_internal_id: Any = ...,
+    must_change_password: Optional[bool] = None,
 ) -> Optional[Dict[str, Any]]:
     init_database()
     sets: List[str] = []
@@ -1344,6 +1440,9 @@ def update_user(
     if employee_internal_id is not ...:
         sets.append("employee_internal_id = ?")
         params.append(employee_internal_id)
+    if must_change_password is not None:
+        sets.append("must_change_password = ?")
+        params.append(1 if must_change_password else 0)
     if not sets:
         return get_user_by_id(user_id)
     sets.append("updated_at = ?")
@@ -1497,6 +1596,29 @@ def set_app_setting(key: str, value: Any) -> None:
         """, (key, json.dumps(value), time.time()))
 
 
+def add_settings_audit(actor: str, setting: str, old_value: Any, new_value: Any) -> None:
+    init_database()
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO settings_audit(at, actor, setting, old_value, new_value) VALUES (?, ?, ?, ?, ?)",
+            (time.time(), actor, setting, json.dumps(old_value), json.dumps(new_value)),
+        )
+
+
+def get_settings_audit(limit: int = 50) -> List[Dict[str, Any]]:
+    init_database()
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT id, at, actor, setting, old_value, new_value FROM settings_audit ORDER BY id DESC LIMIT ?",
+            (int(limit),),
+        ).fetchall()
+    return [
+        {"id": str(row[0]), "at": row[1], "actor": row[2], "setting": row[3],
+         "old_value": row[4], "new_value": row[5]}
+        for row in rows
+    ]
+
+
 def claim_report_run(report_date: str, report_type: str = "daily", revision: int = 1) -> Optional[int]:
     init_database()
     now = time.time()
@@ -1584,16 +1706,38 @@ def save_attribution(record: Dict[str, Any]) -> bool:
             INSERT OR IGNORE INTO identity_attributions(
                 event_outbox_id, event_seq, original_person_id, employee_internal_id,
                 attribution_source, attribution_confidence, attributed_at,
-                needs_hr_review, review_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                needs_hr_review, review_reason, track_uuid, camera_id,
+                window_start, window_end, evidence
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             record.get("event_outbox_id", ""), int(record["event_seq"]),
             record.get("original_person_id"), record.get("employee_internal_id"),
             record.get("attribution_source", "manual"), record.get("attribution_confidence"),
             time.time(), 1 if record.get("needs_hr_review") else 0,
             record.get("review_reason"),
+            record.get("track_uuid"), record.get("camera_id"),
+            record.get("window_start"), record.get("window_end"),
+            json.dumps(record.get("evidence", [])),
         ))
     return cursor.rowcount > 0
+
+
+def get_effective_attributions(start_ts: float, end_ts: float) -> List[Dict[str, Any]]:
+    init_database()
+    with connect() as conn:
+        rows = conn.execute("""
+            SELECT a.original_person_id, e.employee_id, a.track_uuid, a.camera_id,
+                   a.window_start, a.window_end, a.attribution_source,
+                   a.attribution_confidence
+            FROM identity_attributions a
+            JOIN employees e ON e.id = a.employee_internal_id
+            WHERE a.needs_hr_review = 0
+              AND COALESCE(a.window_end, a.attributed_at) >= ?
+              AND COALESCE(a.window_start, a.attributed_at) < ?
+        """, (float(start_ts), float(end_ts))).fetchall()
+    keys = ("original_person_id", "employee_id", "track_uuid", "camera_id",
+            "window_start", "window_end", "attribution_source", "attribution_confidence")
+    return [dict(zip(keys, row)) for row in rows]
 
 
 def get_hr_reviews(unresolved_only: bool = True) -> List[Dict[str, Any]]:
@@ -1620,6 +1764,44 @@ def resolve_hr_review(review_id: int, reviewed_by: str) -> bool:
             WHERE id = ? AND reviewed_at IS NULL
         """, (time.time(), reviewed_by, int(review_id)))
     return cursor.rowcount > 0
+
+
+def get_review_decision(review_id: str) -> Optional[Dict[str, Any]]:
+    init_database()
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT status, decided_by, decided_at, note FROM review_decisions WHERE review_id = ?",
+            (review_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    return {"status": row[0], "decided_by": row[1], "decided_at": row[2], "note": row[3]}
+
+
+def save_review_decision(review_id: str, status: str, decided_by: str, note: Optional[str]) -> None:
+    init_database()
+    with connect() as conn:
+        conn.execute("""
+            INSERT INTO review_decisions(review_id, status, decided_by, decided_at, note)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(review_id) DO UPDATE SET status = excluded.status,
+                decided_by = excluded.decided_by, decided_at = excluded.decided_at, note = excluded.note
+        """, (review_id, status, decided_by, time.time(), note))
+
+
+def apply_attribution_review(employee_internal_id: int, start_ts: float, end_ts: float,
+                             confirmed: bool, reviewed_by: str) -> int:
+    init_database()
+    with connect() as conn:
+        cursor = conn.execute("""
+            UPDATE identity_attributions SET
+                needs_hr_review = CASE WHEN ? THEN 0 ELSE needs_hr_review END,
+                reviewed_at = ?, reviewed_by = ?
+            WHERE employee_internal_id = ? AND attributed_at >= ? AND attributed_at < ?
+              AND reviewed_at IS NULL
+        """, (1 if confirmed else 0, time.time(), reviewed_by, int(employee_internal_id),
+              float(start_ts), float(end_ts)))
+    return cursor.rowcount
 
 
 # ---------------------------------------------------------------------------

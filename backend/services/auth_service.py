@@ -94,6 +94,7 @@ class AuthService:
         password: str,
         role: str,
         employee_internal_id: Optional[int] = None,
+        must_change_password: bool = False,
     ) -> Dict[str, Any]:
         username = username.strip()
 
@@ -126,6 +127,7 @@ class AuthService:
             ),
             role=role,
             employee_internal_id=employee_internal_id,
+            must_change_password=must_change_password,
         )
 
     def login(
@@ -167,6 +169,11 @@ class AuthService:
             expires_at=expires_at,
         )
 
+        employee = (
+            get_employee_by_id(user["employee_internal_id"])
+            if user.get("employee_internal_id") else None
+        )
+
         return {
             "access_token": raw_token,
             "token_type": "bearer",
@@ -176,6 +183,10 @@ class AuthService:
                 "username": user["username"],
                 "role": user["role"],
                 "employee_internal_id": user.get("employee_internal_id"),
+                "employee_uid": str(employee["id"]) if employee else None,
+                "employee_id": employee["employee_id"] if employee else None,
+                "name": employee["name"] if employee else None,
+                "must_change_password": user.get("must_change_password", False),
             },
         }
 

@@ -6,6 +6,7 @@ from datetime import datetime
 import smtplib
 import ssl
 import threading
+import time
 from email.message import EmailMessage
 from typing import Any, Dict, Optional
 
@@ -300,55 +301,42 @@ class EmailService:
             filename, content, maintype, subtype = attachment
             email.add_attachment(content, maintype=maintype, subtype=subtype, filename=filename)
 
+        last_error = None
+        for attempt in range(1, 4):
+            try:
+                self._deliver_message(email)
+                return
+            except (smtplib.SMTPAuthenticationError, smtplib.SMTPRecipientsRefused) as exc:
+                # Permanent errors: retrying risks account lockout or duplicate noise.
+                raise EmailDeliveryError(str(exc)) from exc
+            except (smtplib.SMTPException, OSError) as exc:
+                last_error = exc
+                if attempt < 3:
+                    logger.warning("SMTP attempt %s/3 failed; retrying", attempt)
+                    time.sleep(0.5 * (2 ** (attempt - 1)))
+        logger.exception("SMTP send failed after retries", exc_info=last_error)
+        raise EmailDeliveryError(str(last_error)) from last_error
+
+    def _deliver_message(self, email: EmailMessage) -> None:
         context = ssl.create_default_context()
-
-        try:
-            if settings.smtp_security == "ssl":
-                with smtplib.SMTP_SSL(
-                    settings.smtp_host,
-                    settings.smtp_port,
-                    timeout=settings.smtp_timeout_seconds,
-                    context=context,
-                ) as smtp:
-                    if settings.smtp_username:
-                        smtp.login(
-                            settings.smtp_username,
-                            settings.smtp_password,
-                        )
-
-                    smtp.send_message(email)
-
-            else:
-                with smtplib.SMTP(
-                    settings.smtp_host,
-                    settings.smtp_port,
-                    timeout=settings.smtp_timeout_seconds,
-                ) as smtp:
-                    smtp.ehlo()
-
-                    if settings.smtp_security == "starttls":
-                        smtp.starttls(context=context)
-                        smtp.ehlo()
-
-                    if settings.smtp_username:
-                        smtp.login(
-                            settings.smtp_username,
-                            settings.smtp_password,
-                        )
-
-                    smtp.send_message(email)
-
-        except (
-            smtplib.SMTPException,
-            OSError,
-        ) as exc:
-            logger.exception(
-                "SMTP send failed"
-            )
-
-            raise EmailDeliveryError(
-                str(exc)
-            ) from exc
+        if settings.smtp_security == "ssl":
+            with smtplib.SMTP_SSL(
+                settings.smtp_host, settings.smtp_port,
+                timeout=settings.smtp_timeout_seconds, context=context,
+            ) as smtp:
+                self._login_if_required(smtp)
+                smtp.send_message(email)
+            return
+        with smtplib.SMTP(
+            settings.smtp_host, settings.smtp_port,
+            timeout=settings.smtp_timeout_seconds,
+        ) as smtp:
+            smtp.ehlo()
+            if settings.smtp_security == "starttls":
+                smtp.starttls(context=context)
+                smtp.ehlo()
+            self._login_if_required(smtp)
+            smtp.send_message(email)
 
     def send_report(self, subject: str, body: str, filename: str, content: bytes,
                     recipients: list[str], cc: Optional[list[str]] = None) -> None:

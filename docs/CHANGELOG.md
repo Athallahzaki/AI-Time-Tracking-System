@@ -1581,3 +1581,18 @@ Perbaikan atas audit `claude/audit-masalah-2026-09-23.md`. Keputusan yang dipaka
 - Pukul 12:00–13:00 zona `Asia/Jakarta`, validasi dan pemakaian sama-sama dijeda.
 - Jatah pemakaian adalah 30 menit per pegawai per tanggal lokal dan pemakaian kunjungan yang selesai disimpan di SQLite.
 - Overlay video menampilkan fase validasi, pemakaian harian, jeda istirahat, peringatan, dan batas tercapai, termasuk pada grid compact.
+## 2026-10-16 — Backend completion and real frontend contracts
+
+- Added backward-compatible employee/user migrations, employee division,
+  immutable employee linkage, mandatory viewer linkage, temporary-password
+  workflow, and last-active-admin protection.
+- Added authenticated, employee-scoped REST/SSE plus HttpOnly video session
+  cookie and nginx `auth_request` for HLS, WHEP, and demo video.
+- Added weekday break schedule, engine schedule, HR/email/report settings, and
+  append-only settings audit.
+- Added daily report API, five-sheet XLSX, idempotent scheduler/retry,
+  dirty/follow-up revisions, and frontend-compatible report ranges.
+- Added non-destructive backward ReID attribution, evidence windows, conflict
+  review, recomputation overlay, and HR review decisions.
+- Added security matrix, Windows E2E checklist, and regression cases.
+

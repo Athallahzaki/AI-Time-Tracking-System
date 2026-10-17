@@ -19,8 +19,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 LAUNCHER_VERSION = "2026.09.22-windows-v2"
 MODE_CONFIGS = {
-    "mock": ROOT / "backend" / "configs" / "cameras.demo.yaml",
-    "direct": ROOT / "backend" / "configs" / "cameras.direct.yaml",
+    "mock": ROOT / "backend" / "configs" / "cameras.yaml",
+    "direct": ROOT / "backend" / "configs" / "cameras.yaml",
     "mediamtx": ROOT / "backend" / "configs" / "cameras.mediamtx.yaml",
 }
 
