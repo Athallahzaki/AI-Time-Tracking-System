@@ -1,7 +1,7 @@
 # Peta Kode
 
 Untuk menemukan file tanpa menjelajah repo. Perbarui saat menambah/memindah modul.
-Per 17 Oktober 2026 (paket ea-r14). Uji ReID di 1060: `docs/UJI-REID-1060.md`.
+Per 18 Oktober 2026 (paket be-r1). Uji ReID di 1060: `docs/UJI-REID-1060.md`.
 
 ## Alur data
 
@@ -55,9 +55,10 @@ frontend (Vue + Vite): dashboard, overlay kotak, enrollment, pengaturan
 |---|---|
 | App, daftar router, startup | `main.py` |
 | Config env, database (WAL), keamanan, state | `core/config.py`, `core/database.py`, `core/security.py`, `core/state.py` |
+| Aturan ID ANON- (dicadangkan, bukan karyawan): `is_anon_id`, dipakai ledger/pelanggaran/state/skema employee | `core/identity.py` (tes `test_anon_identity_resolved.py`) |
 | Router (`/api/...`) | `routers/attendance.py`, `auth.py`, `cameras.py`, `enrollments.py`, `notifications.py`, `settings.py`, `stats.py`, `streams.py` (`/api/detections/*`), `system.py`, `violations.py` |
 | Skema Pydantic | `schemas/*.py` (`protocol.py` = pesan engine) |
-| Koneksi ke engine, adaptasi protokol, ingest event | `services/engine_client.py`, `engine_connection_manager.py`, `engine_integration.py`, `protocol_adapter.py`, `event_ingestion.py` |
+| Koneksi ke engine, adaptasi protokol, ingest event (termasuk `identity.resolved` -> atribusi `reid_retro`, `_resolve_identity`) | `services/engine_client.py`, `engine_connection_manager.py`, `engine_integration.py`, `protocol_adapter.py`, `event_ingestion.py` |
 | Jatah free time (ledger kunjungan) | `services/free_time.py`, `break_policy.py`, `policy_service.py` (`configs/policy.yaml`) |
 | Pelanggaran, notifikasi, email | `services/violation_service.py`, `notification_service.py`, `email_service.py` |
 | Login/pengguna | `services/auth_service.py` |

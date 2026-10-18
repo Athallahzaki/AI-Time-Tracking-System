@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
-from typing import Any, Dict
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
 
 from backend.services.violation_service import violation_service
 from backend.core.database import (
-    get_track_history, mark_report_dirty, save_attribution, save_protocol_event,
+    get_protocol_events, get_track_history, mark_report_dirty, save_attribution,
+    save_protocol_event,
 )
 from backend.core.database import get_employee_by_employee_id
 from backend.services.break_policy import break_policy
@@ -21,7 +22,73 @@ def _timestamp(value: str) -> float:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
 
 
+def _local_dates(start_ts: float, end_ts: float) -> List[str]:
+    """Semua tanggal lokal yang disentuh rentang [start_ts, end_ts]."""
+    first = datetime.fromtimestamp(start_ts, break_policy.timezone).date()
+    last = datetime.fromtimestamp(max(start_ts, end_ts), break_policy.timezone).date()
+    dates = []
+    while first <= last:
+        dates.append(first.isoformat())
+        first += timedelta(days=1)
+    return dates
+
+
 class EventIngestionService:
+    def _resolve_identity(self, event: Dict[str, Any], outbox_id: str, seq: int,
+                          event_time: float) -> List[str]:
+        """Pindahkan kelompok ANON ke karyawan (atribusi mundur, identity_source reid_retro).
+
+        Mengembalikan tanggal lokal yang perlu dinilai ulang pelanggarannya
+        (kosong bila karyawan tujuan tidak ada di master: perlu HR review).
+        Atribusi tidak dibatasi satu kamera karena kelompok ANON bisa lintas
+        kamera; jendelanya mencakup semua interval yang dipindah.
+        """
+        anon_id = str(event.get("anon_id") or "")
+        target = str(event.get("person_id") or "")
+        moved = {str(item) for item in event.get("moved_intervals") or []}
+        employee = get_employee_by_employee_id(target)
+
+        starts: List[float] = []
+        ends: List[float] = []
+        if moved:
+            for row in get_protocol_events(event_type="presence.interval"):
+                payload = row["payload"]
+                if str(payload.get("interval_id")) in moved and payload.get("person_id") == anon_id:
+                    starts.append(_timestamp(payload["start_at"]))
+                    ends.append(_timestamp(payload["end_at"]))
+        window_start = min(starts, default=event_time)
+        window_end = max(ends, default=event_time)
+
+        review_reason: Optional[str] = None if employee is not None else "missing_employee"
+        save_attribution({
+            "event_outbox_id": outbox_id,
+            "event_seq": seq,
+            "original_person_id": anon_id,
+            "employee_internal_id": employee.get("id") if employee else None,
+            "attribution_source": "reid_retro",
+            "attribution_confidence": 1.0 if employee is not None else 0.5,
+            "needs_hr_review": review_reason is not None,
+            "review_reason": review_reason,
+            "track_uuid": None,
+            "camera_id": None,
+            "window_start": window_start,
+            "window_end": window_end,
+            "evidence": [{
+                "type": "identity.resolved", "seq": seq, "reason": event.get("reason"),
+                "trigger_track_uuid": event.get("trigger_track_uuid"),
+                "track_uuids": list(event.get("track_uuids") or []),
+                "moved_intervals": sorted(moved),
+            }],
+        })
+        if employee is None:
+            logger.warning("identity.resolved %s -> %s: karyawan tidak ada di master, perlu HR review",
+                           anon_id, target)
+            return []
+        dates = _local_dates(window_start, max(window_end, event_time))
+        for local_date in dates:
+            mark_report_dirty(local_date)
+        return dates
+
     def ingest(self, message: Dict[str, Any], outbox_id: str = "") -> bool:
         validated = protocol_adapter.validate(message, expected_channel="events")
 
@@ -88,6 +155,9 @@ class EventIngestionService:
                 })
                 if employee is not None:
                     mark_report_dirty(datetime.fromtimestamp(window_start, break_policy.timezone).date().isoformat())
+            resolved_dates: List[str] = []
+            if event_type == "identity.resolved":
+                resolved_dates = self._resolve_identity(validated, outbox_id, seq, _timestamp(event_time))
             free_time_ledger.apply_event(validated)
 
             # Event sudah tersimpan dan sudah masuk ledger. Kegagalan menilai
@@ -96,6 +166,12 @@ class EventIngestionService:
             # melewatkan record_event di bawah.
             try:
                 violation_service.evaluate_event(validated)
+                # Waktu yang baru dipindah bisa melampaui jatah pada tanggal mana pun yang
+                # disentuh interval itu; dedupe per orang+tanggal ada di save_violation.
+                for local_date in resolved_dates:
+                    violation_service.evaluate(
+                        str(validated["person_id"]), local_date, now=_timestamp(event_time)
+                    )
             except Exception:  # noqa: BLE001
                 logger.exception(
                     "Evaluasi pelanggaran gagal untuk %s seq=%s", event_type, seq

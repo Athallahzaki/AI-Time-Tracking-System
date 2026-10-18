@@ -7,6 +7,46 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-10-18 · paket be-r1 — ANON tidak dihitung/dinotifikasi + handler `identity.resolved`
+
+Dasar: HEAD `claude/funny-thompson-nt4y1d` (bukan `Claude-Branch`, yang tertinggal 8 commit dan tidak punya
+mekanisme atribusi). Jalur BE. `engine/`, `contracts/schema/`, `engine/ports/` tidak disentuh. Nomor `be-r1`
+dipilih karena CHANGELOG belum punya entri `be-r*`; tim BE perlu mengonfirmasi.
+
+**Masalah.** Backend memperlakukan `person_id` `ANON-xxxx` (kelompok ReID tanpa wajah) sebagai karyawan, padahal
+kontrak (`$defs.anon_id`) melarangnya sebelum `identity.resolved`. Satu `presence.interval` ANON 45 menit
+menghasilkan `usage` "exceeded" -> `save_violation` -> notifikasi + email HR untuk "ANON-7f3a" (direproduksi
+sebagai tes merah di kode lama). Event `identity.resolved` lolos validasi dan tersimpan, tetapi tidak ada handler:
+`moved_intervals` tidak pernah dipindah, jadi waktu karyawan kurang.
+
+**Apa yang berubah**
+
+- Baru `backend/core/identity.py` (`ANON_PREFIX`, `is_anon_id`), dipakai ledger, pelanggaran, state, dan skema.
+- `services/free_time.py`: track/segmen/`usage`/`known_person_ids` ber-ID ANON tidak dihitung. `identity.resolved`
+  ditambahkan ke `TRACKED_TYPES`; track terbuka di `track_uuids` langsung dialihkan ke karyawan tanpa menunggu
+  heartbeat (juga saat `rebuild_from_database`). `start_ts` tidak diubah, jadi dihitung sejak awal track; bagian yang
+  sudah menjadi interval ANON yang dipindah sudah menggeser `start_ts` (cabang `presence.interval`), tidak dobel.
+- `services/violation_service.py`: `evaluate()` mengembalikan `None` untuk ANON; `evaluate_event()` membuang ANON.
+- `services/event_ingestion.py`: cabang `identity.resolved`. Satu baris `identity_attributions`
+  (`original_person_id=anon_id`, `attribution_source=reid_retro`, tanpa `camera_id`/`track_uuid` karena kelompok bisa
+  lintas kamera) dengan jendela = min `start_at` .. max `end_at` semua `moved_intervals` (dibaca dari
+  `protocol_events`). Pemindahan sebenarnya memakai `get_presence_intervals` yang sudah ada (interval ditimpa
+  dengan `identity_source=reid_retro`), sehingga ledger, laporan, dan sesi ikut benar. Tujuan tidak ada di master
+  -> `needs_hr_review` `missing_employee`, tidak dipindah, tidak dinilai. Selain itu: `mark_report_dirty` untuk
+  semua tanggal lokal yang tersentuh (lintas tengah malam), lalu `violation_service.evaluate` per tanggal
+  (dedupe per orang+tanggal dan `dedupe_key` notifikasi tetap berlaku). Replay (outbox+seq sama) berhenti di
+  `save_protocol_event`, jadi tidak ada atribusi/pelanggaran ganda.
+- `schemas/employee.py`: `employee_id` berawalan `ANON-` ditolak (422) di Create dan Update.
+- `core/state.py`: box ber-ID ANON ditandai `TRACKED` tanpa identitas (tampil tak dikenal); `box["person_id"]` utuh.
+- Sengaja tidak diubah: daftar `anonymous` di `report_service`; `/api/attendance/sessions` tetap menampilkan
+  sesi atas ID ANON sebagai string (tidak memicu pelanggaran).
+
+**Cara uji.** Baseline `python -m pytest backend/tests contracts/tests -q`: 252 lulus / 0 gagal. Sesudah:
+268 lulus / 0 gagal (+16 di `backend/tests/test_anon_identity_resolved.py`; 14 dari 16 merah di kode lama).
+`backend/tests/test_boundary.py` lulus; `policy_grep.py engine/` bersih. Tes mencakup fixture
+`reid-tertunda` ujung ke ujung, ANON > 30 menit tanpa pelanggaran/notifikasi, resolved lintas kamera dan lintas
+tengah malam, tujuan tak ada di master, replay, dan 422 untuk employee `ANON-1`.
+
 ## 2026-10-17 · paket ea-r14 — stream_epoch saat kamera dibuka ulang, penjaga onnxruntime CPU, cek NVRTC, alat diagnosis OSNet
 
 Dasar: ea-r13. Jalur EA + EB (menyentuh `ingest/` dan `factory.py` milik EB). Kontrak dan `backend/` tidak

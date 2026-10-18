@@ -32,6 +32,7 @@ from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Set
 
 from backend.core import database
+from backend.core.identity import is_anon_id
 from backend.services.break_policy import BreakPolicy, break_policy
 
 logger = logging.getLogger(__name__)
@@ -39,7 +40,7 @@ logger = logging.getLogger(__name__)
 TRACKED_TYPES = {
     "track.started", "track.identified", "track.heartbeat", "track.resumed",
     "track.identity_changed", "track.ended", "presence.interval",
-    "camera.failed", "snapshot",
+    "camera.failed", "snapshot", "identity.resolved",
 }
 
 
@@ -107,6 +108,17 @@ class OpenPresenceTracker:
                     track.person_id = str(to_person) if to_person else None
                     track.start_ts = at
                     track.last_seen_ts = max(track.last_seen_ts, at)
+            elif event_type == "identity.resolved":
+                # Kelompok ANON selesai: track yang masih terbuka dialihkan ke
+                # karyawan tanpa menunggu heartbeat berikutnya. start_ts tetap,
+                # jadi dihitung sejak awal track (bagian yang sudah ditutup jadi
+                # presence.interval dan sudah menggeser start_ts, tidak dobel).
+                anon_id, target = event.get("anon_id"), event.get("person_id")
+                if target:
+                    for key in event.get("track_uuids") or []:
+                        track = self._tracks.get(key)
+                        if track is not None and track.person_id == anon_id:
+                            track.person_id = str(target)
             elif event_type == "track.ended" and uuid:
                 self._tracks.pop(uuid, None)
             elif event_type == "presence.interval" and uuid:
@@ -135,7 +147,7 @@ class OpenPresenceTracker:
             tracks = list(self._tracks.values())
         segments = []
         for track in tracks:
-            if not track.person_id:
+            if not track.person_id or is_anon_id(track.person_id):
                 continue
             if person_id is not None and track.person_id != person_id:
                 continue
@@ -154,7 +166,10 @@ class OpenPresenceTracker:
 
     def open_person_ids(self) -> Set[str]:
         with self._lock:
-            return {t.person_id for t in self._tracks.values() if t.person_id}
+            return {
+                t.person_id for t in self._tracks.values()
+                if t.person_id and not is_anon_id(t.person_id)
+            }
 
 
 @dataclass
@@ -204,6 +219,8 @@ class FreeTimeLedger:
 
     # ---- computing -------------------------------------------------------
     def _segments(self, person_id: str, start_ts: float, end_ts: float, now: float) -> List[Dict[str, Any]]:
+        if is_anon_id(person_id):
+            return []  # ANON bukan karyawan: tidak pernah dihitung sebelum identity.resolved
         segments = []
         for interval in database.get_presence_intervals(start_ts, end_ts, person_id):
             s, e = _ts(interval.get("start_at")), _ts(interval.get("end_at"))
@@ -329,7 +346,7 @@ class FreeTimeLedger:
         ids = set(database.get_known_person_ids())
         ids.update(self.tracker.open_person_ids())
         ids.update(str(item["person_id"]) for item in database.get_enrollments())
-        return ids
+        return {pid for pid in ids if not is_anon_id(pid)}
 
 
 free_time_ledger = FreeTimeLedger()
