@@ -391,7 +391,7 @@ class ReidSettings:
     """
 
     enabled: bool = False
-    model_path: str = "engine/models/reid/osnet_reid.onnx"
+    model_path: str = "engine/models/reid/osnet_ain_reid.onnx"
     model_sha256: Optional[str] = None
     match_threshold: Optional[float] = None
     match_margin: Optional[float] = None
@@ -404,6 +404,8 @@ class ReidSettings:
     # paling sering sekali per interval ini per track. Bukan tiap frame.
     embed_interval_seconds: float = 15.0
     max_batch: int = 8
+    # eb-r12: satu session ONNX per bucket batch (identity/reid/embedder_onnx.py).
+    batch_buckets: Tuple[int, ...] = (1, 2, 4, 8)
     worker_queue: int = 16
     max_age_seconds: float = 1.0
     onnx_providers: Optional[Tuple[str, ...]] = None
@@ -434,6 +436,10 @@ class ReidSettings:
             raise ValueError("reid.max_batch and reid.worker_queue must be >= 1.")
         if self.max_age_seconds <= 0:
             raise ValueError("reid.max_age_seconds must be > 0.")
+        buckets = tuple(self.batch_buckets)
+        if (not buckets or any(not isinstance(b, int) or isinstance(b, bool) or b < 1 for b in buckets)
+                or list(buckets) != sorted(set(buckets))):
+            raise ValueError("reid.batch_buckets must be a non-empty, strictly increasing list of integers >= 1.")
         if self.onnx_gpu_mem_limit_mb is not None and self.onnx_gpu_mem_limit_mb < 64:
             raise ValueError("reid.onnx_gpu_mem_limit_mb must be >= 64 (or unset).")
         if not isinstance(self.travel_time_seconds, dict):

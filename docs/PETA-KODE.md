@@ -1,7 +1,7 @@
 # Peta Kode
 
 Untuk menemukan file tanpa menjelajah repo. Perbarui saat menambah/memindah modul.
-Per 18 Oktober 2026 (paket eb-r11). Uji ReID di 1060: `docs/UJI-REID-1060.md`.
+Per 18 Oktober 2026 (paket eb-r12). Uji ReID di 1060: `docs/UJI-REID-1060.md`.
 
 ## Alur data
 
@@ -18,7 +18,7 @@ frontend (Vue + Vite): dashboard, overlay kotak, enrollment, pengaturan
 
 | Hal | File |
 |---|---|
-| Entry point, argumen CLI | `runtime/__main__.py` |
+| Entry point, argumen CLI; fd 2 (stderr C) ke `logs/engine/engine-c-stderr.log` bila ReID+CUDA | `runtime/__main__.py` |
 | Rakit kamera, `set_cameras`, health, detector bersama, gerbang detak, error GPU fatal → keluar kode 3 (`_on_camera_fatal`, `core.gpu_fatal_action`), rasio sibuk dispatcher (`_sample_busy_ratio`) | `runtime/service.py` |
 | Loop per kamera, event presence, overlay `view.frame` (`_maybe_view`), jeda jadwal analisis `schedule_off` (`_apply_analysis_switch`, `core.analysis_off_mode`) | `runtime/camera.py` |
 | Penjadwal berdetak (TickClock, TickGate, kerangka TickScheduler) | `runtime/tick_scheduler.py` |
@@ -39,7 +39,7 @@ frontend (Vue + Vite): dashboard, overlay kotak, enrollment, pengaturan
 | Wajah (SCRFD + AuraFace ONNX), gerbang kualitas sebelum embedding (`embed_*`, `yaw_ratio`), cek bentuk model SCRFD (`_check_static_size`), TensorRT EP + cache (`recognition_providers`, `tensorrt_options`, `ProviderUnavailable`), potongan kepala (`head_crop`) | `identity/face_onnx.py` (tes `test_rekognisi_beban.py`, `test_tensorrt_rekognisi.py`) |
 | Matcher, arbiter identitas, admission, enrollment | `identity/matcher.py`, `identity/arbiter.py`, `identity/admission.py`, `identity/enrollment.py` |
 | ReID berjangkar wajah (logika): pesan antrean, galeri harian, aturan gabung, ANON-xxxx | `identity/reid/messages.py`, `identity/reid/gallery.py`, `identity/reid/merge.py`, `identity/reid/pending.py` (tes `test_reid_*.py`) |
-| ReID model + gerbang crop (dimuat hanya bila `reid.enabled`): OSNet ONNX, pra-proses = kit latih, SHA-256 | `identity/reid/embedder_onnx.py`, `identity/reid/quality.py` (tes `test_reid_embedder.py`) |
+| ReID model + gerbang crop (dimuat hanya bila `reid.enabled`): OSNet ONNX, pra-proses = kit latih, SHA-256, `ReidBucketRunner` (satu session per `reid.batch_buckets`) | `identity/reid/embedder_onnx.py`, `identity/reid/quality.py` (tes `test_reid_embedder.py`, `test_reid_bucket.py`) |
 | ReID dirakit ke kamera (default mati): koordinator + `identity.resolved`, worker embedding, sisi kamera | `pipeline/reid_coordinator.py`, `pipeline/reid_worker.py`, `pipeline/reid_tap.py` (tes `test_reid_runtime.py`); model di `engine/models/reid/` (di-ignore) |
 | Binding track ↔ identitas, interval presence, waktu sampai dikenali (`AssemblerMetrics.identify_delays`) | `presence/binding.py`, `presence/assembler.py` (tes `test_waktu_kenali.py`) |
 | Server NDJSON, pembuat event, outbox SQLite | `api/server.py`, `api/events.py`, `api/outbox.py` |

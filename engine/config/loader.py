@@ -264,6 +264,10 @@ def _reid_settings(rid: Dict[str, Any]) -> ReidSettings:
         edge_margin_px=float(rid.get("edge_margin_px", defaults.edge_margin_px)),
         embed_interval_seconds=float(rid.get("embed_interval_seconds", defaults.embed_interval_seconds)),
         max_batch=int(rid.get("max_batch", defaults.max_batch)),
+        batch_buckets=(
+            tuple(int(b) for b in rid["batch_buckets"]) if rid.get("batch_buckets")
+            else defaults.batch_buckets
+        ),
         worker_queue=int(rid.get("worker_queue", defaults.worker_queue)),
         max_age_seconds=float(rid.get("max_age_seconds", defaults.max_age_seconds)),
         onnx_providers=(

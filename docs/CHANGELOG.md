@@ -7,6 +7,36 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-10-18 · paket eb-r12 — ReID: satu session ONNX per bucket batch, fd 2 dialihkan, model OSNet-AIN
+
+Jalur EB (Engine B, ReID). `engine/ports/`, kontrak, backend, dan `tools/reid_train/` tidak disentuh.
+
+**Alasan.** Diukur di Windows/GTX 1060 (ORT 1.26 CUDA EP): CUDA EP hanya menyimpan plan conv cuDNN untuk shape
+terakhir per session, jadi tiap pergantian batch size = replan ±350 ms (10-18 dtk bila torch ada di proses dan
+cuDNN memakai NVRTC dari torch\lib). Satu session per bucket {1,2,4,8} dengan padding nol: median 347 -> 28
+ms/frame, frame >100 ms 175/200 -> 0/200, selisih embedding maks 3,7e-8 (`tools/reid_train/diag_reid_bucket.py`).
+
+**Apa yang berubah**
+
+- `engine/identity/reid/embedder_onnx.py`: kelas baru `ReidBucketRunner` (satu session per bucket, warmup 3x
+  input nol dengan shape bucket sendiri, padding nol ke bucket terkecil >= n, potong kembali ke n, n > bucket
+  terbesar dipecah, n = 0 -> `(0, dim)` tanpa memanggil session). `OnnxReidEmbedder` memakainya; API publik
+  (`embed`/`__call__`, `build_reid_embedder`) tetap. Kosong kini `(0, dim)`, bukan `(0, 0)`. Entri CUDA EP
+  mendapat `cudnn_conv_algo_search: HEURISTIC` (batas VRAM tetap). Log provider aktif per session; WARNING bila
+  bukan CUDA. Setelah warmup: log torch di `sys.modules` (WARNING bila ada) dan, khusus Windows, NVRTC termuat.
+- `engine/config/schema.py`, `loader.py`: `reid.batch_buckets` (default `[1, 2, 4, 8]`, naik ketat, >= 1).
+  Default `reid.model_path` -> `engine/models/reid/osnet_ain_reid.onnx`; 5 profil `demo-*.yaml` ikut (plus
+  `batch_buckets` eksplisit). `model_sha256` tetap null (model di-ignore, tidak ada di repo).
+- `engine/runtime/__main__.py`: bila `reid.enabled` dan CUDA diminta di `reid.onnx_providers`, fd 2 dialihkan ke
+  `logs/engine/engine-c-stderr.log` (append) sebelum session dibuat; `sys.stderr` Python (traceback, logging)
+  tetap ke konsol. `--no-stderr-redirect` mematikan. Spam "Could not locate nvrtc64_120_0.dll" = kondisi benar.
+- `docs/UJI-REID-1060.md`: nama berkas model tujuan -> `osnet_ain_reid.onnx`.
+
+**Uji.** Baru `engine/tests/test_reid_bucket.py` (model sintetis Conv -> InstanceNorm -> Relu -> GAP -> Flatten,
+CPU EP; n = 0,1,3,5,8,9,10 selisih < 1e-5; shape per session; pemecahan; config; fd 2 via subprocess; uji GPU
+model asli dilewati tanpa CUDA/model). Butuh `onnx` (importorskip; tidak ada di requirements-dev).
+`python -m pytest engine/tests contracts/tests -q`: 901 -> 925 lulus, 8 dilewati. Backend 117 lulus.
+
 ## 2026-10-18 · dokumen — Kartu model ReID kandidat demo (RandPerson + fine-tune ENTIRe-ID)
 
 Dokumen saja; kode tidak berubah. Baru `tools/reid_train/MODEL-CARD-osnet-ain-entireid.md`, angkanya disalin oleh

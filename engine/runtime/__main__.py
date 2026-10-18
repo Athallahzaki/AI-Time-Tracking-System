@@ -27,6 +27,8 @@ from typing import Optional
 from .service import EXIT_CODE_CONFIG, EXIT_CODE_GPU_FATAL, ConfigRefused, EngineRuntime, RuntimeOptions
 
 _DEFAULT_OUTBOX = Path(__file__).resolve().parents[1] / "data" / "outbox.sqlite3"
+# Folder log engine yang sama dengan StateDir watchdog (deploy/laptop/engine-watchdog.ps1).
+_DEFAULT_C_STDERR_LOG = Path(__file__).resolve().parents[2] / "logs" / "engine" / "engine-c-stderr.log"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -93,6 +95,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Windows: biarkan EcoQoS/power throttling (default: dimatikan untuk proses engine; "
              "lihat runtime/winpower.py)",
     )
+    parser.add_argument(
+        "--no-stderr-redirect", action="store_true",
+        help="jangan alihkan fd 2 (stderr level C) ke logs/engine/engine-c-stderr.log. Default: "
+             "dialihkan bila reid.enabled dan CUDA diminta, supaya spam cuDNN tidak membanjiri konsol.",
+    )
     return parser
 
 
@@ -140,6 +147,8 @@ def main(argv: Optional[list] = None) -> int:
         logging.getLogger("engine.runtime").error("config engine tidak bisa dipakai: %s", error)
         print(f"config engine salah ({args.config}): {error}", file=sys.stderr)
         return EXIT_CODE_CONFIG
+    if not args.no_stderr_redirect and _reid_wants_cuda(config):
+        _redirect_c_stderr(_DEFAULT_C_STDERR_LOG)
     from ..identity.face_onnx import ModelConfigMismatch
 
     try:
@@ -149,6 +158,41 @@ def main(argv: Optional[list] = None) -> int:
         print(f"config engine ditolak: {error}", file=sys.stderr)
         return EXIT_CODE_CONFIG
     return _serve(runtime)
+
+
+def _reid_wants_cuda(config) -> bool:
+    reid = getattr(config, "reid", None)
+    return bool(getattr(reid, "enabled", False)) and "CUDAExecutionProvider" in (
+        getattr(reid, "onnx_providers", None) or ())
+
+
+def _redirect_c_stderr(path: Path) -> None:
+    """fd 2 -> berkas log; `sys.stderr` Python tetap ke konsol (eb-r12).
+
+    cuDNN tanpa NVRTC menulis "Could not locate nvrtc64_120_0.dll" langsung ke fd 2
+    berulang-ulang; spam itu tanda kondisi BENAR (NVRTC tidak termuat), tetapi
+    membanjiri konsol. Traceback dan logging Python tetap terlihat. Harus jalan
+    sebelum onnxruntime membuat session.
+    """
+    log = logging.getLogger("engine.runtime")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd_log = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+    except OSError as error:
+        log.warning("stderr level C tidak dialihkan (%s): %s", path, error)
+        return
+    old = sys.stderr
+    konsol = os.dup(2)
+    os.dup2(fd_log, 2)
+    os.close(fd_log)
+    # Encoding mengikuti stderr lama: konsol Windows bukan selalu UTF-8.
+    sys.stderr = os.fdopen(konsol, "w", buffering=1, encoding=getattr(old, "encoding", None) or "utf-8",
+                           errors="backslashreplace")
+    # basicConfig sudah memasang handler pada sys.stderr lama (= fd 2 = berkas sekarang).
+    for handler in logging.getLogger().handlers:
+        if isinstance(handler, logging.StreamHandler) and getattr(handler, "stream", None) is old:
+            handler.setStream(sys.stderr)
+    log.info("stderr level C (cuDNN/onnxruntime) dialihkan ke %s", path)
 
 
 def _build_runtime(args, config, tcp) -> EngineRuntime:

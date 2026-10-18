@@ -112,8 +112,8 @@ Pakai berkas `_tanpa_in` di bagian 4 hanya bila jauh lebih cepat.
 
 ```powershell
 mkdir engine\models\reid -Force
-Copy-Item D:\data\onnx\<berkas terpilih>.onnx engine\models\reid\osnet_reid.onnx
-(Get-FileHash engine\models\reid\osnet_reid.onnx -Algorithm SHA256).Hash.ToLower()
+Copy-Item D:\data\onnx\<berkas terpilih>.onnx engine\models\reid\osnet_ain_reid.onnx
+(Get-FileHash engine\models\reid\osnet_ain_reid.onnx -Algorithm SHA256).Hash.ToLower()
 Copy-Item engine\config\demo-1060.yaml engine\config\lokal-reid-1060.yaml
 ```
 
