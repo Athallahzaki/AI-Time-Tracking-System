@@ -1,6 +1,10 @@
 """Diagnosis OSNet di ONNX Runtime (env vision-engine). Simpan di luar repo, jalankan:
     python X:\\data\\diag_reid_ort.py [path onnx]
-Mencetak versi, operasi yang jatuh ke CPU, dan waktu per batch untuk 3 konfigurasi."""
+Mencetak versi, operasi yang jatuh ke CPU, dan waktu per batch untuk 3 konfigurasi.
+
+SENGAJA tanpa `import torch`: torch mendaftarkan folder torch\\lib (berisi
+nvrtc64_120_0.dll) ke search path DLL, sehingga cuDNN ikut memakai NVRTC dan
+setiap pergantian shape jadi stall 10-15 detik. Kondisi engine harus sama."""
 import os
 import sys
 import tempfile
@@ -10,21 +14,30 @@ import numpy as np
 import onnxruntime as ort
 
 ONNX = sys.argv[1] if len(sys.argv) > 1 else r"X:\Projek\AI-Time-Tracking-System\engine\models\reid\osnet_reid.onnx"
+
+
+def nvrtc_termuat():
+    """Cek langsung ke Windows: apakah DLL NVRTC sudah ter-load di proses ini.
+    Jauh lebih jujur daripada mengecek PATH (PATH bukan satu-satunya jalur DLL)."""
+    if os.name != "nt":
+        return "n/a (bukan Windows)"
+    import ctypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.GetModuleHandleW.restype = ctypes.c_void_p
+    k32.GetModuleHandleW.argtypes = [ctypes.c_wchar_p]
+    ada = [n for n in ("nvrtc64_120_0.dll", "nvrtc64_120_0.alt.dll") if k32.GetModuleHandleW(n)]
+    return f"YA {ada}  <-- stall per shape akan berdetik-detik" if ada else "TIDAK"
+
+
 print("python      :", sys.executable)
 print("onnxruntime :", ort.__version__, "| tersedia:", ort.get_available_providers())
-try:
-    import torch
-    print("torch       :", torch.__version__, "| cuDNN torch:", torch.backends.cudnn.version())
-except Exception as e:  # noqa: BLE001
-    print("torch       : tidak bisa diimpor:", e)
+print("torch di proses ini:", "YA (BAHAYA)" if "torch" in sys.modules else "TIDAK")
 if hasattr(ort, "preload_dlls"):
     try:
         ort.preload_dlls()
         print("preload_dlls: ok")
     except Exception as e:  # noqa: BLE001
         print("preload_dlls: gagal:", e)
-print("nvrtc di PATH:", [p for p in os.environ.get("PATH", "").split(os.pathsep)
-                         if p and os.path.isfile(os.path.join(p, "nvrtc64_120_0.dll"))] or "TIDAK")
 
 
 def sesi(cuda_opsi, matikan_optimasi=False, verbose=False):
@@ -58,7 +71,6 @@ for b in baris[:20]:
     print("  ", b.strip()[:400])
 if not baris:
     print("   (tidak ada baris penempatan; log lengkap di", log.name, ")")
-print("   jumlah baris 'nvrtc' di log:", teks.lower().count("nvrtc"))
 
 # 2) Waktu per batch.
 KONFIG = [
@@ -81,3 +93,5 @@ for nama, opsi, mati in KONFIG:
             hasil.append(f"{1000 * (time.perf_counter() - t):8.1f}")
         print(f"{putaran:<8d}" + "  ".join(hasil))
     del s
+    # NVRTC baru di-load cuDNN saat plan conv pertama dibangun, jadi cek SETELAH run
+    print("NVRTC termuat:", nvrtc_termuat())
