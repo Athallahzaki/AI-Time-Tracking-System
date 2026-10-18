@@ -31,16 +31,35 @@ onMounted(() => {
   loadNames();
 });
 
-function formatDateTime(iso) {
-  if (!iso) return '-';
-  const date = new Date(iso);
-  if (isNaN(date.getTime())) return '-';
+function formatDateTime(value) {
+  if (value == null || value === '') return '-';
+
+  const numeric =
+    typeof value === 'number' ||
+    /^\d+(\.\d+)?$/.test(String(value).trim());
+
+  let date;
+
+  if (numeric) {
+    const timestamp = Number(value);
+
+    // Unix timestamp detik → milidetik.
+    date = new Date(
+      timestamp < 1e12 ? timestamp * 1000 : timestamp,
+    );
+  } else {
+    // Tetap menerima tanggal berformat ISO.
+    date = new Date(value);
+  }
+
+  if (Number.isNaN(date.getTime())) return '-';
+
   return date.toLocaleString('id-ID', {
     dateStyle: 'medium',
     timeStyle: 'short',
+    timeZone: 'Asia/Jakarta',
   });
 }
-
 const filteredPersons = computed(() => {
   const q = searchQuery.value.trim().toLowerCase();
   if (!q) return enrolledPersons;
@@ -144,7 +163,7 @@ const filteredPersons = computed(() => {
       Tidak ada karyawan dengan ID cocok "{{ searchQuery }}".
     </div>
 
-    <ul v-else class="max-h-[520px] divide-y overflow-y-auto">
+    <ul v-else class="max-h-130 divide-y overflow-y-auto">
       <li
         v-for="p in filteredPersons"
         :key="p.person_id"
