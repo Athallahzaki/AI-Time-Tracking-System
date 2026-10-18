@@ -18,14 +18,14 @@ sebelum setiap perintah. Jangan jalankan latihan dan engine bersamaan (rebutan G
 
 1. Repo di 1060 harus sama dengan 4060: paket ea-r12, ea-r13, ea-r14 terpasang (ekstrak berurutan di
    root repo, timpa).
-2. Pastikan NVRTC di PATH untuk jendela ini (ganti versi bila folder CUDA berbeda):
+2. **JANGAN taruh NVRTC di PATH** (eb-r12, diukur di 1060 18 Okt): bila cuDNN menemukan NVRTC, tiap
+   pergantian batch size OSNet stall detik-an. Buka jendela baru tanpa `CUDA\vXX\bin` di PATH, lalu:
    ```powershell
-   $env:PATH = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin;$env:PATH"
    python scripts/check_gpu_env.py
    ```
-   Harap: tidak ada GAGAL; baris `nvrtc` OK. Bila `nvrtc` PERINGATAN "tidak ditemukan":
-   `pip install nvidia-cuda-nvrtc-cu12`, cari foldernya
-   (`Get-ChildItem $env:CONDA_PREFIX -Recurse -Filter "nvrtc64_12*.dll"`) dan tambahkan ke PATH.
+   Harap: tidak ada GAGAL; baris `nvrtc` OK ("tidak di PATH"). PERINGATAN `nvrtc` = folder NVRTC ada di
+   PATH; keluarkan (aman: DLL CUDA/cuDNN engine dari pip via `preload_dlls`, bukan toolkit). Spam "Could not locate nvrtc64_120_0.dll" itu kondisi BENAR; engine mengalihkannya ke
+   `logs\engine\engine-c-stderr.log` (±19 KB per 5 menit).
 3. Tes:
    ```powershell
    python -m pytest engine/tests contracts/tests -q 2>&1 | Select-Object -Last 5
@@ -125,7 +125,7 @@ Di blok `reid:` berkas `lokal-reid-1060.yaml` (jangan di-commit): `enabled: true
 .\deploy\mediamtx\start-mediamtx.ps1
 # terminal 2
 .\scripts\publish_test_video.ps1 -Video <video>.mp4 -Fps 25
-# jendela ENGINE (NVRTC di PATH, lihat 1.2)
+# jendela ENGINE (TANPA NVRTC di PATH, lihat 1.2)
 python -m engine.runtime --config engine/config/lokal-reid-1060.yaml --tcp 127.0.0.1:8765 --health-seconds 2 2>&1 | Tee-Object -FilePath logs\engine-reid-1060.log
 # terminal 4, setelah "engine siap"
 python scripts/lag_probe.py --camera cam01=rtsp://127.0.0.1:8554/cam01 --minutes 5 --out bench-out\reid-1060.csv --events-out bench-out\reid-1060.ndjson
@@ -135,6 +135,16 @@ Select-String -Path logs\engine-reid-1060.log -Pattern "ReID:|ANON-|diselesaikan
 
 Harap: engine start tanpa galat (galat "tidak membawanya" = jendela salah env); validator 0 GAGAL;
 baris `ReID: embedding N` naik dan `rata2 ... ms/batch` jauh di bawah 1.000 ms.
+
+Sejak eb-r12, cek juga log start (`Select-String logs\engine-reid-1060.log -Pattern "bucket|torch|NVRTC|dialihkan"`):
+`stderr level C ... dialihkan`; empat baris `bucket 1/2/4/8: provider aktif ['CUDAExecutionProvider', ...]`;
+`ReID [embedder dimuat]: torch tidak ada`; setelah kamera pertama `ReID [setelah detector dimuat]: torch ada
+... terukur aman` (D-FINE membawa torch); NVRTC tidak termuat di kedua tahap. Hasil acuan 1060 18 Okt
+(`demo-1060`, video yang sama): fps 7,6 (ReID mati 6,7), 17 track.identified, ReID 18 ms/batch, 0 basi.
+
+Profil `demo-1060-hemat.yaml` membatasi `target_fps: 4` (+ SCRFD 320, detector 512): fps ±4 di sana bukan
+regresi, dan jangan dibandingkan dengan `demo-1060`. Di uji 18 Okt profil hemat hanya mengenali 1 dari 28
+track; ukur `face_bench.py` (640 vs 320) sebelum memakainya untuk demo.
 
 ## 5. Uji `stream_epoch` saat stream putus (ea-r14)
 

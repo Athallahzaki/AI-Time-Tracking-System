@@ -1,7 +1,7 @@
 # Peta Kode
 
 Untuk menemukan file tanpa menjelajah repo. Perbarui saat menambah/memindah modul.
-Per 18 Oktober 2026 (paket eb-r12). Uji ReID di 1060: `docs/UJI-REID-1060.md`.
+Per 18 Oktober 2026 (paket eb-r12b). Uji ReID di 1060: `docs/UJI-REID-1060.md`.
 
 ## Alur data
 

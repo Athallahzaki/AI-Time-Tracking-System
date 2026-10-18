@@ -325,3 +325,58 @@ def test_gpu_model_asli_bucket_cepat_dan_identik():
         ref = tunggal.run(None, {tunggal.get_inputs()[0].name: pool[:n]})[0]
         assert np.abs(runner.run(pool[:n]) - ref).max() < 1e-4
     assert sum(w > 100 for w in waktu) <= 1, f"frame > 100 ms: {sorted(waktu)[-5:]}"
+
+
+# --------------------------------------------------------------------------
+# Status torch/NVRTC per tahap: D-FINE membawa torch masuk SESUDAH session ReID
+# --------------------------------------------------------------------------
+
+def test_torch_sebelum_sesi_reid_warning_sesudah_detector_info(monkeypatch, caplog):
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace())
+    with caplog.at_level(logging.INFO, logger="engine.identity.reid.embedder_onnx"):
+        embedder_onnx.log_cudnn_environment("embedder dimuat")
+        embedder_onnx.log_cudnn_environment("setelah detector dimuat")
+    catatan = [(r.levelno, r.getMessage()) for r in caplog.records if "torch" in r.getMessage()]
+    assert catatan[0][0] == logging.WARNING and "[embedder dimuat]" in catatan[0][1]
+    assert catatan[1][0] == logging.INFO and "[setelah detector dimuat]" in catatan[1][1]
+
+
+def test_tanpa_torch_info_dengan_tahap(monkeypatch, caplog):
+    monkeypatch.delitem(sys.modules, "torch", raising=False)
+    with caplog.at_level(logging.INFO, logger="engine.identity.reid.embedder_onnx"):
+        embedder_onnx.log_cudnn_environment("setelah detector dimuat")
+    assert "[setelah detector dimuat]: torch tidak ada" in caplog.text
+
+
+def _runtime_mock(reid_enabled):
+    import dataclasses
+
+    from engine.runtime import EngineRuntime, RuntimeOptions
+
+    base = dataclasses.replace(load_config(), source_type="mock", auto_warmup=False)
+    config = dataclasses.replace(
+        base,
+        detector=dataclasses.replace(base.detector, share_across_cameras=True),
+        recognition=dataclasses.replace(base.recognition, enabled=True, recognizer="onnx_face",
+                                        face_detector_model="det.onnx", face_embedder_model="emb.onnx"),
+        reid=ReidSettings(enabled=reid_enabled),
+    )
+    embed = (lambda crops: np.ones((len(crops), DIM), np.float32))
+    runtime = EngineRuntime(config=config, options=RuntimeOptions(tcp=None),
+                            recognize=lambda track, frame: None, reid_embed=embed)
+    return runtime, config
+
+
+@pytest.mark.parametrize("reid_enabled", [True, False])
+def test_status_dicek_ulang_setelah_detector_hanya_bila_reid(monkeypatch, reid_enabled):
+    from engine import factory
+
+    panggilan = []
+    monkeypatch.setattr(embedder_onnx, "log_cudnn_environment", lambda stage: panggilan.append(stage))
+    monkeypatch.setattr(factory, "build_detector", lambda config: object())   # tidak bisa dibagi
+    runtime, config = _runtime_mock(reid_enabled)
+    try:
+        runtime._detector_for("cam01", config)
+    finally:
+        runtime.close()
+    assert panggilan == (["setelah detector dimuat"] if reid_enabled else [])

@@ -196,22 +196,34 @@ def loaded_nvrtc() -> Optional[List[str]]:
     return [n for n in NVRTC_DLLS if k32.GetModuleHandleW(n)]
 
 
-def log_cudnn_environment() -> None:
-    """torch di proses = ORT memakai cuDNN torch, NVRTC ikut termuat = stall ganti shape."""
+def log_cudnn_environment(stage: str = "embedder dimuat") -> None:
+    """torch di proses = ORT bisa memakai cuDNN torch; NVRTC termuat = stall ganti shape.
+
+    Dipanggil dua kali: saat embedder dimuat (sesudah session ReID dibuat) dan sesudah
+    detector pertama dimuat (`runtime/service.py::_detector_for`). D-FINE (LibreYOLO)
+    membawa torch masuk ke proses BELAKANGAN; torch yang sudah ada saat embedder dimuat
+    berarti ORT bisa memakai cuDNN-nya (kasus berisiko). Uji 1060 18 Okt: torch yang
+    masuk sesudah session ReID tidak menimbulkan stall (18 ms/batch).
+    """
     if "torch" in sys.modules:
-        logger.warning("ReID: torch ADA di sys.modules proses engine. ORT bisa memakai cuDNN milik "
-                       "torch (NVRTC lewat torch\\lib); ganti batch size bisa stall detik-an.")
+        if stage == "embedder dimuat":
+            logger.warning("ReID [%s]: torch SUDAH ADA di proses sebelum session ReID dibuat. ORT bisa "
+                           "memakai cuDNN milik torch (NVRTC lewat torch\\lib); ganti batch size bisa "
+                           "stall detik-an.", stage)
+        else:
+            logger.info("ReID [%s]: torch ada di proses (masuk sesudah session ReID; terukur aman di "
+                        "1060, 18 Okt)", stage)
     else:
-        logger.info("ReID: torch tidak ada di sys.modules proses engine")
+        logger.info("ReID [%s]: torch tidak ada di proses", stage)
     nvrtc = loaded_nvrtc()
     if nvrtc is None:
         return
     if nvrtc:
-        logger.warning("ReID: NVRTC TERMUAT (%s); cuDNN akan mengompilasi kernel saat shape berubah.",
-                       ", ".join(nvrtc))
+        logger.warning("ReID [%s]: NVRTC TERMUAT (%s); cuDNN akan mengompilasi kernel saat shape berubah.",
+                       stage, ", ".join(nvrtc))
     else:
-        logger.info("ReID: NVRTC tidak termuat (kondisi benar; spam 'Could not locate nvrtc' "
-                    "di log stderr C memang diharapkan)")
+        logger.info("ReID [%s]: NVRTC tidak termuat (kondisi benar; spam 'Could not locate nvrtc' "
+                    "di log stderr C memang diharapkan)", stage)
 
 
 class OnnxReidEmbedder:
@@ -292,7 +304,7 @@ class OnnxReidEmbedder:
         self.model_name = path.name
         logger.info("embedder ReID %s dimuat (sha256 %s..., bucket %s, dim %s, warmup %d/bucket)",
                     path.name, self.sha256[:12], list(self.buckets), self.dim, warmup_runs)
-        log_cudnn_environment()
+        log_cudnn_environment("embedder dimuat")
 
     def embed(self, crops: Sequence[np.ndarray]) -> np.ndarray:
         if not crops:

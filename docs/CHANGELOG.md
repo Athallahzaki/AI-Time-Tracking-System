@@ -7,6 +7,31 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-10-18 · paket eb-r12b — Status torch/NVRTC dicek ulang setelah detector; NVRTC jangan di PATH
+
+Jalur EB. Penutup eb-r12 setelah uji engine nyata di laptop 1060. Kontrak, `engine/ports/`, backend tidak disentuh.
+
+**Hasil uji 1060 (18 Okt, `demo-1060`, video sama, 5 menit 1 kamera).** ReID nyala vs mati: fps analisis 7,6
+vs 6,7; track.identified 17 vs 17; 59 vs 60 track. ReID: 182 embedding / 176 batch, rata-rata 18 ms/batch, basi 0,
+ditolak 0; keempat bucket di CUDA; NVRTC tidak termuat; log stderr C 19 KB. Pipa: 4 `identity.resolved`
+(`face_confirmed`), dua memindahkan interval ANON -> EMP001; validator 0 pelanggaran. Catatan: cocok galeri 88,
+dicabut 18 (`match_threshold` belum dikalibrasi). Profil `demo-1060-hemat` (fps 4, SCRFD 320): 1 dari 28 track dikenali.
+
+**Apa yang berubah**
+
+- `engine/identity/reid/embedder_onnx.py`: `log_cudnn_environment(stage)`; pesan memuat tahap. torch yang SUDAH
+  ada saat embedder dimuat = WARNING (ORT bisa memakai cuDNN torch); torch sesudah detector = INFO (terukur aman).
+- `engine/runtime/service.py` `_detector_for`: bila ReID aktif, status dicek ulang tepat setelah detector pertama
+  dimuat. Alasan: D-FINE (LibreYOLO) membawa torch masuk sesudah session ReID, jadi baris "torch tidak ada" saat
+  start menyesatkan. ReID mati = tidak ada import/log baru.
+- `scripts/check_gpu_env.py` `check_nvrtc` dibalik: NVRTC di PATH = PERINGATAN, tidak di PATH = OK (dulu ea-r14
+  kebalikannya). `docs/SETUP-GPU.md` dan `docs/UJI-REID-1060.md` §1.2/§4 ikut: NVRTC JANGAN di PATH, hasil acuan,
+  peringatan profil hemat.
+
+**Uji.** `engine/tests/test_reid_bucket.py` (+4: level per tahap, `_detector_for` memanggil hanya bila ReID aktif),
+`engine/tests/test_check_gpu_env.py` (disesuaikan). `python -m pytest engine/tests contracts/tests -q`: 925 -> 929
+lulus, 8 dilewati. Backend 117 lulus.
+
 ## 2026-10-18 · paket eb-r12 — ReID: satu session ONNX per bucket batch, fd 2 dialihkan, model OSNet-AIN
 
 Jalur EB (Engine B, ReID). `engine/ports/`, kontrak, backend, dan `tools/reid_train/` tidak disentuh.

@@ -232,20 +232,22 @@ def find_nvrtc(dirs: List[Path], pattern: str) -> Optional[Path]:
 
 
 def check_nvrtc(on_path: Optional[Path], elsewhere: Optional[Path]) -> Check:
-    """NVRTC (kompiler runtime CUDA) dicari cuDNN 9 untuk sebagian algoritma konvolusi.
+    """NVRTC (kompiler runtime CUDA) yang ditemukan cuDNN 9 = replan/kompilasi kernel conv.
 
-    Uji 17 Okt (4060): tanpa NVRTC di PATH, setiap panggilan OSNet di onnxruntime menulis
-    puluhan "Could not locate nvrtc64_120_0.dll". Bukan GAGAL: dengan NVRTC pun OSNet di
-    onnxruntime tetap lambat (lihat CHANGELOG ea-r14), dan model lain jalan tanpanya.
+    eb-r12 (diukur di 1060, 18 Okt): bila cuDNN menemukan NVRTC, setiap pergantian batch
+    size OSNet di onnxruntime stall detik-an. Tanpa NVRTC, cuDNN hanya menulis spam
+    "Could not locate nvrtc64_120_0.dll" ke stderr C (engine mengalihkannya ke
+    logs/engine/engine-c-stderr.log) dan ReID 18 ms/batch. Jadi NVRTC di PATH = PERINGATAN;
+    tidak di PATH = kondisi yang benar. (Dulu, ea-r14, kebalikannya.)
     """
     if on_path is not None:
-        return Check("OK", "nvrtc", f"{on_path}")
+        return Check("PERINGATAN", "nvrtc", f"{on_path} ada di PATH; cuDNN akan memakainya dan ReID "
+                     "stall tiap ganti batch size. Keluarkan folder itu dari PATH jendela engine.")
     if elsewhere is not None:
-        return Check("PERINGATAN", "nvrtc", f"ada di {elsewhere.parent} tetapi TIDAK di PATH; cuDNN tidak "
-                     "menemukannya. Tambahkan folder itu ke PATH sebelum menjalankan engine.")
-    return Check("PERINGATAN", "nvrtc", "nvrtc64_12*.dll tidak ditemukan. cuDNN akan menulis "
-                 "'Could not locate nvrtc...' berulang. pip install nvidia-cuda-nvrtc-cu12, lalu "
-                 "tambahkan folder bin-nya ke PATH.")
+        return Check("OK", "nvrtc", f"tidak di PATH (ada di {elsewhere.parent}, tidak dipakai cuDNN); spam "
+                     "'Could not locate nvrtc' di log stderr C memang diharapkan.")
+    return Check("OK", "nvrtc", "tidak ditemukan (kondisi benar); spam 'Could not locate nvrtc' di log "
+                 "stderr C memang diharapkan.")
 
 
 def check_driver(text: Optional[str]) -> Check:
