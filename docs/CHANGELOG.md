@@ -34,7 +34,8 @@ ms/frame, frame >100 ms 175/200 -> 0/200, selisih embedding maks 3,7e-8 (`tools/
 
 **Uji.** Baru `engine/tests/test_reid_bucket.py` (model sintetis Conv -> InstanceNorm -> Relu -> GAP -> Flatten,
 CPU EP; n = 0,1,3,5,8,9,10 selisih < 1e-5; shape per session; pemecahan; config; fd 2 via subprocess; uji GPU
-model asli dilewati tanpa CUDA/model). Butuh `onnx` (importorskip; tidak ada di requirements-dev).
+model asli dilewati tanpa CUDA/model; session-nya dibuat lewat `face_onnx._session` supaya DLL CUDA dari pip
+ di-preload dan jatuh ke CPU = galat, bukan angka ms CPU). Butuh `onnx` (importorskip; tidak ada di requirements-dev).
 `python -m pytest engine/tests contracts/tests -q`: 901 -> 925 lulus, 8 dilewati. Backend 117 lulus.
 
 ## 2026-10-18 · dokumen — Kartu model ReID kandidat demo (RandPerson + fine-tune ENTIRe-ID)

@@ -300,14 +300,19 @@ def _cuda_tersedia():
 @pytest.mark.skipif(not MODEL_ASLI.is_file(), reason="model asli osnet_ain_reid.onnx tidak ada")
 @pytest.mark.skipif(not _cuda_tersedia(), reason="CUDAExecutionProvider tidak tersedia")
 def test_gpu_model_asli_bucket_cepat_dan_identik():
-    import onnxruntime as ort
+    from engine.identity.face_onnx import _session
 
     prov = with_cuda_options(["CUDAExecutionProvider", "CPUExecutionProvider"])
 
     def buat():
-        return ort.InferenceSession(str(MODEL_ASLI), providers=prov)
+        # Jalur engine: preload_dlls (DLL CUDA/cuDNN dari pip) + galat jelas bila CUDA
+        # diminta tetapi jatuh ke CPU. InferenceSession mentah jatuh ke CPU diam-diam.
+        return _session(str(MODEL_ASLI), prov, purpose="tes bucket GPU",
+                        providers_key="reid.onnx_providers")
 
     runner = ReidBucketRunner(buat, (1, 2, 4, 8))
+    for bucket, (sesi, _nama) in runner._sessions.items():
+        assert sesi.get_providers()[0] == "CUDAExecutionProvider", f"bucket {bucket} tidak di CUDA"
     tunggal = buat()
     pool = _pool()
     jumlah = np.random.default_rng(0).integers(1, 11, 60)
