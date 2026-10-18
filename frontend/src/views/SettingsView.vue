@@ -13,6 +13,13 @@ import EmailTab from '@/components/settings/EmailTab.vue';
 import SettingsAuditLog from '@/components/settings/SettingsAuditLog.vue';
 import { useSettings } from '@/composables/useSettings';
 
+import { useOverlaySettings } from '@/composables/useOverlaySettings';
+
+const {
+  showIdentityStatus,
+  toggleIdentityStatus,
+} = useOverlaySettings();
+
 // Pengaturan dari web (dok. 12 §3.3), dipecah per tab. Tab aktif disimpan di
 // ?tab= supaya bisa ditautkan langsung dan bertahan saat refresh.
 const TABS = ['allowance', 'break-hours', 'engine', 'email', 'history'] as const;
@@ -85,6 +92,35 @@ function onChanged() {
 
       <DataSourceBanner :domains="['break-hours', 'engine-schedule', 'email-config', 'settings-audit']" />
 
+      <div
+          class="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white p-4"
+        >
+          <div>
+            <h2 class="text-sm font-semibold text-slate-900">
+              Status pengenalan pada video
+            </h2>
+            <p class="mt-1 text-xs text-slate-500">
+              Tampilkan VERIFYING / IDENTIFYING pada bounding box.
+              Proses AI dan timer tetap berjalan.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            role="switch"
+            :aria-checked="showIdentityStatus"
+            aria-label="Tampilkan status pengenalan pada video"
+            class="shrink-0 rounded-lg border px-4 py-2 text-sm font-semibold transition-colors"
+            :class="
+              showIdentityStatus
+                ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                : 'border-slate-300 bg-slate-100 text-slate-500'
+            "
+            @click="toggleIdentityStatus"
+          >
+            {{ showIdentityStatus ? 'ON' : 'OFF' }}
+          </button>
+        </div>
       <Tabs v-model="tab" class="gap-4">
         <div class="-mx-1 overflow-x-auto px-1 pb-1">
           <TabsList class="w-max">

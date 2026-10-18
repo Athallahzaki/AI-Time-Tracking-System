@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from backend.core.identity import ANON_PREFIX, is_anon_id
+
+
+def _tolak_anon(value: Optional[str]) -> Optional[str]:
+    if is_anon_id(value):
+        raise ValueError(f"awalan {ANON_PREFIX} dicadangkan untuk kelompok ReID tanpa wajah")
+    return value
 
 
 class EmployeeCreateRequest(BaseModel):
@@ -23,6 +31,8 @@ class EmployeeCreateRequest(BaseModel):
         max_length=254,
     )
     status: Literal["active", "inactive"] = "active"
+
+    _employee_id_bukan_anon = field_validator("employee_id")(_tolak_anon)
 
 
 class EmployeeUpdateRequest(BaseModel):
@@ -43,3 +53,5 @@ class EmployeeUpdateRequest(BaseModel):
         description="Set to null to clear email.",
     )
     status: Optional[Literal["active", "inactive"]] = None
+
+    _employee_id_bukan_anon = field_validator("employee_id")(_tolak_anon)

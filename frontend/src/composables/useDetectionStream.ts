@@ -1,9 +1,9 @@
-import { onMounted, onUnmounted, reactive, ref } from 'vue';
+import { onMounted, onUnmounted, reactive, ref } from "vue";
 import {
   interpolationEnabled,
   resolveInterpolated,
   type BoxGeom,
-} from './useBoxInterpolation';
+} from "./useBoxInterpolation";
 
 export interface DetectionItem {
   id?: string | number;
@@ -11,7 +11,7 @@ export interface DetectionItem {
   sub: string;
   conf: string;
   extra?: string;
-  color: 'emerald' | 'amber' | 'red' | 'cyan';
+  color: "emerald" | "amber" | "red" | "cyan";
   top: string;
   left: string;
   width: string;
@@ -31,7 +31,7 @@ export interface DetectionItem {
   /** Server epoch seconds at which daily/qualification values were computed. */
   timerAsOf?: number;
   durationSuffix?: string;
-  timerMode?: 'qualifying' | 'counting' | 'paused' | 'limit' | 'unidentified';
+  timerMode?: "qualifying" | "counting" | "paused" | "limit" | "unidentified";
   qualificationRemainingSeconds?: number;
   dailyUsedSeconds?: number;
   allowanceSeconds?: number;
@@ -217,9 +217,10 @@ export function resolveDetectionsAtPts(
   }
   const after = buffer[low];
   const before = low > 0 ? buffer[low - 1] : after;
-  const best = Math.abs(before.pts - targetPts) <= Math.abs(after.pts - targetPts)
-    ? before
-    : after;
+  const best =
+    Math.abs(before.pts - targetPts) <= Math.abs(after.pts - targetPts)
+      ? before
+      : after;
   return Math.abs(best.pts - targetPts) <= MAX_DIRECT_PTS_DIFFERENCE_SECONDS
     ? best.detections
     : [];
@@ -230,8 +231,8 @@ const liveStats = reactive<DashboardStats>({
   activeFacilities: 0,
   totalFacilities: 0,
   activeUsers: 0,
-  totalUsage: '0s',
-  avgSession: '0s',
+  totalUsage: "0s",
+  avgSession: "0s",
   exceededDuration: 0,
 });
 
@@ -285,13 +286,15 @@ function protocolBoxesToPeople(
       // sehingga interpolasi salah memasangkan kotak. Sekarang tanpa ID stabil
       // kotak tetap tampil tetapi tidak diinterpolasi (track_uuid kosong).
       track_id: box.track_id ?? box.track_uuid ?? `n${index + 1}`,
-      track_uuid: box.track_uuid ?? (box.track_id != null ? String(box.track_id) : undefined),
+      track_uuid:
+        box.track_uuid ??
+        (box.track_id != null ? String(box.track_id) : undefined),
       identity_source: box.identity_source ?? null,
       identity: box.person_id ?? null,
       // Detector score from the engine. No fake default: missing stays missing.
       confidence: box.confidence ?? null,
       presence_status:
-        box.presence_status ?? (box.person_id ? 'CONFIRMED' : 'TRACKED'),
+        box.presence_status ?? (box.person_id ? "CONFIRMED" : "TRACKED"),
       first_seen_at: box.first_seen_at,
       timer_as_of: box.timer_as_of,
       session_elapsed: box.session_elapsed ?? box.dwell_time ?? 0,
@@ -322,19 +325,16 @@ function eventTimeMs(data: BackendDetectionPayload): number {
     : parsed;
 }
 
-function detectionStreamUrl(
-    cameraId: string,
-    replay = false,
-  ): string {
-    const params = new URLSearchParams({
-      camera_id: cameraId,
-    });
+function detectionStreamUrl(cameraId: string, replay = false): string {
+  const params = new URLSearchParams({
+    camera_id: cameraId,
+  });
 
-    if (replay) {
-      params.set('replay', 'true');
-    }
+  if (replay) {
+    params.set("replay", "true");
+  }
 
-    return `/api/detections/stream?${params.toString()}`;
+  return `/api/detections/stream?${params.toString()}`;
 }
 
 export function useDetectionStream() {
@@ -374,7 +374,7 @@ export function useDetectionStream() {
           id: data.camera_id,
           code: data.camera_id.toUpperCase(),
           name: data.camera_id,
-          stream_url: '',
+          stream_url: "",
           fps: data.fps || 0,
           is_running: true,
           active_people: 0,
@@ -397,36 +397,39 @@ export function useDetectionStream() {
         const y1 = Math.max(0, Math.min(frameHeight, finiteNumber(bbox.y1)));
         const x2 = Math.max(x1, Math.min(frameWidth, finiteNumber(bbox.x2)));
         const y2 = Math.max(y1, Math.min(frameHeight, finiteNumber(bbox.y2)));
-        const rawConfidence = person.confidence == null ? Number.NaN : Number(person.confidence);
+        const rawConfidence =
+          person.confidence == null ? Number.NaN : Number(person.confidence);
         const confidence = Number.isFinite(rawConfidence)
-          ? (rawConfidence <= 1 ? rawConfidence * 100 : rawConfidence)
+          ? rawConfidence <= 1
+            ? rawConfidence * 100
+            : rawConfidence
           : null;
         const elapsed = person.session_elapsed ?? person.dwell_time ?? 0;
 
-        let color: DetectionItem['color'] = 'cyan';
+        let color: DetectionItem["color"] = "cyan";
         let warning = false;
-        let durationSuffix = '';
-        let timerMode: DetectionItem['timerMode'] = 'counting';
-        if (person.presence_status === 'LIMIT') {
-          color = 'red';
+        let durationSuffix = "";
+        let timerMode: DetectionItem["timerMode"] = "counting";
+        if (person.presence_status === "LIMIT") {
+          color = "red";
           warning = true;
-          durationSuffix = ' (LIMIT REACHED)';
-          timerMode = 'limit';
-        } else if (person.presence_status === 'WARNING') {
-          color = 'amber';
+          durationSuffix = " (LIMIT REACHED)";
+          timerMode = "limit";
+        } else if (person.presence_status === "WARNING") {
+          color = "amber";
           warning = true;
-          durationSuffix = ' (LIMIT NEAR)';
-        } else if (person.presence_status === 'CONFIRMED') {
-          color = 'emerald';
-        } else if (person.presence_status === 'VERIFYING') {
-          color = 'cyan';
-          timerMode = 'qualifying';
-        } else if (person.presence_status === 'OFFICIAL_BREAK') {
-          color = 'emerald';
-          timerMode = 'paused';
-        } else if (person.presence_status === 'UNIDENTIFIED') {
-          color = 'cyan';
-          timerMode = 'unidentified';
+          durationSuffix = " (LIMIT NEAR)";
+        } else if (person.presence_status === "CONFIRMED") {
+          color = "emerald";
+        } else if (person.presence_status === "VERIFYING") {
+          color = "cyan";
+          timerMode = "qualifying";
+        } else if (person.presence_status === "OFFICIAL_BREAK") {
+          color = "emerald";
+          timerMode = "paused";
+        } else if (person.presence_status === "UNIDENTIFIED") {
+          color = "cyan";
+          timerMode = "unidentified";
         }
 
         const qualificationRemaining = finiteNumber(
@@ -435,13 +438,13 @@ export function useDetectionStream() {
         const dailyUsed = finiteNumber(person.daily_used_seconds);
         const allowance = finiteNumber(person.allowance_seconds, 30 * 60);
         let timerText = `Jatah terpakai ${formatDuration(dailyUsed)} / ${formatDuration(allowance)}`;
-        if (timerMode === 'qualifying') {
+        if (timerMode === "qualifying") {
           timerText = `${Math.ceil(qualificationRemaining)}s`;
-        } else if (timerMode === 'paused') {
-          timerText = 'Jam istirahat resmi · timer dijeda';
-        } else if (timerMode === 'unidentified') {
+        } else if (timerMode === "paused") {
+          timerText = "Jam istirahat resmi · timer dijeda";
+        } else if (timerMode === "unidentified") {
           timerText = `Belum dikenali · kunjungan ${formatDuration(finiteNumber(person.visit_free_time_seconds))}`;
-        } else if (timerMode === 'limit') {
+        } else if (timerMode === "limit") {
           timerText = `BATAS TERCAPAI · ${formatDuration(dailyUsed)} / ${formatDuration(allowance)}`;
         }
 
@@ -452,8 +455,11 @@ export function useDetectionStream() {
           h: ((y2 - y1) / frameHeight) * 100,
         };
         // Payload lama (`people`) membawa track_id dari engine yang stabil per track.
-        const interpKey = person.track_uuid
-          ?? (Array.isArray(data.people) && person.track_id != null ? String(person.track_id) : undefined);
+        const interpKey =
+          person.track_uuid ??
+          (Array.isArray(data.people) && person.track_id != null
+            ? String(person.track_id)
+            : undefined);
 
         return {
           id: interpKey ?? person.track_id,
@@ -464,15 +470,19 @@ export function useDetectionStream() {
           label: person.identity
             ? `Emp #${person.identity}`
             : `ID #${person.track_id}`,
-          sub: person.presence_status || person.state || 'TRACKED',
-          conf: confidence == null ? '' : `${Math.round(confidence)}%`,
+          sub: person.presence_status || person.state || "TRACKED",
+          conf: confidence == null ? "" : `${Math.round(confidence)}%`,
           extra: timerText,
           elapsedSeconds: finiteNumber(elapsed),
           elapsedObservedAtMs: Date.now(),
-          firstSeenAt: typeof person.first_seen_at === 'number'
-            ? person.first_seen_at : undefined,
-          timerAsOf: typeof person.timer_as_of === 'number'
-            ? person.timer_as_of : undefined,
+          firstSeenAt:
+            typeof person.first_seen_at === "number"
+              ? person.first_seen_at
+              : undefined,
+          timerAsOf:
+            typeof person.timer_as_of === "number"
+              ? person.timer_as_of
+              : undefined,
           durationSuffix,
           timerMode,
           qualificationRemainingSeconds: qualificationRemaining,
@@ -508,8 +518,8 @@ export function useDetectionStream() {
         const streamEpoch = finiteNumber(data.stream_epoch);
         const lastPtsFrame = camera.ptsFrameBuffer.at(-1);
         if (
-          lastPtsFrame
-          && (lastPtsFrame.streamEpoch !== streamEpoch || pts < lastPtsFrame.pts)
+          lastPtsFrame &&
+          (lastPtsFrame.streamEpoch !== streamEpoch || pts < lastPtsFrame.pts)
         ) {
           camera.ptsFrameBuffer.splice(0);
         }
@@ -527,7 +537,7 @@ export function useDetectionStream() {
       camera.active_people = detections.length;
       camera.is_running = true;
     } catch (error) {
-      console.error('[SSE] Failed to parse detection message:', error);
+      console.error("[SSE] Failed to parse detection message:", error);
     }
   }
 
@@ -543,14 +553,19 @@ export function useDetectionStream() {
     const cameraId = camera.id;
     if (!cameraId || eventSources.has(cameraId)) return;
 
-    const directMp4 = camera.stream_url?.toLowerCase().split('?', 1)[0].endsWith('.mp4');
-    const source = new EventSource(detectionStreamUrl(cameraId, Boolean(directMp4)));
+    const directMp4 = camera.stream_url
+      ?.toLowerCase()
+      .split("?", 1)[0]
+      .endsWith(".mp4");
+    const source = new EventSource(
+      detectionStreamUrl(cameraId, Boolean(directMp4)),
+    );
     eventSources.set(cameraId, source);
     source.onopen = () => {
       isConnected.value = true;
       connectionError.value = null;
     };
-    source.addEventListener('detection', (event: MessageEvent) => {
+    source.addEventListener("detection", (event: MessageEvent) => {
       handlePayload(event.data);
     });
     source.onmessage = (event: MessageEvent) => handlePayload(event.data);
@@ -580,14 +595,16 @@ export function useDetectionStream() {
 
   async function fetchCameras() {
     try {
-      const response = await fetch('/api/cameras');
+      const response = await fetch("/api/cameras");
       if (!response.ok) return;
       const json = await response.json();
-      if (json.status !== 'success' || !Array.isArray(json.cameras)) return;
+      if (json.status !== "success" || !Array.isArray(json.cameras)) return;
 
       const backendCameras = json.cameras;
       for (let index = liveCameras.length - 1; index >= 0; index--) {
-        if (!backendCameras.some((item: any) => item.id === liveCameras[index].id)) {
+        if (
+          !backendCameras.some((item: any) => item.id === liveCameras[index].id)
+        ) {
           liveCameras.splice(index, 1);
         }
       }
@@ -595,14 +612,17 @@ export function useDetectionStream() {
       backendCameras.forEach((backendCamera: any) => {
         let camera = liveCameras.find((item) => item.id === backendCamera.id);
         const running =
-          backendCamera.is_running ?? backendCamera.enabled ?? camera?.is_running ?? false;
+          backendCamera.is_running ??
+          backendCamera.enabled ??
+          camera?.is_running ??
+          false;
 
         if (!camera) {
           camera = {
             id: backendCamera.id,
             code: backendCamera.code || backendCamera.id.toUpperCase(),
             name: backendCamera.name || backendCamera.id,
-            stream_url: backendCamera.stream_url || '',
+            stream_url: backendCamera.stream_url || "",
             fps: backendCamera.fps || 0,
             is_running: Boolean(running),
             active_people: backendCamera.active_people || 0,
@@ -621,18 +641,19 @@ export function useDetectionStream() {
       });
       syncCameraStreams();
     } catch (error) {
-      console.debug('[API] Cameras fetch error:', error);
+      console.debug("[API] Cameras fetch error:", error);
     }
   }
 
   async function fetchStats() {
     try {
-      const response = await fetch('/api/stats');
+      const response = await fetch("/api/stats");
       if (!response.ok) return;
       const json = await response.json();
-      if (json.status === 'success' && json.data) Object.assign(liveStats, json.data);
+      if (json.status === "success" && json.data)
+        Object.assign(liveStats, json.data);
     } catch (error) {
-      console.debug('[API] Stats fetch skipped:', error);
+      console.debug("[API] Stats fetch skipped:", error);
     }
   }
 

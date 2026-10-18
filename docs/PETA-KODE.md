@@ -1,7 +1,7 @@
 # Peta Kode
 
 Untuk menemukan file tanpa menjelajah repo. Perbarui saat menambah/memindah modul.
-Per 17 Oktober 2026 (paket ea-r14). Uji ReID di 1060: `docs/UJI-REID-1060.md`.
+Per 18 Oktober 2026 (paket eb-r12b). Uji ReID di 1060: `docs/UJI-REID-1060.md`.
 
 ## Alur data
 
@@ -18,10 +18,11 @@ frontend (Vue + Vite): dashboard, overlay kotak, enrollment, pengaturan
 
 | Hal | File |
 |---|---|
-| Entry point, argumen CLI | `runtime/__main__.py` |
+| Entry point, argumen CLI; fd 2 (stderr C) ke `logs/engine/engine-c-stderr.log` bila ReID+CUDA | `runtime/__main__.py` |
 | Rakit kamera, `set_cameras`, health, detector bersama, gerbang detak, error GPU fatal → keluar kode 3 (`_on_camera_fatal`, `core.gpu_fatal_action`), rasio sibuk dispatcher (`_sample_busy_ratio`) | `runtime/service.py` |
 | Loop per kamera, event presence, overlay `view.frame` (`_maybe_view`), jeda jadwal analisis `schedule_off` (`_apply_analysis_switch`, `core.analysis_off_mode`) | `runtime/camera.py` |
 | Penjadwal berdetak (TickClock, TickGate, kerangka TickScheduler) | `runtime/tick_scheduler.py` |
+| Detector dihemat di kamera kosong (`core.idle_fps`, `IdleDetectionGate`; dipasang di `camera.py::_build`, `Engine.detection_gate`) | `runtime/idle_gate.py` (tes `test_idle_gate.py`) |
 | Langkah pipeline per frame, decimation PTS | `pipeline/engine.py` |
 | Worker rekognisi asinkron | `pipeline/recognition_worker.py` |
 | Antrean rekognisi berprioritas zona; `pop` per kamera dari scheduler bersama (ea-r12) | `pipeline/zoning.py` (tes `test_scheduler_lintas_kamera.py`) |
@@ -38,12 +39,12 @@ frontend (Vue + Vite): dashboard, overlay kotak, enrollment, pengaturan
 | Wajah (SCRFD + AuraFace ONNX), gerbang kualitas sebelum embedding (`embed_*`, `yaw_ratio`), cek bentuk model SCRFD (`_check_static_size`), TensorRT EP + cache (`recognition_providers`, `tensorrt_options`, `ProviderUnavailable`), potongan kepala (`head_crop`) | `identity/face_onnx.py` (tes `test_rekognisi_beban.py`, `test_tensorrt_rekognisi.py`) |
 | Matcher, arbiter identitas, admission, enrollment | `identity/matcher.py`, `identity/arbiter.py`, `identity/admission.py`, `identity/enrollment.py` |
 | ReID berjangkar wajah (logika): pesan antrean, galeri harian, aturan gabung, ANON-xxxx | `identity/reid/messages.py`, `identity/reid/gallery.py`, `identity/reid/merge.py`, `identity/reid/pending.py` (tes `test_reid_*.py`) |
-| ReID model + gerbang crop (dimuat hanya bila `reid.enabled`): OSNet ONNX, pra-proses = kit latih, SHA-256 | `identity/reid/embedder_onnx.py`, `identity/reid/quality.py` (tes `test_reid_embedder.py`) |
+| ReID model + gerbang crop (dimuat hanya bila `reid.enabled`): OSNet ONNX, pra-proses = kit latih, SHA-256, `ReidBucketRunner` (satu session per `reid.batch_buckets`) | `identity/reid/embedder_onnx.py`, `identity/reid/quality.py` (tes `test_reid_embedder.py`, `test_reid_bucket.py`) |
 | ReID dirakit ke kamera (default mati): koordinator + `identity.resolved`, worker embedding, sisi kamera | `pipeline/reid_coordinator.py`, `pipeline/reid_worker.py`, `pipeline/reid_tap.py` (tes `test_reid_runtime.py`); model di `engine/models/reid/` (di-ignore) |
 | Binding track ↔ identitas, interval presence, waktu sampai dikenali (`AssemblerMetrics.identify_delays`) | `presence/binding.py`, `presence/assembler.py` (tes `test_waktu_kenali.py`) |
 | Server NDJSON, pembuat event, outbox SQLite | `api/server.py`, `api/events.py`, `api/outbox.py` |
 | Referensi wajah tersimpan | `store/references.py` (data: `engine/data/references.sqlite3`, di-ignore) |
-| Skema + loader config, profil | `config/schema.py`, `config/loader.py`, `config/*.yaml` (`demo-4060.yaml`, `demo-4060-tick.yaml`, `demo-1060.yaml`) |
+| Skema + loader config, profil | `config/schema.py`, `config/loader.py`, `config/*.yaml` (`demo-4060.yaml`, `demo-4060-tick.yaml`, `demo-1060.yaml`; hemat 5 kamera, belum diukur: `demo-1060-hemat.yaml`, `demo-4060-hemat.yaml`) |
 | Mematikan power throttling Windows | `runtime/winpower.py` |
 | Berkas detak untuk watchdog (`--heartbeat-file`), berkas stop (`--stop-file`) | `runtime/heartbeat.py`, `runtime/service.py` (`_tick_loop`) |
 | Engine palsu untuk BE/FE | `tools/fake_engine/` |
@@ -55,9 +56,10 @@ frontend (Vue + Vite): dashboard, overlay kotak, enrollment, pengaturan
 |---|---|
 | App, daftar router, startup | `main.py` |
 | Config env, database (WAL), keamanan, state | `core/config.py`, `core/database.py`, `core/security.py`, `core/state.py` |
+| Aturan ID ANON- (dicadangkan, bukan karyawan): `is_anon_id`, dipakai ledger/pelanggaran/state/skema employee | `core/identity.py` (tes `test_anon_identity_resolved.py`) |
 | Router (`/api/...`) | `routers/attendance.py`, `auth.py`, `cameras.py`, `enrollments.py`, `notifications.py`, `settings.py`, `stats.py`, `streams.py` (`/api/detections/*`), `system.py`, `violations.py` |
 | Skema Pydantic | `schemas/*.py` (`protocol.py` = pesan engine) |
-| Koneksi ke engine, adaptasi protokol, ingest event | `services/engine_client.py`, `engine_connection_manager.py`, `engine_integration.py`, `protocol_adapter.py`, `event_ingestion.py` |
+| Koneksi ke engine, adaptasi protokol, ingest event (termasuk `identity.resolved` -> atribusi `reid_retro`, `_resolve_identity`) | `services/engine_client.py`, `engine_connection_manager.py`, `engine_integration.py`, `protocol_adapter.py`, `event_ingestion.py` |
 | Jatah free time (ledger kunjungan) | `services/free_time.py`, `break_policy.py`, `policy_service.py` (`configs/policy.yaml`) |
 | Pelanggaran, notifikasi, email | `services/violation_service.py`, `notification_service.py`, `email_service.py` |
 | Login/pengguna | `services/auth_service.py` |
@@ -96,7 +98,7 @@ generator `.xlsx`, halaman report, penyaringan per peran di semua endpoint.
 | SCRFD bentuk tetap 640 -> berdimensi dinamis + verifikasi onnxruntime | `engine/tools/scrfd_dynamic.py` (tes `test_scrfd_dinamis.py`, butuh paket `onnx`) |
 | Env kloningan uji TensorRT (Windows) + pemeriksaannya (`check_gpu_env.py --tensorrt`) | `scripts/setup-env-trt.ps1`, `scripts/check_gpu_env.py`, `docs/SETUP-GPU.md` |
 | Zip ramping untuk sesi Claude | `scripts/pack_for_claude.py` |
-| Kit latih ReID OSNet dari RandPerson (laptop; torch di luar runtime engine) | `tools/reid_train/` — `README.md` (langkah dari nol), `prepare_randperson.py`, `randperson_dataset.py`, `train_osnet.py`, `export_onnx.py`, `eval_reid.py`, `reid_common.py`, `MODEL-CARD.md`, `requirements-train*.txt`, tes di `tests/` (jalankan terpisah: `python -m pytest tools/reid_train/tests -q`) |
+| Kit latih ReID OSNet dari RandPerson (laptop; torch di luar runtime engine) | `tools/reid_train/` — `README.md` (langkah dari nol), `prepare_randperson.py`, `randperson_dataset.py`, `train_osnet.py`, `export_onnx.py`, `eval_reid.py`, `reid_common.py`, `MODEL-CARD.md` (templat; kandidat demo: `MODEL-CARD-osnet-ain-entireid.md`), `requirements-train*.txt`, tes di `tests/` (jalankan terpisah: `python -m pytest tools/reid_train/tests -q`) |
 
 ## Dokumen
 

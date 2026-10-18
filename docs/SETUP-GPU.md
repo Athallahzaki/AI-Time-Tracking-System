@@ -103,12 +103,13 @@ menolak start ("onnxruntime ini tidak membawanya"). Pakai dua jendela PowerShell
 nama env di prompt. Mencampur aktivasi venv/conda di satu jendela juga bisa merusak Python
 (`No module named 'encodings'`, `sys.prefix` menunjuk folder repo): buka jendela baru.
 
-**NVRTC.** cuDNN 9 mencari `nvrtc64_120_0.dll` lewat PATH (salinan di `torch\lib` tidak cukup).
-Tanpa itu, onnxruntime menulis puluhan "Could not locate nvrtc64_120_0.dll" per panggilan.
-`check_gpu_env.py` memeriksanya (baris `nvrtc`). Perbaikan: tambahkan folder yang memuatnya ke PATH
-(mis. `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin`), atau
-`pip install nvidia-cuda-nvrtc-cu12` lalu tambahkan folder `bin`-nya. NVRTC menghilangkan peringatan
-tetapi TIDAK membuat OSNet di onnxruntime cepat (lihat `tools/reid_train/README.md` §9a).
+**NVRTC: JANGAN di PATH** (eb-r12, diukur di 1060 18 Okt). Bila cuDNN 9 menemukan `nvrtc64_120_0.dll`
+lewat PATH, tiap pergantian batch size OSNet di onnxruntime stall detik-an. Tanpa NVRTC, cuDNN menulis
+"Could not locate nvrtc64_120_0.dll" ke stderr C; spam itu kondisi BENAR dan engine mengalihkannya ke
+`logs\engine\engine-c-stderr.log` (±19 KB per 5 menit). `check_gpu_env.py` baris `nvrtc`: OK bila tidak
+di PATH, PERINGATAN bila ada (keluarkan folder `CUDA\vXX\bin` / `nvidia\cuda_nvrtc\bin` dari PATH jendela
+engine). Ini aman karena DLL CUDA/cuDNN engine datang dari pip (`onnxruntime-gpu[cuda,cudnn]`, dimuat
+`preload_dlls`), bukan dari toolkit. Saran lama (ea-r14, "tambahkan ke PATH") sudah dicabut.
 
 ## Sumber versi
 

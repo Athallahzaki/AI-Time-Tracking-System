@@ -1,42 +1,46 @@
 # Serah Terima
 
-Ditulis ulang di akhir setiap sesi. Terakhir: 17 Oktober 2026, sesi EA + EB (paket ea-r14). `SERAH-TERIMA-EA-R3.md` tetap berlaku untuk langkah uji ReID. Angka: CHANGELOG ea-r9 s.d. ea-r14.
+Ditulis ulang di akhir setiap sesi. Terakhir: 18 Oktober 2026, sesi EB (paket eb-r12 + eb-r12b, ReID bucket, diuji di 1060). Status be-r1/eb-r11/ea-r14 dipertahankan. `SERAH-TERIMA-EA-R3.md` tetap berlaku untuk langkah uji ReID.
 
 ## Lingkup
 
-- Prototype = demo klien (gambaran yang jalan). **ReID wajib tampil di demo.** M4 (6 Nov) / M5 (20 Nov) tetap gerbang pra-pilot (dok. 12 §2, dok. 14).
-- RTX 4060 tidak bisa dipakai sampai Senin 19 Okt; akhir pekan pakai laptop 1060 hanya untuk uji fungsi/diagnosis, bukan angka performa 5 kamera.
+- Prototype = demo klien. **ReID wajib tampil di demo.** M4 (6 Nov) / M5 (20 Nov) tetap gerbang pra-pilot (dok. 12 §2, dok. 14).
 
 ## Selesai
 
-- ea-r12 (scheduler per kamera) lulus pytest di laptop. ea-r13: query val kit latih diperbaiki. ea-r14: lihat CHANGELOG.
-- Model ReID: `X:\data\runs\ain_cepat` (5 epoch, val mAP 0,98 sintetis; ±1.000 dtk/epoch). Run 25 epoch BELUM dijalankan.
-- Uji pipa ReID (EA-R3 1–6) di 4060: pipa hidup, cannot-link 0 pelanggaran; dua masalah di bawah.
+- **eb-r12 (terbukti di 1060):** `ReidBucketRunner` (satu session ORT per `reid.batch_buckets` [1,2,4,8]) + fd 2 -> `logs/engine/engine-c-stderr.log` + config `osnet_ain_reid.onnx`. Uji `demo-1060`, video sama, 5 menit: ReID nyala vs mati fps 7,6 vs 6,7, dikenali 17 vs 17; ReID 18 ms/batch (176 batch, 0 basi/ditolak), 4 bucket CUDA, NVRTC tidak termuat, log C 19 KB; 4 `identity.resolved`, dua memindahkan interval (be-r1 `reid_retro` pertama kali dengan engine nyata); validator 0 pelanggaran. `diag_reid_bucket.py`: 358 -> 29 ms median.
+- **Audit torch selesai:** D-FINE (LibreYOLO, `dfine_detector.py:195`) membawa torch ke proses SESUDAH session ReID dibuat; urutan ini terukur aman, opsi subprocess/ONNX-detector tidak diperlukan.
+- **eb-r12b:** status torch/NVRTC dicek ulang setelah detector dimuat (baris start lama menyesatkan); `check_gpu_env.py` nvrtc dibalik (di PATH = PERINGATAN); `SETUP-GPU.md`, `UJI-REID-1060.md`: NVRTC JANGAN di PATH. Engine+kontrak 929 lulus.
+- be-r1, eb-r11, ea-r12..r14: lihat CHANGELOG.
 
 ## Belum (urut untuk demo ReID)
 
-1. **OSNet lambat di onnxruntime** (±9,5 dtk batch >= 4, PyTorch ±32 ms). Jalankan `tools/reid_train/diag_reid_profile.py` (1060 akhir pekan bila ONNX bisa disalin, atau 4060 Senin). Bila InstanceNormalization: `ganti_instancenorm.py` di reid-env, lalu ukur ulang `diag_reid_ort.py`. Bila bukan: backend embedder TorchScript (paket baru, di belakang flag).
-2. Uji ulang validator setelah ea-r14: matikan/nyalakan publish satu stream di tengah run; `stream_epoch` harus naik, 0 GAGAL.
-3. Latih 25 epoch (`--epochs 25 --workers 8`, ±7 jam) di 4060; cek `nvidia-smi` utilisasi GPU.
-4. BE: handler `identity.resolved` + ANON tidak dihitung/memicu pelanggaran sebelum resolved (EA-K1 §2) — wajib sebelum ReID disambung ke backend. Login endpoint baca sebelum demo publik.
-5. Rekaman skenario demo ReID (wajah di kamera A -> membelakangi di kamera B, jeda > 30 dtk atau turunkan `default_travel_time_seconds`); sekalian bahan `eval_reid.py` + ambang sementara.
-6. ea-r15 (tidak menghalangi ReID): giliran frame pertama track baru terbuang; backoff bertingkat track tak dikenal.
-7. Curiga: SCRFD/glintr100 (47–54 ms/wajah) mungkin juga lambat karena onnxruntime; profil dengan `diag_reid_profile.py <onnx wajah>` setelah #1.
-8. EB: korektor offset P18 kebablasan setelah diskontinuitas stream.
+1. **Kalibrasi `match_threshold`** (masih null = usulan 0,80): di uji 1060 cocok galeri 88, dicabut 18 (±20%). `eval_reid.py` di crop berlabel 5 kamera lokasi -> ambang dengan salah gabung <= 1%; isi `reid.model_sha256` (hash 4dc0271f98d1... di laptop) di profil; verifikasi split + lisensi ENTIRe-ID; lengkapi kartu model.
+2. **Profil hemat 1060 belum layak demo:** fps 4 + SCRFD 320 -> 1 dari 28 track dikenali (waktu 24,6 dtk). Ukur `face_bench.py` 640 vs 320 dinamis; bila 320 melewatkan wajah, profil hemat butuh SCRFD 640 atau batch embedding glintr100 (B2).
+3. Rekaman skenario demo ReID (wajah kamera A -> membelakangi kamera B) + `eval_reid.py`.
+4. Uji ujung ke ujung engine ReID -> backend nyata (`identity.resolved` mengubah pemakaian di dashboard).
+5. ea-r15: waktu dikenali maks 84 dtk (frame pertama track baru terbuang; backoff track tak dikenal; WARNING "giliran untuk track yang tidak dikenal binding"). EB: korektor offset P18 kebablasan.
+6. Uji ulang validator setelah ea-r14 (matikan/nyalakan publish satu stream; `stream_epoch` naik, 0 GAGAL).
+7. Gladi 5 kamera dengan ReID: VRAM 4 session x `onnx_gpu_mem_limit_mb`, latensi ReID tetap puluhan ms.
+
+## Di luar lingkup, ditemukan di jalan (belum dikerjakan)
+
+- `/api/auth/login` tanpa rate limit dan `AUTH_COOKIE_SECURE` default `false` (sebelum demo publik).
+- `schemas/enrollment.py` / `set_roster` belum menolak `ANON-`; `report_service` memuat baris ANON (kosmetik).
+- `onnx` tidak ada di `requirements-dev.txt`; tes ONNX sintetis engine dilewati tanpanya.
+- Pesan galat `_session` ("lihat pesan [E:onnxruntime] di atas") kini ada di `engine-c-stderr.log` saat ReID+CUDA.
+- `engine-c-stderr.log` satu berkas append tanpa tanggal (tidak ikut dibersihkan `KeepDays` watchdog); ±2-3 MB/hari, prioritas rendah.
 
 ## Keputusan yang perlu disetujui
 
-- ea-r14 mengubah `factory.build_engine/build_source` dan `PyAVSource` (jalur EB): argumen opsional `stream_epoch_base`, default 0.
-- Engine menolak start bila CUDA diminta tetapi onnxruntime CPU (sebelumnya diam-diam CPU).
+- eb-r12: default `reid.model_path` -> `osnet_ain_reid.onnx`; fd 2 dialihkan otomatis saat ReID+CUDA. eb-r12b: semantik `check_gpu_env.py` nvrtc dibalik. Kontrak tidak berubah.
+- Sebelumnya: be-r1 dari `claude/funny-thompson-nt4y1d`; eb-r11 ditumpuk di atas be-r1; `idle_fps` perlu persetujuan EA sebelum pilot.
 
-## Uji manual di laptop
+## Uji manual di laptop (eb-r12b)
 
-Akhir pekan (1060): ikuti `docs/UJI-REID-1060.md` dari awal (termasuk bila ONNX tidak bisa disalin). Senin (4060):
-
-1. `python -m pytest engine/tests contracts/tests -q`; di reid-env: `python -m pytest tools/reid_train/tests -q`.
-2. `python scripts/check_gpu_env.py`: baris `nvrtc` OK (tambahkan folder CUDA v12.6\bin ke PATH bila PERINGATAN).
-3. Diagnosis OSNet (#1), lalu uji pipa ReID 5 menit + validator (#2). Engine selalu dari jendela `vision-engine`, latihan dari jendela `reid-env`.
+1. Jendela tanpa `CUDA\vXX\bin` di PATH: `python scripts/check_gpu_env.py` -> baris `nvrtc` OK.
+2. `docs/UJI-REID-1060.md` §4 dengan `demo-1060` + ReID: log memuat `ReID [embedder dimuat]: torch tidak ada` lalu, setelah kamera pertama, `ReID [setelah detector dimuat]: torch ada ... terukur aman`; NVRTC tidak termuat di keduanya.
 
 ## Langkah berikutnya
 
-Profil OSNet -> perbaiki jalur embedding -> uji pipa ReID + validator -> latih 25 epoch -> rekam skenario -> BE handler -> demo.
+Kalibrasi ambang ReID + SHA di profil -> rekam skenario demo -> uji backend nyata -> putuskan profil 1060 (hemat vs biasa) -> gladi 5 kamera -> demo.

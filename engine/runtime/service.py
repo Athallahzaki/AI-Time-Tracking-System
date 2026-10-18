@@ -441,6 +441,12 @@ class EngineRuntime:
         with self._detector_lock:
             if self._shared_detector is None:
                 inner = factory.build_detector(config)
+                if self._reid is not None:
+                    # eb-r12: D-FINE membawa torch masuk ke proses SESUDAH session ReID;
+                    # status saat embedder dimuat sudah usang di titik ini.
+                    from ..identity.reid.embedder_onnx import log_cudnn_environment
+
+                    log_cudnn_environment("setelah detector dimuat")
                 if not supports_sharing(inner):
                     return inner
                 shared = SharedDetector(inner, max_batch=config.detector.max_batch,

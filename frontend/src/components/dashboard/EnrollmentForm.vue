@@ -60,17 +60,93 @@ const videoRef = ref(null);
 const mediaStream = ref(null);
 const cameraError = ref(null);
 
-function handleFileChange(e) {
-  const files = Array.from(e.target.files || []);
-  if (files.length === 0) return;
-  addFiles(files);
-  e.target.value = '';
+const isDragging = ref(false);
+const uploadError = ref('');
+let dragDepth = 0;
+
+const ALLOWED_PHOTO_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+]);
+
+function handleFileChange(event) {
+  addFiles(Array.from(event.target.files || []));
+
+  // File yang sama tetap dapat dipilih lagi setelah dihapus.
+  event.target.value = '';
 }
 
 function addFiles(files) {
-  selectedFiles.value = [...selectedFiles.value, ...files];
-  const newPreviews = files.map((f) => URL.createObjectURL(f));
-  previews.value = [...previews.value, ...newPreviews];
+  if (isSubmitting.value) return;
+
+  uploadError.value = '';
+
+  const accepted = [];
+  let rejected = 0;
+
+  for (const file of files) {
+    if (
+      !ALLOWED_PHOTO_TYPES.has(file.type) ||
+      file.size === 0
+    ) {
+      rejected++;
+      continue;
+    }
+
+    accepted.push(file);
+  }
+
+  if (rejected) {
+    uploadError.value =
+      `${rejected} file dilewati. Gunakan foto JPG, PNG, atau WebP yang tidak kosong.`;
+  }
+
+  selectedFiles.value = [
+    ...selectedFiles.value,
+    ...accepted,
+  ];
+
+  previews.value = [
+    ...previews.value,
+    ...accepted.map((file) => URL.createObjectURL(file)),
+  ];
+}
+
+function isFileDrag(event) {
+  return Array.from(event.dataTransfer?.types || [])
+    .includes('Files');
+}
+
+function handleDragEnter(event) {
+  if (!isFileDrag(event) || isSubmitting.value) return;
+
+  dragDepth++;
+  isDragging.value = true;
+}
+
+function handleDragOver(event) {
+  if (!event.dataTransfer) return;
+
+  event.dataTransfer.dropEffect =
+    isSubmitting.value ? 'none' : 'copy';
+}
+
+function handleDragLeave() {
+  dragDepth = Math.max(0, dragDepth - 1);
+
+  if (dragDepth === 0) {
+    isDragging.value = false;
+  }
+}
+
+function handleDrop(event) {
+  dragDepth = 0;
+  isDragging.value = false;
+
+  if (isSubmitting.value) return;
+
+  addFiles(Array.from(event.dataTransfer?.files || []));
 }
 
 function removeImage(idx) {
@@ -269,42 +345,75 @@ async function handleSubmit() {
             <span class="text-xs font-medium text-slate-500">
               {{ selectedFiles.length }} terpilih (min. 3)
             </span>
-          </div>
+            </div>
 
-          <!-- Action buttons: File Upload & Camera Toggle -->
-          <div class="mt-2 grid grid-cols-2 gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              class="h-auto border-dashed border-slate-300 bg-slate-50/50 py-3 text-xs text-slate-700 shadow-none hover:bg-slate-100"
-              @click="fileInputRef?.click()"
-            >
-              <Upload class="text-indigo-600" />
-              Unggah File Foto
-            </Button>
-            <input
-              ref="fileInputRef"
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              multiple
-              class="hidden"
-              @change="handleFileChange"
-            />
+                <!-- Drag-and-drop sekaligus tombol pemilih file. -->
+                <button
+                  type="button"
+                  :disabled="isSubmitting"
+                  class="mt-3 flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-7 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  :class="
+                    isDragging
+                      ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                      : 'border-slate-300 bg-slate-50 text-slate-600 hover:border-indigo-400 hover:bg-indigo-50/50'
+                  "
+                  @click="fileInputRef?.click()"
+                  @dragenter.prevent.stop="handleDragEnter"
+                  @dragover.prevent.stop="handleDragOver"
+                  @dragleave.prevent.stop="handleDragLeave"
+                  @drop.prevent.stop="handleDrop"
+                >
+                  <Upload class="h-7 w-7 text-indigo-600 pointer-events-none" />
 
-            <Button
-              type="button"
-              variant="outline"
-              class="h-auto py-3 text-xs text-slate-700"
-              :class="
-                isCameraActive &&
-                'border-amber-400 bg-amber-50/50 text-amber-800 hover:bg-amber-50'
-              "
-              @click="isCameraActive ? stopCamera() : startCamera()"
-            >
-              <Camera class="text-indigo-600" />
-              {{ isCameraActive ? 'Tutup Kamera' : 'Buka Kamera Web' }}
-            </Button>
-          </div>
+                  <span class="text-sm font-semibold pointer-events-none">
+                    {{
+                      isDragging
+                        ? 'Lepaskan foto di sini'
+                        : 'Tarik foto ke sini atau klik untuk memilih'
+                    }}
+                  </span>
+
+                  <span class="text-xs text-slate-500 pointer-events-none">
+                    JPG, PNG, atau WebP · Bisa beberapa foto sekaligus
+                  </span>
+
+                  <span class="text-xs text-slate-400 pointer-events-none">
+                    Minimal 3 foto referensi wajah
+                  </span>
+                </button>
+
+                <input
+                  ref="fileInputRef"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  multiple
+                  :disabled="isSubmitting"
+                  class="hidden"
+                  @change="handleFileChange"
+                />
+
+                <p
+                  v-if="uploadError"
+                  role="alert"
+                  class="mt-2 text-xs text-red-600"
+                >
+                  {{ uploadError }}
+                </p>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  :disabled="isSubmitting"
+                  class="mt-3 h-auto w-full py-3 text-xs text-slate-700"
+                  :class="
+                    isCameraActive &&
+                    'border-amber-400 bg-amber-50/50 text-amber-800 hover:bg-amber-50'
+                  "
+                  @click="isCameraActive ? stopCamera() : startCamera()"
+                >
+                  <Camera class="text-indigo-600" />
+                  {{ isCameraActive ? 'Tutup Kamera' : 'Buka Kamera Web' }}
+                </Button>
 
           <!-- Live Webcam Box -->
           <div

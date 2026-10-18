@@ -189,6 +189,8 @@ class CameraSupervisor:
         self._stop = threading.Event()
 
         self._engine: Any = None
+        self._idle_gate: Any = None
+        self._idle_logged = False
         self._source: Any = None
         self._zoner: Optional[TrackZoner] = None
         self._queue: Optional[ZonePriorityQueue] = None
@@ -496,6 +498,14 @@ class CameraSupervisor:
 
         self._engine = engine
         self._source = source
+        # eb-r11: gerbang kamera kosong. Baru per pembukaan, mulai AKTIF.
+        self._idle_gate = None
+        self._idle_logged = False
+        if config.idle_fps is not None:
+            from .idle_gate import IdleDetectionGate
+
+            self._idle_gate = IdleDetectionGate(config.idle_fps, config.idle_after_seconds)
+            engine.detection_gate = self._idle_gate.should_detect
         # Engine baru selalu mulai menganalisis; jeda (bila diminta) diterapkan
         # di langkah pertama oleh `_apply_analysis_switch`.
         self._analysis_on = True
@@ -558,12 +568,26 @@ class CameraSupervisor:
             # Analisis dijeda jadwal: stream, epoch, lag, dan offset tetap dipantau;
             # tidak ada track, overlay, heartbeat, atau ReID.
             return
+        self._observe_idle(pts, tracks)
         if self._reid_tap is not None:
             self._reid_tap.step(frame, tracks, pts)
         self._remember_live(frame, tracks, pts)
         self._heartbeats(pts)
         self._unidentified(pts)
         self._maybe_view(frame, tracks, pts)
+
+    def _observe_idle(self, pts: float, tracks: Sequence[Track]) -> None:
+        gate = self._idle_gate
+        if gate is None:
+            return
+        gate.observe(pts, active=bool(tracks) or getattr(self._engine, "last_detection_count", 0) > 0)
+        if gate.idle != self._idle_logged:
+            self._idle_logged = gate.idle
+            logger.info(
+                "[%s] kamera %s (detector dilewati %d kali sejauh ini)", self.spec.camera_id,
+                "kosong: detector diturunkan ke idle_fps" if gate.idle else "aktif lagi: detector penuh",
+                gate.skipped,
+            )
 
     def _on_reconnect(self, frame: Frame, epoch: int) -> None:
         """A new epoch is a new timeline, and the old tracks did not walk out."""

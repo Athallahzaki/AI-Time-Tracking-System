@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
+from backend.core.identity import is_anon_id
 from backend.services.break_policy import break_policy
 from backend.services.free_time import FreeTimeLedger, free_time_ledger
 
@@ -192,14 +193,16 @@ class SystemState:
             track_id = box.get("track_uuid") or box.get("track_id") or f"unknown-{index + 1}"
             tracking_ids.append(track_id)
             person_id = box.get("person_id")
+            # ANON-xxxx = tubuh tanpa wajah: tampil sebagai tak dikenal, bukan karyawan.
+            dikenal = bool(person_id) and not is_anon_id(person_id)
             elapsed = self.update_track(
                 camera_id=camera_id,
                 track_id=track_id,
-                identity=str(person_id) if person_id is not None else None,
+                identity=str(person_id) if dikenal else None,
                 # Face similarity only. The detector score ("confidence") is a
                 # different quantity and must not inflate identity similarity.
                 similarity=float(box.get("similarity") or 0.0),
-                presence_status="CONFIRMED" if person_id else "TRACKED",
+                presence_status="CONFIRMED" if dikenal else "TRACKED",
                 dwell_time=float(box.get("dwell_time") or 0.0),
                 session_elapsed=(
                     float(box["session_elapsed"]) if box.get("session_elapsed") is not None else None

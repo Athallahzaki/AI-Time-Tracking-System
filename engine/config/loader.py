@@ -156,6 +156,8 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
         cpu_threads=int(core.get("cpu_threads", 0) or 0),
         scheduler=str(core.get("scheduler", "free")),
         tick_fps=(float(core["tick_fps"]) if core.get("tick_fps") is not None else None),
+        idle_fps=(float(core["idle_fps"]) if core.get("idle_fps") is not None else None),
+        idle_after_seconds=float(core.get("idle_after_seconds", 10.0)),
         analysis_off_mode=str(core.get("analysis_off_mode", "stop")),
         gpu_fatal_action=str(core.get("gpu_fatal_action", "exit")),
         ingest=IngestConfig(
@@ -262,6 +264,10 @@ def _reid_settings(rid: Dict[str, Any]) -> ReidSettings:
         edge_margin_px=float(rid.get("edge_margin_px", defaults.edge_margin_px)),
         embed_interval_seconds=float(rid.get("embed_interval_seconds", defaults.embed_interval_seconds)),
         max_batch=int(rid.get("max_batch", defaults.max_batch)),
+        batch_buckets=(
+            tuple(int(b) for b in rid["batch_buckets"]) if rid.get("batch_buckets")
+            else defaults.batch_buckets
+        ),
         worker_queue=int(rid.get("worker_queue", defaults.worker_queue)),
         max_age_seconds=float(rid.get("max_age_seconds", defaults.max_age_seconds)),
         onnx_providers=(

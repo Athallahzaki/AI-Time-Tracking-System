@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional, Set
 
 from backend.core.database import save_violation
+from backend.core.identity import is_anon_id
 from backend.services.break_policy import break_policy
 from backend.services.free_time import free_time_ledger
 from backend.services.notification_service import notification_service
@@ -27,6 +28,9 @@ class ViolationService:
         local_date: str,
         now: Optional[float] = None,
     ) -> Optional[Dict[str, Any]]:
+        if is_anon_id(person_id):
+            return None  # kontrak: ANON tidak dihitung/dinotifikasi sebelum identity.resolved
+
         now = now if now is not None else datetime.now().timestamp()
 
         usage = free_time_ledger.usage(
@@ -100,6 +104,8 @@ class ViolationService:
             value = item.get("person_id")
             if value is not None:
                 people.add(str(value))
+
+        people = {pid for pid in people if not is_anon_id(pid)}
 
         if not people:
             return []

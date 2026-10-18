@@ -94,18 +94,19 @@ def test_pasangan_onnxruntime_tensorrt(ort, trt, status):
         assert "tensorrt-cu12-libs==10.9.*" in check.detail and "setup-env-trt.ps1" in check.detail
 
 
-def test_nvrtc_di_path_ok_di_tempat_lain_peringatan(tmp_path):
-    """ea-r14: cuDNN 9 mencari NVRTC lewat PATH; di torch/lib saja tidak cukup (uji 17 Okt)."""
+def test_nvrtc_di_path_peringatan_di_tempat_lain_ok(tmp_path):
+    """cuDNN 9 mencari NVRTC lewat PATH (uji 17 Okt). eb-r12: yang ditemukan = stall ganti batch ReID."""
     di_path, lain = tmp_path / "a", tmp_path / "b"
     di_path.mkdir(); lain.mkdir()
     (lain / "nvrtc64_120_0.dll").write_bytes(b"x")
     assert env.find_nvrtc([di_path], "nvrtc64_12*.dll") is None
     temuan = env.find_nvrtc([di_path, lain], "nvrtc64_12*.dll")
     assert temuan is not None and temuan.name == "nvrtc64_120_0.dll"
-    assert env.check_nvrtc(temuan, None).status == "OK"
-    hasil = env.check_nvrtc(None, temuan)
+    # eb-r12: NVRTC di PATH = cuDNN memakainya = stall ganti batch ReID.
+    hasil = env.check_nvrtc(temuan, None)
     assert hasil.status == "PERINGATAN" and "PATH" in hasil.detail
-    assert env.check_nvrtc(None, None).status == "PERINGATAN"
+    assert env.check_nvrtc(None, temuan).status == "OK"
+    assert env.check_nvrtc(None, None).status == "OK"
 
 
 def test_folder_kandidat_nvrtc(tmp_path):

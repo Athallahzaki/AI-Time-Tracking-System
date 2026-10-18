@@ -7,6 +7,144 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-10-18 · paket eb-r12b — Status torch/NVRTC dicek ulang setelah detector; NVRTC jangan di PATH
+
+Jalur EB. Penutup eb-r12 setelah uji engine nyata di laptop 1060. Kontrak, `engine/ports/`, backend tidak disentuh.
+
+**Hasil uji 1060 (18 Okt, `demo-1060`, video sama, 5 menit 1 kamera).** ReID nyala vs mati: fps analisis 7,6
+vs 6,7; track.identified 17 vs 17; 59 vs 60 track. ReID: 182 embedding / 176 batch, rata-rata 18 ms/batch, basi 0,
+ditolak 0; keempat bucket di CUDA; NVRTC tidak termuat; log stderr C 19 KB. Pipa: 4 `identity.resolved`
+(`face_confirmed`), dua memindahkan interval ANON -> EMP001; validator 0 pelanggaran. Catatan: cocok galeri 88,
+dicabut 18 (`match_threshold` belum dikalibrasi). Profil `demo-1060-hemat` (fps 4, SCRFD 320): 1 dari 28 track dikenali.
+
+**Apa yang berubah**
+
+- `engine/identity/reid/embedder_onnx.py`: `log_cudnn_environment(stage)`; pesan memuat tahap. torch yang SUDAH
+  ada saat embedder dimuat = WARNING (ORT bisa memakai cuDNN torch); torch sesudah detector = INFO (terukur aman).
+- `engine/runtime/service.py` `_detector_for`: bila ReID aktif, status dicek ulang tepat setelah detector pertama
+  dimuat. Alasan: D-FINE (LibreYOLO) membawa torch masuk sesudah session ReID, jadi baris "torch tidak ada" saat
+  start menyesatkan. ReID mati = tidak ada import/log baru.
+- `scripts/check_gpu_env.py` `check_nvrtc` dibalik: NVRTC di PATH = PERINGATAN, tidak di PATH = OK (dulu ea-r14
+  kebalikannya). `docs/SETUP-GPU.md` dan `docs/UJI-REID-1060.md` §1.2/§4 ikut: NVRTC JANGAN di PATH, hasil acuan,
+  peringatan profil hemat.
+
+**Uji.** `engine/tests/test_reid_bucket.py` (+4: level per tahap, `_detector_for` memanggil hanya bila ReID aktif),
+`engine/tests/test_check_gpu_env.py` (disesuaikan). `python -m pytest engine/tests contracts/tests -q`: 925 -> 929
+lulus, 8 dilewati. Backend 117 lulus.
+
+## 2026-10-18 · paket eb-r12 — ReID: satu session ONNX per bucket batch, fd 2 dialihkan, model OSNet-AIN
+
+Jalur EB (Engine B, ReID). `engine/ports/`, kontrak, backend, dan `tools/reid_train/` tidak disentuh.
+
+**Alasan.** Diukur di Windows/GTX 1060 (ORT 1.26 CUDA EP): CUDA EP hanya menyimpan plan conv cuDNN untuk shape
+terakhir per session, jadi tiap pergantian batch size = replan ±350 ms (10-18 dtk bila torch ada di proses dan
+cuDNN memakai NVRTC dari torch\lib). Satu session per bucket {1,2,4,8} dengan padding nol: median 347 -> 28
+ms/frame, frame >100 ms 175/200 -> 0/200, selisih embedding maks 3,7e-8 (`tools/reid_train/diag_reid_bucket.py`).
+
+**Apa yang berubah**
+
+- `engine/identity/reid/embedder_onnx.py`: kelas baru `ReidBucketRunner` (satu session per bucket, warmup 3x
+  input nol dengan shape bucket sendiri, padding nol ke bucket terkecil >= n, potong kembali ke n, n > bucket
+  terbesar dipecah, n = 0 -> `(0, dim)` tanpa memanggil session). `OnnxReidEmbedder` memakainya; API publik
+  (`embed`/`__call__`, `build_reid_embedder`) tetap. Kosong kini `(0, dim)`, bukan `(0, 0)`. Entri CUDA EP
+  mendapat `cudnn_conv_algo_search: HEURISTIC` (batas VRAM tetap). Log provider aktif per session; WARNING bila
+  bukan CUDA. Setelah warmup: log torch di `sys.modules` (WARNING bila ada) dan, khusus Windows, NVRTC termuat.
+- `engine/config/schema.py`, `loader.py`: `reid.batch_buckets` (default `[1, 2, 4, 8]`, naik ketat, >= 1).
+  Default `reid.model_path` -> `engine/models/reid/osnet_ain_reid.onnx`; 5 profil `demo-*.yaml` ikut (plus
+  `batch_buckets` eksplisit). `model_sha256` tetap null (model di-ignore, tidak ada di repo).
+- `engine/runtime/__main__.py`: bila `reid.enabled` dan CUDA diminta di `reid.onnx_providers`, fd 2 dialihkan ke
+  `logs/engine/engine-c-stderr.log` (append) sebelum session dibuat; `sys.stderr` Python (traceback, logging)
+  tetap ke konsol. `--no-stderr-redirect` mematikan. Spam "Could not locate nvrtc64_120_0.dll" = kondisi benar.
+- `docs/UJI-REID-1060.md`: nama berkas model tujuan -> `osnet_ain_reid.onnx`.
+
+**Uji.** Baru `engine/tests/test_reid_bucket.py` (model sintetis Conv -> InstanceNorm -> Relu -> GAP -> Flatten,
+CPU EP; n = 0,1,3,5,8,9,10 selisih < 1e-5; shape per session; pemecahan; config; fd 2 via subprocess; uji GPU
+model asli dilewati tanpa CUDA/model; session-nya dibuat lewat `face_onnx._session` supaya DLL CUDA dari pip
+ di-preload dan jatuh ke CPU = galat, bukan angka ms CPU). Butuh `onnx` (importorskip; tidak ada di requirements-dev).
+`python -m pytest engine/tests contracts/tests -q`: 901 -> 925 lulus, 8 dilewati. Backend 117 lulus.
+
+## 2026-10-18 · dokumen — Kartu model ReID kandidat demo (RandPerson + fine-tune ENTIRe-ID)
+
+Dokumen saja; kode tidak berubah. Baru `tools/reid_train/MODEL-CARD-osnet-ain-entireid.md`, angkanya disalin oleh
+skrip dari 5 CSV Colab yang diunggah user. Ringkas: fine-tune ENTIRe-ID (split sendiri) mAP 0,68, Market-1501 0,40;
+RandPerson saja 0,22 / 0,43; jenuh sejak epoch 15; evaluasi ulang model yang sama bergeser ±0,007 (derau).
+Belum ada: SHA ONNX, verifikasi split, lisensi ENTIRe-ID, dan eval/ambang di crop kamera lokasi. SERAH-TERIMA #3
+dan PETA-KODE diperbarui.
+
+## 2026-10-18 · paket eb-r11 — Detector dihemat di kamera kosong (`core.idle_fps`) + profil hemat 1060/4060
+
+Dasar: be-r1 (branch `be/2026-10-18-anon-identity-resolved`; paket ini ditumpuk di atasnya agar SERAH-TERIMA
+tetap satu alur). Jalur EB. `engine/ports/`, kontrak, dan backend tidak disentuh. **Default tidak berubah**:
+`core.idle_fps` default `null` (mati); profil lama `demo-1060.yaml` / `demo-4060.yaml` / `demo-4060-tick.yaml` utuh.
+
+**Alasan.** Anggaran GPU 5 kamera tidak cukup pada fps profil demo: 1060 D-FINE S 48 ms x 5 kamera x 8 fps
+±1,9 dtk GPU per detik; 4060 ±20 ms x 5 x 10 fps ±1 dtk (jenuh; gladi yang lulus 6 fps). Lima ruangan jarang
+ramai bersamaan, tetapi kamera kosong dianalisis secepat kamera ramai.
+
+**Apa yang berubah**
+
+- Baru `engine/runtime/idle_gate.py` (`IdleDetectionGate`): dalam detik PTS, kamera tanpa track/deteksi selama
+  `idle_after_seconds` hanya menjalankan detector `idle_fps` kali per detik; satu deteksi/track langsung penuh
+  lagi; timeline mundur = mulai lagi dari aktif.
+- `pipeline/engine.py`: `detection_gate` (None = lama) dicek sebelum detector; bila False, detector dilewati dan
+  tracker menerima nol deteksi (seperti jeda analisis, tanpa reset tracker). `last_detection_count` baru.
+- `runtime/camera.py`: gerbang dibuat per pembukaan bila `idle_fps` diisi; `_observe_idle` melaporkan aktivitas
+  (track atau deteksi) dan menulis log INFO saat kamera masuk/keluar keadaan kosong.
+- `config/schema.py` + `loader.py`: `core.idle_fps` (null), `core.idle_after_seconds` (10). Ditolak: `idle_fps <= 0`,
+  `idle_fps >= target_fps`, `idle_after_seconds < 0`.
+- Baru `config/demo-1060-hemat.yaml` (target 4 fps, idle 1 fps, detector 512, SCRFD dinamis 320, batas VRAM
+  rekognisi 1024 MB) dan `config/demo-4060-hemat.yaml` (target 6 fps, idle 2 fps, SCRFD dinamis 320). Keduanya
+  butuh `scrfd_10g_bnkps_dinamis.onnx` dari `engine/tools/scrfd_dynamic.py`; tanpa itu engine menolak start (kode 2).
+  Gerbang embedding (`embed_*`) sengaja tetap mati: uji ea-r10 (92% wajah < 56 px, identifikasi molor ±56 dtk).
+
+**Konsekuensi yang disengaja.** Orang yang masuk ruangan kosong terlihat paling lambat 1/`idle_fps` dtk kemudian
+(lalu tracker butuh beberapa frame penuh untuk konfirmasi); `at` track.started bergeser sebesar itu. Decode CPU
+tidak berkurang (frame tetap dibaca); yang dihemat GPU detector.
+
+**Cara uji.** `python -m pytest engine/tests contracts/tests -q`: sebelum 878 lulus / 10 dilewati, sesudah 894 / 10
+(+16 di `engine/tests/test_idle_gate.py`: gerbang murni, config, `Engine.step` dengan detector palsu, CameraSupervisor
+mock, profil hemat dimuat). Backend 268 lulus. `policy_grep` bersih. Laptop: lihat SERAH-TERIMA.
+
+## 2026-10-18 · paket be-r1 — ANON tidak dihitung/dinotifikasi + handler `identity.resolved`
+
+Dasar: HEAD `claude/funny-thompson-nt4y1d` (bukan `Claude-Branch`, yang tertinggal 8 commit dan tidak punya
+mekanisme atribusi). Jalur BE. `engine/`, `contracts/schema/`, `engine/ports/` tidak disentuh. Nomor `be-r1`
+dipilih karena CHANGELOG belum punya entri `be-r*`; tim BE perlu mengonfirmasi.
+
+**Masalah.** Backend memperlakukan `person_id` `ANON-xxxx` (kelompok ReID tanpa wajah) sebagai karyawan, padahal
+kontrak (`$defs.anon_id`) melarangnya sebelum `identity.resolved`. Satu `presence.interval` ANON 45 menit
+menghasilkan `usage` "exceeded" -> `save_violation` -> notifikasi + email HR untuk "ANON-7f3a" (direproduksi
+sebagai tes merah di kode lama). Event `identity.resolved` lolos validasi dan tersimpan, tetapi tidak ada handler:
+`moved_intervals` tidak pernah dipindah, jadi waktu karyawan kurang.
+
+**Apa yang berubah**
+
+- Baru `backend/core/identity.py` (`ANON_PREFIX`, `is_anon_id`), dipakai ledger, pelanggaran, state, dan skema.
+- `services/free_time.py`: track/segmen/`usage`/`known_person_ids` ber-ID ANON tidak dihitung. `identity.resolved`
+  ditambahkan ke `TRACKED_TYPES`; track terbuka di `track_uuids` langsung dialihkan ke karyawan tanpa menunggu
+  heartbeat (juga saat `rebuild_from_database`). `start_ts` tidak diubah, jadi dihitung sejak awal track; bagian yang
+  sudah menjadi interval ANON yang dipindah sudah menggeser `start_ts` (cabang `presence.interval`), tidak dobel.
+- `services/violation_service.py`: `evaluate()` mengembalikan `None` untuk ANON; `evaluate_event()` membuang ANON.
+- `services/event_ingestion.py`: cabang `identity.resolved`. Satu baris `identity_attributions`
+  (`original_person_id=anon_id`, `attribution_source=reid_retro`, tanpa `camera_id`/`track_uuid` karena kelompok bisa
+  lintas kamera) dengan jendela = min `start_at` .. max `end_at` semua `moved_intervals` (dibaca dari
+  `protocol_events`). Pemindahan sebenarnya memakai `get_presence_intervals` yang sudah ada (interval ditimpa
+  dengan `identity_source=reid_retro`), sehingga ledger, laporan, dan sesi ikut benar. Tujuan tidak ada di master
+  -> `needs_hr_review` `missing_employee`, tidak dipindah, tidak dinilai. Selain itu: `mark_report_dirty` untuk
+  semua tanggal lokal yang tersentuh (lintas tengah malam), lalu `violation_service.evaluate` per tanggal
+  (dedupe per orang+tanggal dan `dedupe_key` notifikasi tetap berlaku). Replay (outbox+seq sama) berhenti di
+  `save_protocol_event`, jadi tidak ada atribusi/pelanggaran ganda.
+- `schemas/employee.py`: `employee_id` berawalan `ANON-` ditolak (422) di Create dan Update.
+- `core/state.py`: box ber-ID ANON ditandai `TRACKED` tanpa identitas (tampil tak dikenal); `box["person_id"]` utuh.
+- Sengaja tidak diubah: daftar `anonymous` di `report_service`; `/api/attendance/sessions` tetap menampilkan
+  sesi atas ID ANON sebagai string (tidak memicu pelanggaran).
+
+**Cara uji.** Baseline `python -m pytest backend/tests contracts/tests -q`: 252 lulus / 0 gagal. Sesudah:
+268 lulus / 0 gagal (+16 di `backend/tests/test_anon_identity_resolved.py`; 14 dari 16 merah di kode lama).
+`backend/tests/test_boundary.py` lulus; `policy_grep.py engine/` bersih. Tes mencakup fixture
+`reid-tertunda` ujung ke ujung, ANON > 30 menit tanpa pelanggaran/notifikasi, resolved lintas kamera dan lintas
+tengah malam, tujuan tak ada di master, replay, dan 422 untuk employee `ANON-1`.
+
 ## 2026-10-17 · paket ea-r14 — stream_epoch saat kamera dibuka ulang, penjaga onnxruntime CPU, cek NVRTC, alat diagnosis OSNet
 
 Dasar: ea-r13. Jalur EA + EB (menyentuh `ingest/` dan `factory.py` milik EB). Kontrak dan `backend/` tidak

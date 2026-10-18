@@ -49,14 +49,14 @@ ingest:
   offset_correction: "slew"         # "slew" | "none". Hanya aktif dengan live_buffer:
                                     # latest: bias offset jam (keyframe lama dari
                                     # MediaMTX) dikoreksi maks 0,1 dtk/dtk (P18).
-  hwaccel: "none"                   # "none" | "cuda" (NVDEC). Frame tetap disalin
+  hwaccel: "cuda"                   # "none" | "cuda" (NVDEC). Frame tetap disalin
                                     # balik ke RAM; hemat CPU decode, bukan PCIe.
 
 core:
   source_uri: "samples/room.mp4"   # "0" for webcam, "rtsp://..." for a camera, or a file path
   source_type: "video_file"        # opencv | video_file | mock
   detection_interval: 1            # 1 is the only safe value until ARCHITECTURE.md §9 item 7 is fixed
-  target_fps: 8.0                  # DEMO 1060: bukan 12. Detector S 48 ms + rekognisi ±34 ms/wajah
+  target_fps: 4.0                  # DEMO 1060: bukan 12. Detector S 48 ms + rekognisi ±34 ms/wajah
                                    # + CPU laptop yang throttle (1,5-2,5 GHz). 8 fps stabil lebih
                                    # baik daripada 12 yang naik-turun. Naikkan ke 10 hanya bila
                                    # gladi resik (lag_probe) menunjukkan sisa waktu.
@@ -122,15 +122,16 @@ recognition:
 #   4. enabled: true. Butuh recognition.recognizer onnx_face (galeri diisi dari wajah).
 # Model hilang/rusak/SHA salah atau CUDA diminta tapi jatuh ke CPU = engine menolak start.
 reid:
-  enabled: false
-  model_path: "engine/models/reid/osnet_reid.onnx"
+  enabled: true
+  model_path: "engine/models/reid/osnet_ain_reid.onnx"
   model_sha256: null
-  match_threshold: null           # ditahan: belum ada kalibrasi di kamera lokasi
+  match_threshold: 0.8           # ditahan: belum ada kalibrasi di kamera lokasi
   min_crop_height_px: 96          # crop badan lebih pendek tidak di-embed
   embed_interval_seconds: 15      # per track; plus saat track baru & wajah baru terkonfirmasi
   max_batch: 8
+  batch_buckets: [1, 2, 4, 8]    # eb-r12: satu session ONNX per bucket, tanpa replan cuDNN
   onnx_providers: ["CUDAExecutionProvider", "CPUExecutionProvider"]
-  onnx_gpu_mem_limit_mb: 512       # 1060 6 GB: VRAM dibagi D-FINE + SCRFD + AuraFace
+  onnx_gpu_mem_limit_mb: 3072       # 1060 6 GB: VRAM dibagi D-FINE + SCRFD + AuraFace
   # Waktu tempuh minimum antar lokasi (detik, simetris). Pasangan yang tidak ditulis
   # memakai default_travel_time_seconds yang sengaja ketat. Isi setelah diukur di lokasi.
   travel_time_seconds: {}
@@ -150,14 +151,14 @@ detector:
   cudnn_benchmark: false
   cuda_graph: true               # S: 56 -> 48 ms, identik. Bila aneh saat gladi: false (hilang ±7 ms).
                                  # Butuh libreyolo >= 1.6 (1.5 jatuh ke eager dengan peringatan).
-  fast_preprocess: false         # hanya untuk frame >= 640x640; video demo 848x478.
+  fast_preprocess: true         # hanya untuk frame >= 640x640; video demo 848x478.
   share_across_cameras: true
   batch_inference: false         # 1 kamera: tidak ada yang di-batch.
   max_batch: 8
   batch_wait_ms: 4.0
 
 tracker:
-  backend: "iou"
+  backend: "bytetrack"
   track_threshold: 0.45
   match_threshold: 0.8
   track_buffer_seconds: 1.0
