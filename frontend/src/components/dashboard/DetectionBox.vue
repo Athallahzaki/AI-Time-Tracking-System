@@ -1,91 +1,178 @@
 <script setup>
 import { computed } from 'vue';
-import { identitySourceMeta } from '@/lib/format';
 
 const props = defineProps({
   detection: { type: Object, required: true },
   compact: { type: Boolean, default: false },
 });
 
-const colorMap = {
-  emerald:
-    'border-emerald-400 text-emerald-300 shadow-[0_0_8px_rgba(52,211,153,0.3)]',
-  amber:
-    'border-amber-400 text-amber-300 shadow-[0_0_8px_rgba(251,191,36,0.3)]',
-  red: 'border-red-400 text-red-300 shadow-[0_0_8px_rgba(248,113,113,0.4)]',
-  cyan: 'border-cyan-400 text-cyan-300 shadow-[0_0_8px_rgba(34,211,238,0.3)]',
+const colors = {
+  emerald: '#6ee7b7',
+  amber: '#facc15',
+  red: '#f87171',
+  cyan: '#e2e8f0',
 };
 
-// Label sumber identitas (dok. 12 §3.6). ReID ditandai warna berbeda supaya HR
-// tahu identitasnya disambung lewat tubuh, bukan wajah.
-const source = computed(() => identitySourceMeta(props.detection.identitySource));
-const sourceTone = computed(() =>
-  props.detection.identitySource === 'reid' || props.detection.identitySource === 'reid_retro'
-    ? 'bg-violet-500/90 text-white'
-    : 'bg-white/15 text-white/90',
+const boxColor = computed(() =>
+  props.detection.warning
+    ? colors.red
+    : colors[props.detection.color] || colors.cyan,
 );
+
+const label = computed(() => {
+  const detection = props.detection;
+
+  return detection.label ||
+    (detection.track_id != null
+      ? `ID ${detection.track_id}`
+      : '');
+});
+
+const identitySource = computed(() => {
+  const source = props.detection.identitySource;
+
+  if (source === 'reid' || source === 'reid_retro') {
+    return 'ReID';
+  }
+
+  return '';
+});
 </script>
 
 <template>
   <div
-    class="pointer-events-none absolute rounded border-2 transition-[border-color,box-shadow] duration-150"
-    :class="colorMap[detection.color] || colorMap.emerald"
+    class="detection-box"
+    :class="{ compact }"
     :style="{
       top: detection.top,
       left: detection.left,
       width: detection.width,
       height: detection.height,
+      '--box-color': boxColor,
     }"
   >
-    <!-- Top label badge — ukuran teks dinaikkan (9/10px → 10/13px) untuk keterbacaan -->
-    <div
-      class="absolute left-0 z-10 whitespace-nowrap rounded font-semibold tracking-wide backdrop-blur-xs transition-colors"
-      :class="[
-        compact
-          ? 'text-[10px] sm:text-[11px] px-1.5 py-0.5'
-          : 'text-[11px] sm:text-[13px] px-1.5 sm:px-2 py-0.5 sm:py-1',
-        parseFloat(detection.top) < 7 ? 'top-1' : '-top-6 sm:-top-7',
-        detection.warning
-          ? 'bg-red-500/90 text-white'
-          : 'bg-slate-950/85 text-white border border-white/10',
-      ]"
-    >
-      <span v-if="detection.sub">{{ detection.sub }}</span>
-      <span v-if="detection.conf"> · {{ detection.conf }}</span>
-      <span
-        v-if="source"
-        class="ml-1 rounded px-1 text-[9px] font-bold tracking-normal uppercase"
-        :class="sourceTone"
-        :title="source.hint"
-      >{{ source.short }}</span>
+    <!-- Garis tipis yang menghubungkan empat sudut. -->
+    <div class="outline"></div>
+
+    <!-- Sudut tebal seperti referensi. -->
+    <span class="corner top-left"></span>
+    <span class="corner top-right"></span>
+    <span class="corner bottom-left"></span>
+    <span class="corner bottom-right"></span>
+
+    <!-- Nama / ID kecil di dalam kotak. -->
+    <div v-if="label" class="identity">
+      <span>{{ label }}</span>
+      <span v-if="identitySource" class="source">
+        {{ identitySource }}
+      </span>
     </div>
 
-    <!-- Bottom duration / extra badge — ikut dinaikkan agar konsisten dengan label atas -->
-    <div
-      v-if="detection.extra"
-      class="absolute -bottom-6 sm:-bottom-7 left-0 z-10 whitespace-nowrap rounded px-1.5 sm:px-2 py-0.5 sm:py-1 font-medium backdrop-blur-xs transition-colors"
-      :class="[
-        compact ? 'text-[10px] sm:text-[11px]' : 'text-[15px] sm:text-[16px]',
-        detection.warning
-          ? 'bg-red-500/90 text-white'
-          : 'bg-slate-950/85 text-white border border-white/10'
-      ]"
-    >
+    <!-- Timer tetap terlihat tanpa badge besar. -->
+    <div v-if="detection.extra" class="timer">
       {{ detection.extra }}
     </div>
-
-    <!-- HUD corner accents -->
-    <span
-      class="absolute -left-0.5 -top-0.5 h-1.5 w-1.5 border-l-2 border-t-2 border-white/80"
-    ></span>
-    <span
-      class="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 border-r-2 border-t-2 border-white/80"
-    ></span>
-    <span
-      class="absolute -bottom-0.5 -left-0.5 h-1.5 w-1.5 border-b-2 border-l-2 border-white/80"
-    ></span>
-    <span
-      class="absolute -bottom-0.5 -right-0.5 h-1.5 w-1.5 border-b-2 border-r-2 border-white/80"
-    ></span>
   </div>
 </template>
+
+<style scoped>
+.detection-box {
+  position: absolute;
+  pointer-events: none;
+  color: var(--box-color);
+  box-sizing: border-box;
+  --corner-size: 18px;
+  --corner-thickness: 3px;
+}
+
+.outline {
+  position: absolute;
+  inset: 0;
+  border: 1px dashed currentColor;
+  border-radius: 5px;
+  opacity: 0.35;
+}
+
+.corner {
+  position: absolute;
+  width: min(var(--corner-size), 35%);
+  height: min(var(--corner-size), 35%);
+  box-sizing: border-box;
+  border: 0 solid currentColor;
+}
+
+.top-left {
+  top: 0;
+  left: 0;
+  border-top-width: var(--corner-thickness);
+  border-left-width: var(--corner-thickness);
+  border-top-left-radius: 5px;
+}
+
+.top-right {
+  top: 0;
+  right: 0;
+  border-top-width: var(--corner-thickness);
+  border-right-width: var(--corner-thickness);
+  border-top-right-radius: 5px;
+}
+
+.bottom-left {
+  bottom: 0;
+  left: 0;
+  border-bottom-width: var(--corner-thickness);
+  border-left-width: var(--corner-thickness);
+  border-bottom-left-radius: 5px;
+}
+
+.bottom-right {
+  bottom: 0;
+  right: 0;
+  border-bottom-width: var(--corner-thickness);
+  border-right-width: var(--corner-thickness);
+  border-bottom-right-radius: 5px;
+}
+
+.identity,
+.timer {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  width: fit-content;
+  max-width: calc(100% - 12px);
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: rgb(0 0 0 / 45%);
+  color: #fff;
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.identity {
+  top: 6px;
+}
+
+.timer {
+  bottom: 6px;
+}
+
+.source {
+  margin-left: 5px;
+  color: #c4b5fd;
+  font-size: 9px;
+}
+
+.compact {
+  --corner-size: 12px;
+  --corner-thickness: 2px;
+}
+
+.compact .identity,
+.compact .timer {
+  font-size: 9px;
+}
+</style>

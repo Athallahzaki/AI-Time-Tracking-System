@@ -322,15 +322,19 @@ function eventTimeMs(data: BackendDetectionPayload): number {
     : parsed;
 }
 
-function detectionStreamUrl(cameraId: string, replay = false): string {
-  const configured = import.meta.env.VITE_API_URL as string | undefined;
-  const base =
-    configured ||
-    (window.location.port === '5173'
-      ? '/api/detections/stream'
-      : 'http://localhost:8000/api/detections/stream');
-  const separator = base.includes('?') ? '&' : '?';
-  return `${base}${separator}camera_id=${encodeURIComponent(cameraId)}${replay ? '&replay=true' : ''}`;
+function detectionStreamUrl(
+    cameraId: string,
+    replay = false,
+  ): string {
+    const params = new URLSearchParams({
+      camera_id: cameraId,
+    });
+
+    if (replay) {
+      params.set('replay', 'true');
+    }
+
+    return `/api/detections/stream?${params.toString()}`;
 }
 
 export function useDetectionStream() {

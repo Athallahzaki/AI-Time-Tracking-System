@@ -15,6 +15,7 @@ import json
 import urllib.error
 import urllib.request
 from pathlib import Path
+from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
 LAUNCHER_VERSION = "2026.09.22-windows-v2"
@@ -23,6 +24,8 @@ MODE_CONFIGS = {
     "direct": ROOT / "backend" / "configs" / "cameras.yaml",
     "mediamtx": ROOT / "backend" / "configs" / "cameras.mediamtx.yaml",
 }
+
+load_dotenv(ROOT / ".env", override=False)
 
 
 def check_mediamtx() -> None:
