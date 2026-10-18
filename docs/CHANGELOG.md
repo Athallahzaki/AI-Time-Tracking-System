@@ -7,6 +7,48 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-10-18 · dokumen — Kartu model ReID kandidat demo (RandPerson + fine-tune ENTIRe-ID)
+
+Dokumen saja; kode tidak berubah. Baru `tools/reid_train/MODEL-CARD-osnet-ain-entireid.md`, angkanya disalin oleh
+skrip dari 5 CSV Colab yang diunggah user. Ringkas: fine-tune ENTIRe-ID (split sendiri) mAP 0,68, Market-1501 0,40;
+RandPerson saja 0,22 / 0,43; jenuh sejak epoch 15; evaluasi ulang model yang sama bergeser ±0,007 (derau).
+Belum ada: SHA ONNX, verifikasi split, lisensi ENTIRe-ID, dan eval/ambang di crop kamera lokasi. SERAH-TERIMA #3
+dan PETA-KODE diperbarui.
+
+## 2026-10-18 · paket eb-r11 — Detector dihemat di kamera kosong (`core.idle_fps`) + profil hemat 1060/4060
+
+Dasar: be-r1 (branch `be/2026-10-18-anon-identity-resolved`; paket ini ditumpuk di atasnya agar SERAH-TERIMA
+tetap satu alur). Jalur EB. `engine/ports/`, kontrak, dan backend tidak disentuh. **Default tidak berubah**:
+`core.idle_fps` default `null` (mati); profil lama `demo-1060.yaml` / `demo-4060.yaml` / `demo-4060-tick.yaml` utuh.
+
+**Alasan.** Anggaran GPU 5 kamera tidak cukup pada fps profil demo: 1060 D-FINE S 48 ms x 5 kamera x 8 fps
+±1,9 dtk GPU per detik; 4060 ±20 ms x 5 x 10 fps ±1 dtk (jenuh; gladi yang lulus 6 fps). Lima ruangan jarang
+ramai bersamaan, tetapi kamera kosong dianalisis secepat kamera ramai.
+
+**Apa yang berubah**
+
+- Baru `engine/runtime/idle_gate.py` (`IdleDetectionGate`): dalam detik PTS, kamera tanpa track/deteksi selama
+  `idle_after_seconds` hanya menjalankan detector `idle_fps` kali per detik; satu deteksi/track langsung penuh
+  lagi; timeline mundur = mulai lagi dari aktif.
+- `pipeline/engine.py`: `detection_gate` (None = lama) dicek sebelum detector; bila False, detector dilewati dan
+  tracker menerima nol deteksi (seperti jeda analisis, tanpa reset tracker). `last_detection_count` baru.
+- `runtime/camera.py`: gerbang dibuat per pembukaan bila `idle_fps` diisi; `_observe_idle` melaporkan aktivitas
+  (track atau deteksi) dan menulis log INFO saat kamera masuk/keluar keadaan kosong.
+- `config/schema.py` + `loader.py`: `core.idle_fps` (null), `core.idle_after_seconds` (10). Ditolak: `idle_fps <= 0`,
+  `idle_fps >= target_fps`, `idle_after_seconds < 0`.
+- Baru `config/demo-1060-hemat.yaml` (target 4 fps, idle 1 fps, detector 512, SCRFD dinamis 320, batas VRAM
+  rekognisi 1024 MB) dan `config/demo-4060-hemat.yaml` (target 6 fps, idle 2 fps, SCRFD dinamis 320). Keduanya
+  butuh `scrfd_10g_bnkps_dinamis.onnx` dari `engine/tools/scrfd_dynamic.py`; tanpa itu engine menolak start (kode 2).
+  Gerbang embedding (`embed_*`) sengaja tetap mati: uji ea-r10 (92% wajah < 56 px, identifikasi molor ±56 dtk).
+
+**Konsekuensi yang disengaja.** Orang yang masuk ruangan kosong terlihat paling lambat 1/`idle_fps` dtk kemudian
+(lalu tracker butuh beberapa frame penuh untuk konfirmasi); `at` track.started bergeser sebesar itu. Decode CPU
+tidak berkurang (frame tetap dibaca); yang dihemat GPU detector.
+
+**Cara uji.** `python -m pytest engine/tests contracts/tests -q`: sebelum 878 lulus / 10 dilewati, sesudah 894 / 10
+(+16 di `engine/tests/test_idle_gate.py`: gerbang murni, config, `Engine.step` dengan detector palsu, CameraSupervisor
+mock, profil hemat dimuat). Backend 268 lulus. `policy_grep` bersih. Laptop: lihat SERAH-TERIMA.
+
 ## 2026-10-18 · paket be-r1 — ANON tidak dihitung/dinotifikasi + handler `identity.resolved`
 
 Dasar: HEAD `claude/funny-thompson-nt4y1d` (bukan `Claude-Branch`, yang tertinggal 8 commit dan tidak punya

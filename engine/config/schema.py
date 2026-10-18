@@ -552,6 +552,13 @@ class EngineConfig:
     # Detak per detik untuk scheduler "tick". None = pakai target_fps. Pilih DI
     # BAWAH kapasitas terukur; cadangan itulah yang membuat fps tidak berayun.
     tick_fps: Optional[float] = None
+    # Kamera kosong (runtime/idle_gate.py, eb-r11). None = mati (perilaku lama).
+    # Bila diisi: kamera tanpa track/deteksi selama `idle_after_seconds` hanya
+    # menjalankan detector `idle_fps` kali per detik; satu deteksi membuatnya
+    # penuh lagi. Frame tetap dibaca. Orang yang masuk ruangan kosong terlihat
+    # paling lambat 1/idle_fps detik kemudian.
+    idle_fps: Optional[float] = None
+    idle_after_seconds: float = 10.0
     # Arti `set_cameras enabled=false` untuk kamera yang sedang jalan.
     # "stop" (default, perilaku lama): kamera ditutup, track berakhir engine_shutdown,
     #   menyala lagi = stream dibuka ulang + camera.online baru.
@@ -596,6 +603,12 @@ class EngineConfig:
             raise ValueError("core.scheduler must be 'free' or 'tick'.")
         if self.tick_fps is not None and self.tick_fps <= 0:
             raise ValueError("core.tick_fps must be > 0.")
+        if self.idle_fps is not None and self.idle_fps <= 0:
+            raise ValueError("core.idle_fps must be > 0 (atau null = mati).")
+        if self.idle_fps is not None and self.target_fps is not None and self.idle_fps >= self.target_fps:
+            raise ValueError("core.idle_fps harus di bawah core.target_fps, kalau tidak gerbang idle tidak berguna.")
+        if self.idle_after_seconds < 0:
+            raise ValueError("core.idle_after_seconds must be >= 0.")
         if self.scheduler == "tick" and not (self.tick_fps or self.target_fps):
             raise ValueError("core.scheduler: tick butuh core.tick_fps atau core.target_fps.")
         if self.detection_interval < 1:

@@ -1,7 +1,7 @@
 # Peta Kode
 
 Untuk menemukan file tanpa menjelajah repo. Perbarui saat menambah/memindah modul.
-Per 18 Oktober 2026 (paket be-r1). Uji ReID di 1060: `docs/UJI-REID-1060.md`.
+Per 18 Oktober 2026 (paket eb-r11). Uji ReID di 1060: `docs/UJI-REID-1060.md`.
 
 ## Alur data
 
@@ -22,6 +22,7 @@ frontend (Vue + Vite): dashboard, overlay kotak, enrollment, pengaturan
 | Rakit kamera, `set_cameras`, health, detector bersama, gerbang detak, error GPU fatal → keluar kode 3 (`_on_camera_fatal`, `core.gpu_fatal_action`), rasio sibuk dispatcher (`_sample_busy_ratio`) | `runtime/service.py` |
 | Loop per kamera, event presence, overlay `view.frame` (`_maybe_view`), jeda jadwal analisis `schedule_off` (`_apply_analysis_switch`, `core.analysis_off_mode`) | `runtime/camera.py` |
 | Penjadwal berdetak (TickClock, TickGate, kerangka TickScheduler) | `runtime/tick_scheduler.py` |
+| Detector dihemat di kamera kosong (`core.idle_fps`, `IdleDetectionGate`; dipasang di `camera.py::_build`, `Engine.detection_gate`) | `runtime/idle_gate.py` (tes `test_idle_gate.py`) |
 | Langkah pipeline per frame, decimation PTS | `pipeline/engine.py` |
 | Worker rekognisi asinkron | `pipeline/recognition_worker.py` |
 | Antrean rekognisi berprioritas zona; `pop` per kamera dari scheduler bersama (ea-r12) | `pipeline/zoning.py` (tes `test_scheduler_lintas_kamera.py`) |
@@ -43,7 +44,7 @@ frontend (Vue + Vite): dashboard, overlay kotak, enrollment, pengaturan
 | Binding track ↔ identitas, interval presence, waktu sampai dikenali (`AssemblerMetrics.identify_delays`) | `presence/binding.py`, `presence/assembler.py` (tes `test_waktu_kenali.py`) |
 | Server NDJSON, pembuat event, outbox SQLite | `api/server.py`, `api/events.py`, `api/outbox.py` |
 | Referensi wajah tersimpan | `store/references.py` (data: `engine/data/references.sqlite3`, di-ignore) |
-| Skema + loader config, profil | `config/schema.py`, `config/loader.py`, `config/*.yaml` (`demo-4060.yaml`, `demo-4060-tick.yaml`, `demo-1060.yaml`) |
+| Skema + loader config, profil | `config/schema.py`, `config/loader.py`, `config/*.yaml` (`demo-4060.yaml`, `demo-4060-tick.yaml`, `demo-1060.yaml`; hemat 5 kamera, belum diukur: `demo-1060-hemat.yaml`, `demo-4060-hemat.yaml`) |
 | Mematikan power throttling Windows | `runtime/winpower.py` |
 | Berkas detak untuk watchdog (`--heartbeat-file`), berkas stop (`--stop-file`) | `runtime/heartbeat.py`, `runtime/service.py` (`_tick_loop`) |
 | Engine palsu untuk BE/FE | `tools/fake_engine/` |
@@ -97,7 +98,7 @@ generator `.xlsx`, halaman report, penyaringan per peran di semua endpoint.
 | SCRFD bentuk tetap 640 -> berdimensi dinamis + verifikasi onnxruntime | `engine/tools/scrfd_dynamic.py` (tes `test_scrfd_dinamis.py`, butuh paket `onnx`) |
 | Env kloningan uji TensorRT (Windows) + pemeriksaannya (`check_gpu_env.py --tensorrt`) | `scripts/setup-env-trt.ps1`, `scripts/check_gpu_env.py`, `docs/SETUP-GPU.md` |
 | Zip ramping untuk sesi Claude | `scripts/pack_for_claude.py` |
-| Kit latih ReID OSNet dari RandPerson (laptop; torch di luar runtime engine) | `tools/reid_train/` — `README.md` (langkah dari nol), `prepare_randperson.py`, `randperson_dataset.py`, `train_osnet.py`, `export_onnx.py`, `eval_reid.py`, `reid_common.py`, `MODEL-CARD.md`, `requirements-train*.txt`, tes di `tests/` (jalankan terpisah: `python -m pytest tools/reid_train/tests -q`) |
+| Kit latih ReID OSNet dari RandPerson (laptop; torch di luar runtime engine) | `tools/reid_train/` — `README.md` (langkah dari nol), `prepare_randperson.py`, `randperson_dataset.py`, `train_osnet.py`, `export_onnx.py`, `eval_reid.py`, `reid_common.py`, `MODEL-CARD.md` (templat; kandidat demo: `MODEL-CARD-osnet-ain-entireid.md`), `requirements-train*.txt`, tes di `tests/` (jalankan terpisah: `python -m pytest tools/reid_train/tests -q`) |
 
 ## Dokumen
 

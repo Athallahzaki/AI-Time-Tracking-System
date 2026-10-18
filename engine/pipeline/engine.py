@@ -88,6 +88,12 @@ class VisionEngine:
         # `schedule_off`): frame tetap dibaca supaya stream tetap hidup, tetapi
         # detector dilewati dan tracker hanya menerima nol deteksi.
         self.analysis_paused = False
+        # Gerbang kamera kosong (runtime/idle_gate.py, `core.idle_fps`). None =
+        # detector di setiap langkah (perilaku lama). Dipanggil dengan PTS frame;
+        # False = detector dilewati, tracker menerima nol deteksi.
+        self.detection_gate: Optional[Callable[[float], bool]] = None
+        # Jumlah deteksi dari detector di langkah terakhir (0 bila dilewati).
+        self.last_detection_count = 0
 
         # Known tracks are retained until the tracker stops returning them.
         # This lets us distinguish LOST from actual removal.
@@ -204,7 +210,10 @@ class VisionEngine:
         self._frame_count += 1
 
         # 2. Detection cadence
+        self.last_detection_count = 0
         if self.analysis_paused:
+            detections = []
+        elif self.detection_gate is not None and not self.detection_gate(self._frame_pts(frame)):
             detections = []
         elif (
             self._frame_count % self._config.detection_interval == 0
@@ -227,6 +236,7 @@ class VisionEngine:
                 self._metrics.record_span(name, start, end)
 
             self._cached_detections = detections
+            self.last_detection_count = len(detections)
         else:
             detections = self._cached_detections
 
