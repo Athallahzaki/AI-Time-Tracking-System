@@ -325,16 +325,24 @@ function eventTimeMs(data: BackendDetectionPayload): number {
     : parsed;
 }
 
-function detectionStreamUrl(cameraId: string, replay = false): string {
-  const params = new URLSearchParams({
-    camera_id: cameraId,
-  });
+function detectionStreamUrl(
+  cameraId: string,
+  replay = false,
+): string {
+  const configured = (
+    import.meta.env.VITE_API_URL as string | undefined
+  )?.trim();
+
+  const base = configured || '/api/detections/stream';
+  const url = new URL(base, window.location.origin);
+
+  url.searchParams.set('camera_id', cameraId);
 
   if (replay) {
-    params.set("replay", "true");
+    url.searchParams.set('replay', 'true');
   }
 
-  return `/api/detections/stream?${params.toString()}`;
+  return url.toString();
 }
 
 export function useDetectionStream() {

@@ -215,7 +215,7 @@ function isHlsUrl(url) {
   return url && url.includes('.m3u8');
 }
 
-const WEBRTC_PLAYOUT_DELAY = 0.8;
+const WEBRTC_PLAYOUT_DELAY = 5.0;
 // Direct-mode sync (seamless). The engine analyses the file at its own speed;
 // if that is below real time the old code paused the video, waited for a
 // 2 s lead, played again, caught up, paused again ... a visible stutter every

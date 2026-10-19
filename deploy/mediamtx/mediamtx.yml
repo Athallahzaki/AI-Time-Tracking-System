@@ -24,10 +24,11 @@ hlsSegmentDuration: 1s
 hlsPartDuration: 200ms
 
 webrtc: true
-webrtcAddress: :8889
+webrtcAddress: :50001
 webrtcAllowOrigins: ["*"]
-webrtcLocalUDPAddress: :8189
-webrtcIPsFromInterfaces: true
+webrtcLocalUDPAddress: :50002
+webrtcIPsFromInterfaces: false
+webrtcAdditionalHosts: ["100.101.175.190", "stream.zenahost.my.id"]
 
 pathDefaults:
   sourceOnDemand: false
