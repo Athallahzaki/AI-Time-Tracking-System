@@ -3,7 +3,7 @@
 #
 # Model: kamera memantau RUANG FASILITAS. Waktu karyawan TERLIHAT di ruang itu
 # memakai jatah hariannya.
-timezone: "Asia/Jakarta"
+timezone: Asia/Jakarta
 
 # Kunjungan yang lebih pendek dari ini (orang lewat) tidak memakai jatah.
 # Untuk kunjungan yang lebih panjang, detik-detik pertama ini tetap gratis.
@@ -16,20 +16,20 @@ warning_remaining_minutes: 5.0
 # (mis. "12:30"). Boleh lebih dari satu.
 official_breaks:
   monday:
-    - start: "12:00"
-      end: "13:00"
+    - start: '12:00'
+      end: '13:00'
   tuesday:
-    - start: "12:00"
-      end: "13:00"
+    - start: '12:00'
+      end: '13:00'
   wednesday:
-    - start: "12:00"
-      end: "13:00"
+    - start: '12:00'
+      end: '13:00'
   thursday:
-    - start: "12:00"
-      end: "13:00"
+    - start: '12:00'
+      end: '13:00'
   friday:
-    - start: "12:00"
-      end: "13:00"
+    - start: '12:00'
+      end: '13:00'
   saturday: []
   sunday: []
 

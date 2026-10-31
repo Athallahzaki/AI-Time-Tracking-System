@@ -107,7 +107,7 @@ recognition:
   embedding_version: "auraface-v1"
   reference_db_path: "engine/data/references.sqlite3"
   onnx_providers: ["CUDAExecutionProvider", "CPUExecutionProvider"]
-  onnx_gpu_mem_limit_mb: null     # batas VRAM ORT per sesi, mis. 1024 di 4060 8 GB dengan 5 kamera
+  onnx_gpu_mem_limit_mb: 1024     # batas VRAM ORT per sesi, mis. 1024 di 4060 8 GB dengan 5 kamera
   # TensorRT EP untuk SCRFD + glintr100 (ea-r11), BELUM DIUKUR -> mati. Urutan menyalakan:
   #   1. scripts/setup-env-trt.ps1 (env kloningan vision-engine-trt), lalu
   #      python scripts/check_gpu_env.py --tensorrt
@@ -145,9 +145,9 @@ recognition:
 #   4. enabled: true. Butuh recognition.recognizer onnx_face (galeri diisi dari wajah).
 # Model hilang/rusak/SHA salah atau CUDA diminta tapi jatuh ke CPU = engine menolak start.
 reid:
-  enabled: false
-  model_path: "engine/models/reid/osnet_ain_reid.onnx"
-  model_sha256: null
+  enabled: true
+  model_path: "engine/models/reid/osnet_ain_colab_tanpa_in.onnx"
+  model_sha256: 562F3E957F7300F0887847AE6EF404F8F7587601D28ED5DC3E269C1A591E29B4
   match_threshold: null           # ditahan: belum ada kalibrasi di kamera lokasi
   min_crop_height_px: 96          # crop badan lebih pendek tidak di-embed
   embed_interval_seconds: 15      # per track; plus saat track baru & wajah baru terkonfirmasi
@@ -181,7 +181,7 @@ detector:
   batch_wait_ms: 4.0
 
 tracker:
-  backend: "iou"
+  backend: "bytetrack"
   track_threshold: 0.45
   match_threshold: 0.8
   track_buffer_seconds: 1.0
