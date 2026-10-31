@@ -106,6 +106,7 @@ generator `.xlsx`, halaman report, penyaringan per peran di semua endpoint.
 |---|---|
 | Aturan untuk Claude | `CLAUDE.md` |
 | Status kerja terakhir | `docs/SERAH-TERIMA.md` |
+| Rencana overhaul engine (prioritas, akar masalah, data lapangan) | `docs/RENCANA-OVERHAUL.md` |
 | Serah terima per paket EA (berlaku bersama SERAH-TERIMA.md) | `docs/SERAH-TERIMA-EA-K1.md`, `docs/SERAH-TERIMA-EA-R3.md` |
 | Riwayat perubahan (entri teratas cukup) | `docs/CHANGELOG.md` |
 | Runbook demo jarak jauh + uji A/B | `docs/DEMO-REMOTE.md` |

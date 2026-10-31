@@ -27,18 +27,20 @@ webrtc: true
 webrtcAddress: :8889
 webrtcAllowOrigins: ["*"]
 webrtcLocalUDPAddress: :8189
-webrtcIPsFromInterfaces: true
+webrtcIPsFromInterfaces: false
+webrtcAdditionalHosts: ["100.101.59.153"]
 
 pathDefaults:
   sourceOnDemand: false
 
 paths:
   cam01:
-    # Aman sebagai default; Compose wajib menggantinya dengan CAM01_SOURCE.
-    source: publisher
-  # cam02..cam05: uji 5 kamera dengan video (publish_test_video.ps1 -Count 5).
-  # Tanpa path terdaftar, publish ditolak "400 Bad Request" (eb-r1). Untuk CCTV
-  # sungguhan ganti `source` dengan URL RTSP kamera masing-masing.
+     source: publisher
+#    source: rtsp://admin:admin123@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0
+#    rtspTransport: tcp
+#  cam01b:
+#    source: rtsp://admin:admin123@192.168.1.108:554/cam/realmonitor?channel=1&subtype=1
+#    rtspTransport: tcp
   cam02:
     source: publisher
   cam03:

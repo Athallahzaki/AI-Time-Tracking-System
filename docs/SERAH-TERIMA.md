@@ -43,4 +43,6 @@ Ditulis ulang di akhir setiap sesi. Terakhir: 18 Oktober 2026, sesi EB (paket eb
 
 ## Langkah berikutnya
 
+Overhaul engine (bedah): ikuti `docs/RENCANA-OVERHAUL.md`, mulai P1 (keamanan login) dan §3 (data lapangan pilot).
+
 Kalibrasi ambang ReID + SHA di profil -> rekam skenario demo -> uji backend nyata -> putuskan profil 1060 (hemat vs biasa) -> gladi 5 kamera -> demo.
