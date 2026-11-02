@@ -6,6 +6,7 @@ import DashboardView from './views/DashboardView.vue';
 import EnrollmentView from './views/EnrollmentView.vue';
 import LoginView from './views/LoginView.vue';
 import { homePathFor, useAuth } from './composables/useAuth';
+import { loadDisplayConfig } from './config/display';
 
 import SettingsView from './views/SettingsView.vue';
 
@@ -71,4 +72,5 @@ router.beforeEach((to) => {
 // Sinkronkan profil (employee_id, must_change_password) bila sesi lama masih tersimpan.
 useAuth().refreshMe();
 
-createApp(App).use(router).mount('#app');
+// Pengaturan tampilan dibaca sebelum mount: komponen video memakainya saat pertama dirender.
+loadDisplayConfig().finally(() => createApp(App).use(router).mount('#app'));

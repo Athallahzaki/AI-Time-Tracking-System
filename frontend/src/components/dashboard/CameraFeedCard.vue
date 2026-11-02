@@ -8,6 +8,7 @@ import {
   computed,
 } from 'vue';
 import Hls from 'hls.js';
+import { displayConfig } from '@/config/display';
 import { Circle, ScanSearch, TriangleAlert, Video, Wifi } from '@lucide/vue';
 import DetectionBox from './DetectionBox.vue';
 import { Badge } from '@/components/ui/badge';
@@ -190,9 +191,9 @@ function computeTargetMs() {
     // Fallback kalau metadata PDT belum tersedia (mis. baru mulai load)
   }
   if (streamMode.value === 'webrtc') {
-    // Playout delay sengaja ditambahkan di receiver (lihat WEBRTC_PLAYOUT_DELAY),
+    // Playout delay sengaja ditambahkan di receiver (lihat displayConfig.webrtc.playoutDelaySeconds, display-config.json),
     // jadi frame yang sedang tampil sedikit di belakang "sekarang".
-    return Date.now() - WEBRTC_PLAYOUT_DELAY * 1000;
+    return Date.now() - displayConfig.webrtc.playoutDelaySeconds * 1000;
   }
   return Date.now();
 }
@@ -215,7 +216,6 @@ function isHlsUrl(url) {
   return url && url.includes('.m3u8');
 }
 
-const WEBRTC_PLAYOUT_DELAY = 8.5;
 // Direct-mode sync (seamless). The engine analyses the file at its own speed;
 // if that is below real time the old code paused the video, waited for a
 // 2 s lead, played again, caught up, paused again ... a visible stutter every
@@ -369,11 +369,11 @@ async function startWhep(url) {
     });
     try {
       if ('playoutDelayHint' in videoTransceiver.receiver) {
-        videoTransceiver.receiver.playoutDelayHint = WEBRTC_PLAYOUT_DELAY;
+        videoTransceiver.receiver.playoutDelayHint = displayConfig.webrtc.playoutDelaySeconds;
       }
 
       if ('playoutDelayHint' in audioTransceiver.receiver) {
-        audioTransceiver.receiver.playoutDelayHint = WEBRTC_PLAYOUT_DELAY;
+        audioTransceiver.receiver.playoutDelayHint = displayConfig.webrtc.playoutDelaySeconds;
       }
     } catch (err) {
       console.warn('[WebRTC] Could not set playout delay hint:', err);
@@ -439,7 +439,12 @@ function startHls(url) {
   if (!videoEl.value) return;
 
   if (Hls.isSupported()) {
-    hls = new Hls({ lowLatencyMode: true, backBufferLength: 4 });
+    const { lowLatencyMode, backBufferLength, liveSyncDurationSeconds } = displayConfig.hls;
+    hls = new Hls({
+      lowLatencyMode,
+      backBufferLength,
+      ...(liveSyncDurationSeconds === null ? {} : { liveSyncDuration: liveSyncDurationSeconds }),
+    });
     hls.loadSource(url);
     hls.attachMedia(videoEl.value);
     hls.on(Hls.Events.ERROR, (_event, data) => {

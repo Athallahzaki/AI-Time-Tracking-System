@@ -158,6 +158,13 @@ server {
         include /etc/nginx/snippets/security-headers.conf;
     }
 
+    # Pengaturan tampilan: di-mount dan diedit di server, jadi jangan di-cache.
+    location = /display-config.json {
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        include /etc/nginx/snippets/security-headers.conf;
+        try_files $uri =404;
+    }
+
     # Fallback SPA untuk vue-router (history mode).
     location / {
         try_files $uri $uri/ /index.html;

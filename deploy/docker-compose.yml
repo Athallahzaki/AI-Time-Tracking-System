@@ -107,6 +107,8 @@ services:
       CLIENT_MAX_BODY_SIZE: ${CLIENT_MAX_BODY_SIZE:-25m}
     volumes:
       - ${VIDEOS_DIR:-../frontend/public/videos}:/usr/share/nginx/html/videos:ro
+      # Pengaturan tampilan (delay WebRTC/HLS, kotak, interpolasi). Edit + refresh browser.
+      - ${DISPLAY_CONFIG_FILE:-../frontend/public/display-config.json}:/usr/share/nginx/html/display-config.json:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

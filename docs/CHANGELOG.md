@@ -7,6 +7,20 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-11-03 · paket fe-r2 — Pengaturan tampilan video dari `display-config.json`
+
+Jalur FE + deploy. Konstanta tampilan pindah dari kode ke `frontend/public/display-config.json`, dibaca saat start
+(`src/config/display.ts`, sebelum app di-mount): `webrtc.playoutDelaySeconds` (8,5), `hls.lowLatencyMode`,
+`hls.backBufferLength`, `hls.liveSyncDurationSeconds` (baru, null = default hls.js; untuk P5), `boxes.maxAgeMs`
+(fe-r1; `?boxage=` tetap menimpa), `boxes.bufferWindowMs`, `boxes.maxDirectPtsDifferenceSeconds`, `interpolation.*`
+(`?interp=0` tetap menimpa). Default = nilai lama, jadi tanpa file perilaku sama persis.
+Validasi per field (tipe + rentang); file hilang/rusak/HTML fallback SPA -> default + `console.warn [display-config]`.
+`deploy/docker-compose.yml` me-mount file (`DISPLAY_CONFIG_FILE`) read-only; nginx `location = /display-config.json`
+no-store. Ubah = edit file + refresh browser, tanpa build ulang. Compose Portainer belum me-mount (file ikut image).
+Tidak dipindah: sinkronisasi mode file `DIRECT_*` (gain algoritma, bukan pengaturan operator).
+Catatan: rencana overhaul menyebut `WEBRTC_PLAYOUT_DELAY = 5.0`; kode sebenarnya 8,5.
+Uji: `cd frontend && npm run check:display && npm run build`.
+
 ## 2026-11-03 · paket be-r3 — Overhaul P10: enrollment menolak `ANON-`; `onnx` di requirements-dev
 
 Jalur BE + umum. `backend/schemas/enrollment.py`: `person_id` berawalan `ANON-` ditolak (validator yang sama dengan

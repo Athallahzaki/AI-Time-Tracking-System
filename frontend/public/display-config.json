@@ -1,0 +1,25 @@
+{
+  "_catatan": "Pengaturan tampilan video + kotak. Ubah, simpan, refresh browser; tidak perlu build ulang. Kunci berawalan _ diabaikan. Nilai tidak valid -> default + peringatan di konsol browser ([display-config]). URL ?boxage=MS dan ?interp=0 menimpa file ini untuk uji cepat.",
+  "webrtc": {
+    "_playoutDelaySeconds": "Video WebRTC ditahan selama ini agar kotak dari engine sempat tiba. Setel sedikit di atas lag engine (log/health engine). 0..30",
+    "playoutDelaySeconds": 8.5
+  },
+  "hls": {
+    "lowLatencyMode": true,
+    "backBufferLength": 4,
+    "_liveSyncDurationSeconds": "Seberapa jauh di belakang ujung live HLS diputar (detik). null = default hls.js. Overhaul P5: setel sedikit di atas lag engine. 0.5..60",
+    "liveSyncDurationSeconds": null
+  },
+  "boxes": {
+    "_maxAgeMs": "Kotak yang lebih tua dari ini terhadap waktu video disembunyikan. null = tanpa batas (perilaku lama). Usulan uji: 1000. 50..60000",
+    "maxAgeMs": null,
+    "bufferWindowMs": 8000,
+    "maxDirectPtsDifferenceSeconds": 1.0
+  },
+  "interpolation": {
+    "enabled": true,
+    "maxGapMs": 500,
+    "lostHoldMs": 300,
+    "maxJumpPercent": 25
+  }
+}

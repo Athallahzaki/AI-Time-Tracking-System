@@ -10,6 +10,7 @@ Rencana: **`docs/RENCANA-OVERHAUL.md`**. Pilot tetap di `c990bc4`. Semua paket d
 - eb-r13 P3 NMS (`detector.nms_iou_threshold`, default mati) · eb-r14 P7(1) pangkas outbox per gugus.
 - fe-r1 P5 batas umur kotak (`?boxage=`, default mati) · ea-r18 P6 alasan ReID tidak digabung (log).
 - be-r3 P10 enrollment tolak `ANON-`; `onnx` di requirements-dev. Rincian: CHANGELOG 2–3 Nov.
+- fe-r2 pengaturan tampilan di `display-config.json` (mount compose; edit + refresh, tanpa build).
 - Dicek: backend memakai `identity_confidence` hanya untuk tampilan (P8 (2)(3) turun prioritas);
   `track.heartbeat` dipakai `free_time.py` untuk `last_seen` -> tetap durabel (pertanyaan terbuka P7 terjawab).
 
@@ -33,7 +34,8 @@ Rencana: **`docs/RENCANA-OVERHAUL.md`**. Pilot tetap di `c990bc4`. Semua paket d
 1. Baseline `c990bc4` vs paket ini, rekaman sama, 5 kamera: `identify_delays` median/p95, `unidentified_closed`,
    `metric_recognitions_not_attempted`, jumlah track per orang, ANON per jam; `py-spy` 5 menit.
 2. Ulangi dengan `detector.nms_iou_threshold: 0.7`; bandingkan track per orang dan ANON per jam.
-3. Dashboard `?boxage=1000`: kotak tidak tertinggal; bila semua kotak hilang, cek `clock_drift_seconds`.
+3. `display-config.json`: `boxes.maxAgeMs: 1000`, lalu `hls.liveSyncDurationSeconds` / `webrtc.playoutDelaySeconds`
+   sedikit di atas lag engine; kotak tidak tertinggal. Semua kotak hilang -> cek `clock_drift_seconds`.
 4. 6 login gagal ke satu akun -> 429; cookie bertanda Secure di HTTPS. Log `ReID tidak digabung` muncul.
 
 ## Langkah berikutnya

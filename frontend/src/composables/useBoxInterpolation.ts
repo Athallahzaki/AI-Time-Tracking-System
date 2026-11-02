@@ -1,3 +1,5 @@
+import { displayConfig } from '@/config/display';
+
 /**
  * Interpolasi posisi kotak antar frame analisis (dok. 12 §3.7).
  *
@@ -39,20 +41,19 @@ export interface InterpolatableBox {
   height: string;
 }
 
-export const INTERP_CONFIG = {
-  maxGapMs: 500,
-  lostHoldMs: 300,
-  /** Pergeseran pusat maksimum (persen lebar/tinggi frame) yang masih di-lerp. */
-  maxJumpPercent: 25,
-};
+// Nilainya dari display-config.json (`interpolation`); objek yang sama, diisi saat start.
+export const INTERP_CONFIG = displayConfig.interpolation;
 
 let enabledCache: boolean | null = null;
 export function interpolationEnabled(): boolean {
   if (enabledCache === null) {
     try {
-      enabledCache = new URLSearchParams(window.location.search).get('interp') !== '0';
+      // `?interp=0` menimpa display-config.json untuk uji cepat.
+      enabledCache = new URLSearchParams(window.location.search).get('interp') === '0'
+        ? false
+        : displayConfig.interpolation.enabled;
     } catch {
-      enabledCache = true;
+      enabledCache = displayConfig.interpolation.enabled;
     }
   }
   return enabledCache;

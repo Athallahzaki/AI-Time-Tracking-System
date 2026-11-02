@@ -1,4 +1,5 @@
 import { onMounted, onUnmounted, reactive, ref } from "vue";
+import { displayConfig } from "@/config/display";
 import {
   interpolationEnabled,
   resolveInterpolated,
@@ -137,27 +138,26 @@ interface BackendDetectionPayload {
   boxes?: ProtocolViewBox[];
 }
 
-const DETECTION_BUFFER_WINDOW_MS = 8000;
 const MAX_PTS_BUFFER_FRAMES = 20_000;
-// Match the direct-player lag tolerance. A larger value would make boxes visibly
-// lead/lag the recorded person; a smaller one would flicker during brief GPU dips.
-const MAX_DIRECT_PTS_DIFFERENCE_SECONDS = 1.0;
+// Toleransi PTS mode file: displayConfig.boxes.maxDirectPtsDifferenceSeconds. Lebih besar
+// membuat kotak terlihat mendahului/tertinggal; lebih kecil berkedip saat GPU tersendat.
 const MAX_CLOCK_DIFFERENCE_MS = 30_000;
 
-// Overhaul P5: batas umur kotak live (ms) lewat `?boxage=1000`. Tanpa parameter =
-// tanpa batas (perilaku lama). Dengan batas, video yang lebih segar dari kotak
-// terakhir menampilkan tanpa kotak, bukan kotak yang tertinggal di belakang orang.
-let maxLiveBoxAgeCache: number | null | undefined;
+// Overhaul P5: batas umur kotak live (ms) dari display-config.json `boxes.maxAgeMs`;
+// `?boxage=1000` di URL menimpanya untuk uji cepat. null = tanpa batas (perilaku lama).
+// Dengan batas, video yang lebih segar dari kotak terakhir tampil tanpa kotak, bukan
+// dengan kotak yang tertinggal di belakang orang.
+let boxAgeFromUrl: number | null | undefined;
 export function maxLiveBoxAgeMs(): number | null {
-  if (maxLiveBoxAgeCache === undefined) {
+  if (boxAgeFromUrl === undefined) {
     try {
       const raw = Number(new URLSearchParams(window.location.search).get('boxage'));
-      maxLiveBoxAgeCache = Number.isFinite(raw) && raw > 0 ? raw : null;
+      boxAgeFromUrl = Number.isFinite(raw) && raw > 0 ? raw : null;
     } catch {
-      maxLiveBoxAgeCache = null;
+      boxAgeFromUrl = null;
     }
   }
-  return maxLiveBoxAgeCache;
+  return boxAgeFromUrl ?? displayConfig.boxes.maxAgeMs;
 }
 
 function formatDuration(seconds: number): string {
@@ -220,7 +220,7 @@ export function resolveDetectionsAtPts(
       targetPts * 1000,
     );
     if (!resolved) return [];
-    return resolved.nearestDistance <= MAX_DIRECT_PTS_DIFFERENCE_SECONDS * 1000
+    return resolved.nearestDistance <= displayConfig.boxes.maxDirectPtsDifferenceSeconds * 1000
       ? resolved.boxes
       : [];
   }
@@ -240,7 +240,7 @@ export function resolveDetectionsAtPts(
     Math.abs(before.pts - targetPts) <= Math.abs(after.pts - targetPts)
       ? before
       : after;
-  return Math.abs(best.pts - targetPts) <= MAX_DIRECT_PTS_DIFFERENCE_SECONDS
+  return Math.abs(best.pts - targetPts) <= displayConfig.boxes.maxDirectPtsDifferenceSeconds
     ? best.detections
     : [];
 }
@@ -535,7 +535,7 @@ export function useDetectionStream() {
         while (insertAt > 0 && buffer[insertAt - 1].atMs > atMs) insertAt--;
         buffer.splice(insertAt, 0, { atMs, detections });
       }
-      const cutoff = Date.now() - DETECTION_BUFFER_WINDOW_MS;
+      const cutoff = Date.now() - displayConfig.boxes.bufferWindowMs;
       while (camera.frameBuffer.length && camera.frameBuffer[0].atMs < cutoff) {
         camera.frameBuffer.shift();
       }

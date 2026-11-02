@@ -79,6 +79,7 @@ generator `.xlsx`, halaman report, penyaringan per peran di semua endpoint.
 | Halaman | `views/DashboardView.vue`, `EnrollmentView.vue`, `SettingsView.vue`, `LoginView.vue` |
 | Layout, sidebar, notifikasi | `layouts/DashboardLayout.vue`, `components/layout/*` |
 | Video + overlay kotak | `components/dashboard/LiveFeedSection.vue`, `CameraFeedCard.vue`, `DetectionBox.vue`, `composables/useDetectionStream.ts` (`?boxage=`, fe-r1) |
+| Pengaturan tampilan (delay WebRTC/HLS, kotak, interpolasi), dibaca saat start (fe-r2) | `frontend/public/display-config.json`, `src/config/display.ts` (cek `npm run check:display`) |
 | Data (composable) | `composables/useAuth.ts`, `useNotifications.ts`, `useSettings.ts`, `useEnrollment.ts`, `useEmployeeAllowance.ts`, `useUnidentifiedAlerts.ts` |
 | Komponen UI dasar (shadcn-vue, jangan diubah tanpa perlu) | `components/ui/` |
 
