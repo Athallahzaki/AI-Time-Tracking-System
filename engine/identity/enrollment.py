@@ -363,16 +363,17 @@ def _best_other(matcher: MatrixMatcher, query: np.ndarray, exclude_person: str) 
     Mendaftar ulang karyawan yang sudah ada tidak boleh dianggap bertabrakan
     dengan dirinya sendiri — itu justru tanda foto barunya benar.
     """
-    if matcher._matrix is None:
+    matrix, owner_index, people, _version = matcher.snapshot()
+    if matrix is None:
         return None, -1.0
 
-    similarities = matcher._matrix @ _normalize(np.asarray(query, dtype=np.float32).reshape(-1))
-    per_person = np.full(len(matcher._people), -1.0, dtype=np.float32)
-    np.maximum.at(per_person, matcher._owner_index, similarities)
+    similarities = matrix @ _normalize(np.asarray(query, dtype=np.float32).reshape(-1))
+    per_person = np.full(len(people), -1.0, dtype=np.float32)
+    np.maximum.at(per_person, owner_index, similarities)
 
     best_id: Optional[str] = None
     best = -1.0
-    for index, person_id in enumerate(matcher._people):
+    for index, person_id in enumerate(people):
         if person_id == exclude_person:
             continue
         if float(per_person[index]) > best:

@@ -7,6 +7,27 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-11-02 · paket ea-r16 — Overhaul P4: roster `MatrixMatcher` diganti atomik
+
+Jalur EA. Butir P4 `docs/RENCANA-OVERHAUL.md`. Kontrak, `engine/ports/`, backend, config tidak disentuh.
+
+**Masalah.** Satu `MatrixMatcher` dibagi semua kamera. `rebuild()` mengganti `_matrix`, `_owner_index`,
+`_people` satu per satu, sementara `match()` (thread kamera, tanpa kunci) dan `enrollment._best_other`
+membacanya berkali-kali. Terbukti di tes: kode lama memberi `P2`/`Q1` dengan skor penuh untuk vektor milik
+`P1`/`Q2` (matriks satu roster + nama roster lain), yaitu nama karyawan tertukar tanpa error.
+
+**Apa yang berubah**
+
+- `engine/identity/matcher.py`: keempat atribut (termasuk `version`) jadi satu tuple `_snapshot` yang diganti
+  sekaligus di akhir `rebuild()`; `match()` membacanya sekali. Metode baru `snapshot()`.
+- `engine/identity/enrollment.py` `_best_other`: membaca `matcher.snapshot()` sekali, bukan atribut privat.
+- `engine/tests/test_matcher_race.py` (baru): dua roster silang, `rebuild()` berulang dari thread lain,
+  20.000 `match()`; gagal di kode lama, lulus di kode baru (3x berturut).
+
+**Cara uji.** `python -m pytest engine/tests/test_matcher_race.py -q`. Suite engine: 758 lulus, 20 dilewati,
+6 gagal **yang sudah gagal sebelum paket ini** (tes profil demo-1060/4060, preflight, reid_bucket,
+reid_embedder: profil YAML berubah, mis. `LibreDFINEm.pt`, tesnya belum). Tidak butuh GPU.
+
 ## 2026-10-18 · paket eb-r12b — Status torch/NVRTC dicek ulang setelah detector; NVRTC jangan di PATH
 
 Jalur EB. Penutup eb-r12 setelah uji engine nyata di laptop 1060. Kontrak, `engine/ports/`, backend tidak disentuh.

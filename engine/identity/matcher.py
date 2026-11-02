@@ -59,10 +59,12 @@ class MatrixMatcher:
         self._threshold = float(threshold)
         self._margin = float(margin)
 
-        self._matrix: Optional[np.ndarray] = None
-        self._owner_index: np.ndarray = np.empty(0, dtype=np.int32)
-        self._people: List[str] = []
-        self._version: str = store.embedding_version
+        # Satu tuple (matrix, owner_index, people, version) yang diganti sekaligus.
+        # `match()` jalan di thread kamera tanpa kunci; membaca tuple sekali
+        # menjamin matriks, indeks pemilik, dan nama selalu dari roster yang sama.
+        self._snapshot: Tuple[Optional[np.ndarray], np.ndarray, List[str], str] = (
+            None, np.empty(0, dtype=np.int32), [], store.embedding_version,
+        )
         self.rebuild()
 
     # ---------------- roster ----------------
@@ -70,7 +72,7 @@ class MatrixMatcher:
     def rebuild(self) -> None:
         """Susun ulang matriks dari store. Dipanggil saat roster berubah."""
         references = self._store.references()
-        self._version = self._store.embedding_version
+        version = self._store.embedding_version
 
         rows: List[np.ndarray] = []
         owners: List[int] = []
@@ -86,54 +88,59 @@ class MatrixMatcher:
                 rows.append(_normalize(vector))
                 owners.append(index)
 
-        self._matrix = np.stack(rows, axis=0) if rows else None
-        self._owner_index = np.asarray(owners, dtype=np.int32)
-        self._people = people
+        matrix = np.stack(rows, axis=0) if rows else None
+        self._snapshot = (matrix, np.asarray(owners, dtype=np.int32), people, version)
+
+    def snapshot(self) -> Tuple[Optional[np.ndarray], np.ndarray, List[str], str]:
+        """(matrix, owner_index, people, version) dari satu roster yang sama."""
+        return self._snapshot
 
     @property
     def person_count(self) -> int:
-        return len(self._people)
+        return len(self._snapshot[2])
 
     @property
     def reference_count(self) -> int:
-        return 0 if self._matrix is None else int(self._matrix.shape[0])
+        matrix = self._snapshot[0]
+        return 0 if matrix is None else int(matrix.shape[0])
 
     @property
     def embedding_version(self) -> str:
-        return self._version
+        return self._snapshot[3]
 
     # ---------------- pencocokan ----------------
 
     def match(self, query: np.ndarray, query_version: Optional[str] = None) -> Match:
-        if query_version is not None and query_version != self._version:
+        matrix, owner_index, people, version = self._snapshot
+        if query_version is not None and query_version != version:
             raise VersionMismatch(
-                f"query `{query_version}` vs referensi `{self._version}`. Menolak mencocokkan: "
+                f"query `{query_version}` vs referensi `{version}`. Menolak mencocokkan: "
                 "cosine antar dua ruang vektor bukan angka yang salah, ia angka tanpa arti."
             )
 
-        if self._matrix is None:
+        if matrix is None:
             return Match(None, -1.0, 0.0, rejected_because="empty_roster")
 
-        similarities = self._matrix @ _normalize(np.asarray(query, dtype=np.float32).reshape(-1))
+        similarities = matrix @ _normalize(np.asarray(query, dtype=np.float32).reshape(-1))
 
         # Reduksi per orang SEBELUM peringkat. Inti perbaikannya ada di dua
         # baris ini: `np.maximum.at` mengambil skor terbaik tiap orang, dan
         # sisanya membandingkan antar orang, bukan antar foto.
-        per_person = np.full(len(self._people), -1.0, dtype=np.float32)
-        np.maximum.at(per_person, self._owner_index, similarities)
+        per_person = np.full(len(people), -1.0, dtype=np.float32)
+        np.maximum.at(per_person, owner_index, similarities)
 
         best_index = int(np.argmax(per_person))
         best = float(per_person[best_index])
-        best_id = self._people[best_index]
+        best_id = people[best_index]
 
         runner_up_id: Optional[str] = None
         runner_up = -1.0
-        if len(self._people) > 1:
+        if len(people) > 1:
             masked = per_person.copy()
             masked[best_index] = -np.inf
             runner_index = int(np.argmax(masked))
             runner_up = float(masked[runner_index])
-            runner_up_id = self._people[runner_index]
+            runner_up_id = people[runner_index]
 
         margin = best - runner_up if runner_up_id is not None else best + 1.0
 

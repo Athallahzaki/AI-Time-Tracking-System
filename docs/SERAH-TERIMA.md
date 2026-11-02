@@ -1,48 +1,42 @@
 # Serah Terima
 
-Ditulis ulang di akhir setiap sesi. Terakhir: 18 Oktober 2026, sesi EB (paket eb-r12 + eb-r12b, ReID bucket, diuji di 1060). Status be-r1/eb-r11/ea-r14 dipertahankan. `SERAH-TERIMA-EA-R3.md` tetap berlaku untuk langkah uji ReID.
-
-## Lingkup
-
-- Prototype = demo klien. **ReID wajib tampil di demo.** M4 (6 Nov) / M5 (20 Nov) tetap gerbang pra-pilot (dok. 12 §2, dok. 14).
+Ditulis ulang di akhir setiap sesi. Terakhir: 2 November 2026, sesi EA (paket ea-r16, overhaul P4).
+Rencana kerja sekarang: **`docs/RENCANA-OVERHAUL.md`** (P1–P10). Pilot tetap di `c990bc4`.
+Status demo ReID lama (eb-r12/eb-r12b, kalibrasi `match_threshold`, profil hemat 1060): lihat CHANGELOG 18 Okt;
+kalibrasi itu kini bagian dari P6.
 
 ## Selesai
 
-- **eb-r12 (terbukti di 1060):** `ReidBucketRunner` (satu session ORT per `reid.batch_buckets` [1,2,4,8]) + fd 2 -> `logs/engine/engine-c-stderr.log` + config `osnet_ain_reid.onnx`. Uji `demo-1060`, video sama, 5 menit: ReID nyala vs mati fps 7,6 vs 6,7, dikenali 17 vs 17; ReID 18 ms/batch (176 batch, 0 basi/ditolak), 4 bucket CUDA, NVRTC tidak termuat, log C 19 KB; 4 `identity.resolved`, dua memindahkan interval (be-r1 `reid_retro` pertama kali dengan engine nyata); validator 0 pelanggaran. `diag_reid_bucket.py`: 358 -> 29 ms median.
-- **Audit torch selesai:** D-FINE (LibreYOLO, `dfine_detector.py:195`) membawa torch ke proses SESUDAH session ReID dibuat; urutan ini terukur aman, opsi subprocess/ONNX-detector tidak diperlukan.
-- **eb-r12b:** status torch/NVRTC dicek ulang setelah detector dimuat (baris start lama menyesatkan); `check_gpu_env.py` nvrtc dibalik (di PATH = PERINGATAN); `SETUP-GPU.md`, `UJI-REID-1060.md`: NVRTC JANGAN di PATH. Engine+kontrak 929 lulus.
-- be-r1, eb-r11, ea-r12..r14: lihat CHANGELOG.
+- **ea-r16 (P4):** roster `MatrixMatcher` diganti atomik (satu tuple `_snapshot`); `enrollment._best_other`
+  membaca `snapshot()`. Tes race baru gagal di kode lama (nama `P2`/`Q1` tertukar), lulus di kode baru.
 
-## Belum (urut untuk demo ReID)
+## Belum (urut rencana overhaul)
 
-1. **Kalibrasi `match_threshold`** (masih null = usulan 0,80): di uji 1060 cocok galeri 88, dicabut 18 (±20%). `eval_reid.py` di crop berlabel 5 kamera lokasi -> ambang dengan salah gabung <= 1%; isi `reid.model_sha256` (hash 4dc0271f98d1... di laptop) di profil; verifikasi split + lisensi ENTIRe-ID; lengkapi kartu model.
-2. **Profil hemat 1060 belum layak demo:** fps 4 + SCRFD 320 -> 1 dari 28 track dikenali (waktu 24,6 dtk). Ukur `face_bench.py` 640 vs 320 dinamis; bila 320 melewatkan wajah, profil hemat butuh SCRFD 640 atau batch embedding glintr100 (B2).
-3. Rekaman skenario demo ReID (wajah kamera A -> membelakangi kamera B) + `eval_reid.py`.
-4. Uji ujung ke ujung engine ReID -> backend nyata (`identity.resolved` mengubah pemakaian di dashboard).
-5. ea-r15: waktu dikenali maks 84 dtk (frame pertama track baru terbuang; backoff track tak dikenal; WARNING "giliran untuk track yang tidak dikenal binding"). EB: korektor offset P18 kebablasan.
-6. Uji ulang validator setelah ea-r14 (matikan/nyalakan publish satu stream; `stream_epoch` naik, 0 GAGAL).
-7. Gladi 5 kamera dengan ReID: VRAM 4 session x `onnx_gpu_mem_limit_mb`, latensi ReID tetap puluhan ms.
+1. **P1 keamanan login.** Tanpa kode, bisa hari ini di pilot: `AUTH_COOKIE_SECURE=true` di `deploy/.env`;
+   batasi dashboard di Traefik VPS. Kode: rate limit login (jalur BE).
+2. **P2 koreksi rencana:** job basi dan exception recognizer dikirim worker sebagai `None`, sama dengan
+   "wajah tidak ada". Pembeda di `binding._complete` saja tidak cukup; hasil worker butuh sentinel
+   (basi/galat). Exception = kasus ke-5 yang belum ada di daftar P2.
+3. P3, P5–P10 sesuai rencana; §3 data lapangan pilot belum dikumpulkan.
 
-## Di luar lingkup, ditemukan di jalan (belum dikerjakan)
+## Di luar lingkup, ditemukan di jalan
 
-- `/api/auth/login` tanpa rate limit dan `AUTH_COOKIE_SECURE` default `false` (sebelum demo publik).
-- `schemas/enrollment.py` / `set_roster` belum menolak `ANON-`; `report_service` memuat baris ANON (kosmetik).
-- `onnx` tidak ada di `requirements-dev.txt`; tes ONNX sintetis engine dilewati tanpanya.
-- Pesan galat `_session` ("lihat pesan [E:onnxruntime] di atas") kini ada di `engine-c-stderr.log` saat ReID+CUDA.
-- `engine-c-stderr.log` satu berkas append tanpa tanggal (tidak ikut dibersihkan `KeepDays` watchdog); ±2-3 MB/hari, prioritas rendah.
+- 6 tes engine sudah gagal sebelum ea-r16 (profil YAML berubah, tes belum): `test_demo_1060_config` (2),
+  `test_demo_4060_config`, `test_preflight_demo`, `test_reid_bucket`, `test_reid_embedder`
+  (mis. harap `LibreDFINEs.pt`, profil `LibreDFINEm.pt`). Putuskan: profil atau tes yang benar.
+- Butir lama tetap: `set_roster` belum menolak `ANON-`; `onnx` tidak di `requirements-dev.txt`;
+  `engine-c-stderr.log` tanpa rotasi.
 
 ## Keputusan yang perlu disetujui
 
-- eb-r12: default `reid.model_path` -> `osnet_ain_reid.onnx`; fd 2 dialihkan otomatis saat ReID+CUDA. eb-r12b: semantik `check_gpu_env.py` nvrtc dibalik. Kontrak tidak berubah.
-- Sebelumnya: be-r1 dari `claude/funny-thompson-nt4y1d`; eb-r11 ditumpuk di atas be-r1; `idle_fps` perlu persetujuan EA sebelum pilot.
+- ea-r16: `MatrixMatcher.snapshot()` publik baru (dipakai enrollment). Kontrak tidak berubah.
 
-## Uji manual di laptop (eb-r12b)
+## Uji manual di laptop (ea-r16)
 
-1. Jendela tanpa `CUDA\vXX\bin` di PATH: `python scripts/check_gpu_env.py` -> baris `nvrtc` OK.
-2. `docs/UJI-REID-1060.md` §4 dengan `demo-1060` + ReID: log memuat `ReID [embedder dimuat]: torch tidak ada` lalu, setelah kamera pertama, `ReID [setelah detector dimuat]: torch ada ... terukur aman`; NVRTC tidak termuat di keduanya.
+1. `python -m pytest engine/tests/test_matcher_race.py -q` di Windows (penjadwal thread berbeda).
+2. Engine biasa dengan wajah terdaftar, lalu enroll/hapus karyawan saat kamera jalan: tidak ada exception
+   dari `match()` di log, nama yang dikenali tetap benar.
 
 ## Langkah berikutnya
 
-Overhaul engine (bedah): ikuti `docs/RENCANA-OVERHAUL.md`, mulai P1 (keamanan login) dan §3 (data lapangan pilot).
-
-Kalibrasi ambang ReID + SHA di profil -> rekam skenario demo -> uji backend nyata -> putuskan profil 1060 (hemat vs biasa) -> gladi 5 kamera -> demo.
+P1 bagian config (pilot) → P2 (dengan koreksi di atas) → P3.
