@@ -31,6 +31,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional
 
+from ..identity.admission import NOT_ATTEMPTED
+
 logger = logging.getLogger("engine.pipeline.recognition_worker")
 
 Recognize = Callable[[Any, Any], Any]
@@ -186,7 +188,7 @@ class RecognitionWorker:
                 with self._lock:
                     self.metrics.dropped_stale += 1
                     self.metrics.wait_seconds += waited
-                self._deliver(job, None)
+                self._deliver(job, NOT_ATTEMPTED)  # P2: basi bukan kegagalan wajah
                 continue
             started = self._clock()
             evidence = None
@@ -194,6 +196,7 @@ class RecognitionWorker:
                 evidence = self._recognize(job.track, job.frame)
             except Exception:  # noqa: BLE001 -- satu wajah rusak tidak boleh mematikan worker
                 logger.exception("pengenalan gagal untuk %s", job.uuid)
+                evidence = NOT_ATTEMPTED  # P2: galat sistem bukan kegagalan wajah
                 with self._lock:
                     self.metrics.failed += 1
             with self._lock:

@@ -189,6 +189,29 @@ def test_backoff_setelah_percobaan_berulang_yang_gagal():
     assert scheduler.priority_for(identity(), now_pts=pts + 6.0) is not None
 
 
+def test_giliran_tidak_dicoba_tidak_mendorong_ke_backoff():
+    """P2: antrean penuh, job basi, galat recognizer bukan kegagalan wajah."""
+    scheduler = RecognitionScheduler(
+        retry_interval_seconds=1.0, backoff_interval_seconds=5.0, attempts_before_backoff=3,
+        max_age_seconds=100.0,
+    )
+    pts = 0.0
+    for _ in range(10):
+        scheduler.submit("tr_1", "r1", Priority.UNIDENTIFIED, pts)
+        assert scheduler.pop(pts) is not None
+        scheduler.complete("tr_1", produced_evidence=None)
+        pts += 1.0
+
+    assert scheduler.priority_for(identity(), now_pts=pts) is not None, "harus tetap interval retry"
+    assert scheduler.in_flight == 0
+
+
+def test_tidak_dicoba_untuk_track_yang_sudah_dilupakan_tidak_membuat_entri():
+    scheduler = RecognitionScheduler()
+    scheduler.complete("hilang", produced_evidence=None)
+    assert "hilang" not in scheduler._attempts
+
+
 def test_percobaan_yang_menghasilkan_bukti_mereset_backoff():
     scheduler = RecognitionScheduler(attempts_before_backoff=2, max_age_seconds=100.0)
     for pts in (0.0, 1.0):

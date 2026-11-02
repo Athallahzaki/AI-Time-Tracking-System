@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional, Sequence
 
 from ..identity import Evidence, IdentityArbiter, Outcome, RecognitionScheduler
+from ..identity.admission import NOT_ATTEMPTED
 from ..identity.ports import IdentityState
 from ..ports.frame import Frame
 from ..ports.tracking import Track, TrackState
@@ -63,6 +64,8 @@ class BindingMetrics:
     evidence_submitted: int = 0
     recognitions_attempted: int = 0
     recognitions_empty: int = 0
+    # P2: giliran yang dilepas tanpa wajah dinilai (basi, galat). Tidak memicu backoff.
+    recognitions_not_attempted: int = 0
     identified: int = 0
     released: int = 0
     # Jalur asinkron (P7): dikirim ke worker, ditolak karena antrean penuh,
@@ -228,7 +231,7 @@ class EngineBinding:
         if track is None:
             self.metrics.requests_unknown_track += 1
         if track is None or frame is None or self._recognize is None:
-            self._complete(uuid, produced_evidence=False)
+            self._complete(uuid, produced_evidence=None)
             return
 
         self.metrics.recognitions_attempted += 1
@@ -241,14 +244,14 @@ class EngineBinding:
             else:
                 # Antrean worker penuh: lepaskan giliran, scheduler mencoba lagi.
                 self.metrics.recognitions_rejected += 1
-                self._complete(uuid, produced_evidence=False)
+                self._complete(uuid, produced_evidence=None)
             return
 
         try:
             evidence = self._recognize(track, frame)
         except Exception:
             logger.exception("pengenalan gagal untuk %s", uuid)
-            evidence = None
+            evidence = NOT_ATTEMPTED
         self._apply_result(uuid, evidence)
 
     # ---------------- hasil asinkron ----------------
@@ -278,6 +281,10 @@ class EngineBinding:
         return len(self._pending)
 
     def _apply_result(self, uuid: str, evidence: Any) -> None:
+        if evidence is NOT_ATTEMPTED:
+            self.metrics.recognitions_not_attempted += 1
+            self._complete(uuid, produced_evidence=None)
+            return
         if evidence is None:
             self.metrics.recognitions_empty += 1
             self._complete(uuid, produced_evidence=False)
@@ -288,7 +295,7 @@ class EngineBinding:
         self.submit_evidence(uuid, evidence)
         self._complete(uuid, produced_evidence=True)
 
-    def _complete(self, uuid: str, produced_evidence: bool) -> None:
+    def _complete(self, uuid: str, produced_evidence: Optional[bool]) -> None:
         if self._scheduler is not None:
             self._scheduler.complete(uuid, produced_evidence=produced_evidence)
 

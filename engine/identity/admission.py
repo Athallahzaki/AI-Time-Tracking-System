@@ -47,6 +47,20 @@ DEFAULT_REVERIFY_INTERVAL_SECONDS = 60.0
 DEFAULT_PER_CAMERA_QUOTA = 4
 
 
+class _NotAttempted:
+    """Penanda hasil rekognisi "tidak dicoba" (overhaul P2).
+
+    Job basi, recognizer error, antrean penuh, track/frame hilang: tidak ada
+    wajah yang dinilai, jadi tidak boleh dihitung sebagai kegagalan wajah.
+    """
+
+    def __repr__(self) -> str:
+        return "NOT_ATTEMPTED"
+
+
+NOT_ATTEMPTED = _NotAttempted()
+
+
 class Priority(enum.IntEnum):
     """Lebih kecil dikerjakan lebih dulu."""
 
@@ -278,11 +292,18 @@ class RecognitionScheduler:
             return False
         return now_pts - item.requested_pts > self._max_age
 
-    def complete(self, track_uuid: str, produced_evidence: bool = True) -> None:
-        """Hasil sudah kembali. Percobaan yang berhasil mereset backoff."""
+    def complete(self, track_uuid: str, produced_evidence: Optional[bool] = True) -> None:
+        """Hasil sudah kembali. Percobaan yang berhasil mereset backoff.
+
+        `produced_evidence=None` (P2): giliran dilepas tanpa wajah dinilai.
+        Percobaan yang dihitung `pop()` dikembalikan, supaya kegagalan sistem
+        tidak mendorong track ke backoff. Interval retry tetap berlaku.
+        """
         self._in_flight.pop(track_uuid, None)
         if produced_evidence:
             self._attempts[track_uuid] = 0
+        elif produced_evidence is None and track_uuid in self._attempts:
+            self._attempts[track_uuid] = max(0, self._attempts[track_uuid] - 1)
 
     def forget(self, track_uuid: str) -> None:
         self._in_flight.pop(track_uuid, None)

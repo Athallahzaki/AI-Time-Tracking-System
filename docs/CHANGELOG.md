@@ -7,6 +7,34 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-11-03 · paket ea-r17 — Overhaul P2: kegagalan sistem tidak lagi dihitung sebagai kegagalan wajah
+
+Jalur EA. Butir P2 `docs/RENCANA-OVERHAUL.md`. Ditumpuk di atas ea-r16. Kontrak, `engine/ports/`, backend, config
+tidak disentuh. Syarat konfirmasi (3 bukti, sebaran 0,5 dtk) tidak diubah.
+
+**Masalah.** `pop()` menaikkan `attempts` sebelum ada pekerjaan; setiap pelepasan tanpa bukti dianggap gagal wajah.
+Lima "gagal" -> backoff 5 dtk, padahal hanya satu kasus yang sungguh gagal wajah. Koreksi atas rencana: job basi dan
+**exception recognizer** (kasus ke-5, tidak ada di rencana) dikirim worker sebagai `None`, tak terbedakan dari
+"wajah tidak ada", jadi pembeda di `binding._complete` saja tidak cukup.
+
+**Apa yang berubah**
+
+- `engine/identity/admission.py`: penanda `NOT_ATTEMPTED`; `complete(produced_evidence=None)` mengembalikan
+  percobaan yang dihitung `pop()` (tidak membuat entri untuk track yang sudah dilupakan). Interval retry tetap berlaku.
+- `engine/pipeline/recognition_worker.py`: job basi dan recognizer error mengirim `NOT_ATTEMPTED`, bukan `None`.
+  Metrik `dropped_stale`/`failed` tidak berubah.
+- `engine/presence/binding.py`: track/frame hilang, antrean worker penuh, galat sinkron, dan hasil `NOT_ATTEMPTED`
+  -> `produced_evidence=None`. Metrik baru `recognitions_not_attempted`; `recognitions_empty` kini hanya
+  "recognizer jalan, wajah tidak ada" (sebelumnya ikut menghitung basi/galat: angka lama tidak sebanding).
+- Tes: `test_admission.py` (+2), `test_recognition_worker.py` (+1, 2 diubah dari `None` ke `NOT_ATTEMPTED`).
+
+**Belum (sengaja).** Melonggarkan `admission.backoff_interval_seconds`/`attempts_before_backoff` untuk profil 5090:
+tunggu angka `identify_delays` sebelum/sesudah paket ini di rekaman yang sama.
+
+**Cara uji.** `python -m pytest engine/tests/test_admission.py engine/tests/test_recognition_worker.py engine/tests/test_binding.py -q`.
+Tes scheduler baru gagal di logika lama. Engine + kontrak: 912 lulus, 20 dilewati, 6 gagal yang sama dengan ea-r16
+(sudah gagal sebelumnya). Tidak butuh GPU.
+
 ## 2026-11-02 · paket ea-r16 — Overhaul P4: roster `MatrixMatcher` diganti atomik
 
 Jalur EA. Butir P4 `docs/RENCANA-OVERHAUL.md`. Kontrak, `engine/ports/`, backend, config tidak disentuh.

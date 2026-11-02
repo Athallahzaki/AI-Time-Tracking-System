@@ -19,6 +19,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from engine.identity.admission import NOT_ATTEMPTED
 from engine.identity.ports import Evidence
 from engine.pipeline.recognition_worker import RecognitionWorker, TrackSnapshot
 
@@ -83,7 +84,7 @@ def test_pekerjaan_basi_dibuang_tapi_tetap_dijawab():
         time.sleep(0.2)          # lama-2 menunggu > 0,05 dtk di antrean
         gate.set()
         assert _wait(lambda: len(results) == 2)
-        assert results["lama-2"] is None, "crop setengah detik lalu lebih buruk dari crop berikutnya"
+        assert results["lama-2"] is NOT_ATTEMPTED, "crop setengah detik lalu lebih buruk dari crop berikutnya"
         assert worker.snapshot_metrics()["dropped_stale"] >= 1
     finally:
         worker.stop()
@@ -124,7 +125,7 @@ def test_recognizer_yang_error_tidak_mematikan_worker():
         results = []
         worker.submit("u1", "c", _track(), None, lambda u, e: results.append(e))
         worker.submit("u2", "c", _track(), None, lambda u, e: results.append(e))
-        assert _wait(lambda: results == [None, "bukti"])
+        assert _wait(lambda: results == [NOT_ATTEMPTED, "bukti"])
         assert worker.snapshot_metrics()["failed"] == 1 and worker.running
     finally:
         worker.stop()
@@ -233,6 +234,25 @@ def test_hasil_untuk_track_yang_sudah_berakhir_dibuang():
     binding.on_tracks_updated([], _frame(1.2))
     assert binding.metrics.results_discarded == 1 and binding.metrics.evidence_submitted == 0
     assert not any(m.get("type") == "track.identified" for m in emitted)
+
+
+def test_hasil_tidak_dicoba_bukan_kegagalan_wajah():
+    """P2: job basi/galat dari worker melepas giliran tanpa menaikkan attempts."""
+    executor = _InlineExecutor()
+    binding, scheduler, emitted, vector = _binding(executor, recognize=lambda t, f: None)
+    track = _live_track()
+    binding.on_tracks_updated([track], _frame(1.0))
+    uuid = track.attributes["track_uuid"]
+    scheduler._in_flight[uuid] = (1.0, "cam01")    # seolah baru di-pop
+    scheduler._attempts[uuid] = 1
+
+    binding(SimpleNamespace(track_uuid=uuid, camera_id="cam01"))
+    executor.finish_all(NOT_ATTEMPTED)
+    binding.on_tracks_updated([track], _frame(1.1))
+
+    assert binding.metrics.recognitions_not_attempted == 1
+    assert binding.metrics.recognitions_empty == 0 and binding.metrics.evidence_submitted == 0
+    assert scheduler._attempts[uuid] == 0 and scheduler.in_flight == 0
 
 
 def test_antrean_worker_penuh_melepas_giliran_scheduler():
