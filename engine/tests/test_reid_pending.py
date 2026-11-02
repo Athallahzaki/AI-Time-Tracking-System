@@ -159,3 +159,15 @@ def test_pengamatan_tanpa_embedding_belum_memberi_identitas():
     core = _core()
     r = core.observe(_obs("cam1", 1, 0, zone="lobby"))
     assert (r.person_id, r.identity_source) == (None, None)
+
+
+def test_alasan_tidak_digabung_tercatat_untuk_kalibrasi():
+    """P6: penolakan dicatat per tahap, tanpa mengubah keputusan."""
+    core = _core()
+    core.observe(_obs("cam1", 1, 0, _vec(0), zone="lobby"))           # pertama: galeri & ANON kosong
+    assert core.rejections == {"galeri_kosong": 1, "anon_kosong": 1}
+    core.observe(_obs("cam1", 1, 30, zone="lobby"))
+    core.observe(_obs("cam5", 7, 20, _vec(0), zone="biliar"))         # identik, lobby->biliar < 20 dtk
+    assert core.rejections["anon_travel_time"] == 1
+    core.observe(_obs("cam2", 3, 40, _vec(5), zone="lobby"))          # tidak mirip siapa pun
+    assert core.rejections["anon_ambang"] == 1

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from backend.schemas.employee import _tolak_anon
 
 
 class EnrollmentImageInput(BaseModel):
@@ -17,6 +19,9 @@ class EnrollmentRequest(BaseModel):
 
     person_id: str
     images: List[EnrollmentImageInput]
+
+    # P10: ANON- milik kelompok ReID; mendaftarkan wajah ke sana mencampur dua ruang identitas.
+    _person_id_bukan_anon = field_validator("person_id")(_tolak_anon)
 
 
 class EnrollmentImageResult(BaseModel):
@@ -47,4 +52,4 @@ class EnrolledPerson(BaseModel):
     enrollment_version: int
     reference_count: int = 0
     enrolled_at: Optional[str] = None
-    last_seen_at: Optional[str] = None
+    last_seen_at: Optional[str] = None

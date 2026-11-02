@@ -157,11 +157,16 @@ def pick_best(scored: Sequence[Tuple[K, float]], cfg: ReidConfig) -> Optional[K]
     nanti gugur oleh aturan waktu): margin dihitung atas skor mentah supaya
     dua kandidat sama-sama mirip tetap terbaca sebagai "tidak tahu".
     """
+    return pick_with_reason(scored, cfg)[0]
+
+
+def pick_with_reason(scored: Sequence[Tuple[K, float]], cfg: ReidConfig) -> Tuple[Optional[K], str]:
+    """Seperti `pick_best`, plus alasan: "ok" | "kosong" | "ambang" | "margin" (overhaul P6)."""
     if not scored:
-        return None
+        return None, "kosong"
     best_key, best = scored[0]
     if best < cfg.match_threshold:
-        return None
+        return None, "ambang"
     if len(scored) > 1 and best - scored[1][1] < cfg.match_margin:
-        return None
-    return best_key
+        return None, "margin"
+    return best_key, "ok"

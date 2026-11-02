@@ -523,10 +523,17 @@ class DetectorConfig:
     batch_inference: bool = False
     max_batch: int = 8
     batch_wait_ms: float = 4.0
+    # NMS per kelas di engine, pada hasil mentah sebelum dibagi ke detect() dan
+    # ByteTrack (overhaul P3). LibreYOLO 1.6 tidak menjalankan NMS untuk D-FINE,
+    # jadi `iou_threshold` di atas tidak berefek. None = mati (perilaku lama);
+    # usulan rencana 0,7.
+    nms_iou_threshold: Optional[float] = None
 
     def __post_init__(self) -> None:
         if self.max_batch < 1:
             raise ValueError("detector.max_batch must be >= 1.")
+        if self.nms_iou_threshold is not None and not 0.0 < self.nms_iou_threshold <= 1.0:
+            raise ValueError("detector.nms_iou_threshold must be in (0, 1] or null.")
         if not 0.0 <= self.batch_wait_ms <= 100.0:
             raise ValueError("detector.batch_wait_ms must be within 0..100.")
         if self.cuda_graph not in (False, True, "auto"):

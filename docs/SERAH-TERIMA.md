@@ -1,48 +1,41 @@
 # Serah Terima
 
-Ditulis ulang di akhir setiap sesi. Terakhir: 3 November 2026, sesi EA (paket ea-r16 P4, ea-r17 P2; r17 ditumpuk di atas r16).
-Rencana kerja sekarang: **`docs/RENCANA-OVERHAUL.md`** (P1–P10). Pilot tetap di `c990bc4`.
-Status demo ReID lama (eb-r12/eb-r12b, kalibrasi `match_threshold`, profil hemat 1060): lihat CHANGELOG 18 Okt;
-kalibrasi itu kini bagian dari P6.
+Ditulis ulang di akhir setiap sesi. Terakhir: 3 November 2026, sesi overhaul (lintas jalur, tanpa GPU).
+Rencana: **`docs/RENCANA-OVERHAUL.md`**. Pilot tetap di `c990bc4`. Semua paket di bawah **belum diuji di 4060/5090**.
 
-## Selesai
+## Selesai (kode + tes CPU)
 
-- **ea-r16 (P4):** roster `MatrixMatcher` diganti atomik (satu tuple `_snapshot`); `enrollment._best_other`
-  membaca `snapshot()`. Tes race baru gagal di kode lama (nama `P2`/`Q1` tertukar), lulus di kode baru.
-- **ea-r17 (P2):** basi, galat recognizer, antrean penuh, track/frame hilang -> "tidak dicoba" (`NOT_ATTEMPTED`,
-  `complete(None)`), tidak menaikkan `attempts`. Metrik baru `recognitions_not_attempted`.
+- ea-r16 P4 race `MatrixMatcher` · ea-r17 P2 kegagalan sistem bukan kegagalan wajah (`NOT_ATTEMPTED`).
+- be-r2 P1 rate limit login; `AUTH_COOKIE_SECURE` kini benar-benar sampai ke container (`docker-compose.yml`).
+- eb-r13 P3 NMS (`detector.nms_iou_threshold`, default mati) · eb-r14 P7(1) pangkas outbox per gugus.
+- fe-r1 P5 batas umur kotak (`?boxage=`, default mati) · ea-r18 P6 alasan ReID tidak digabung (log).
+- be-r3 P10 enrollment tolak `ANON-`; `onnx` di requirements-dev. Rincian: CHANGELOG 2–3 Nov.
+- Dicek: backend memakai `identity_confidence` hanya untuk tampilan (P8 (2)(3) turun prioritas);
+  `track.heartbeat` dipakai `free_time.py` untuk `last_seen` -> tetap durabel (pertanyaan terbuka P7 terjawab).
 
-## Belum (urut rencana overhaul)
+## Belum, dan alasannya
 
-1. **P1 keamanan login.** Tanpa kode, bisa hari ini di pilot: `AUTH_COOKIE_SECURE=true` di `deploy/.env`;
-   batasi dashboard di Traefik VPS. Kode: rate limit login (jalur BE).
-2. **P2 sisa:** ukur median/p95 `identify_delays` + `unidentified_closed` per jam, sebelum (c990bc4) vs
-   sesudah ea-r17, rekaman sama di 4060. Baru setelah itu putuskan longgarkan backoff profil 5090.
-3. P3, P5–P10 sesuai rencana; §3 data lapangan pilot belum dikumpulkan; tambah profil `py-spy` 5 kamera di 4060.
-
-## Di luar lingkup, ditemukan di jalan
-
-- 6 tes engine sudah gagal sebelum ea-r16 (profil YAML berubah, tes belum): `test_demo_1060_config` (2),
-  `test_demo_4060_config`, `test_preflight_demo`, `test_reid_bucket`, `test_reid_embedder`
-  (mis. harap `LibreDFINEs.pt`, profil `LibreDFINEm.pt`). Putuskan: profil atau tes yang benar.
-- Butir lama tetap: `set_roster` belum menolak `ANON-`; `onnx` tidak di `requirements-dev.txt`;
-  `engine-c-stderr.log` tanpa rotasi.
+- **[data]** P1 allowlist Traefik VPS; P3 containment; P5 `liveSyncDuration`; P6 tabel waktu tempuh, kalibrasi
+  `match_threshold`, penilaian ulang + gabung ANON<->ANON; P7(2) group commit (jenis disk); P8 (2)(3) kalibrasi.
+- **[keputusan]** P8 (1) tolak klaim wajah bersamaan lintas kamera: siapa yang menang saat bentrok + daftar pasangan
+  kamera tumpang-tindih. P3: `track_threshold` < `confidence_threshold` disengaja atau tidak.
+- **[GPU]** P9 D-FINE ke ONNX. P10 profil YAML berwarisan (besar; kerjakan sebelum P9 menambah profil).
+- 6 tes engine gagal sejak sebelum overhaul (profil berubah, tes belum): demo_1060 (2), demo_4060, preflight_demo,
+  reid_bucket, reid_embedder. Putuskan profil atau tes yang benar sebelum mengukur apa pun.
 
 ## Keputusan yang perlu disetujui
 
-- ea-r16: `MatrixMatcher.snapshot()` publik baru (dipakai enrollment). Kontrak tidak berubah.
-- ea-r17: perilaku default berubah tanpa flag (perbaikan bug yang diminta P2). `recognitions_empty` berganti makna
-  (lebih sempit): dasbor/log yang membandingkan angka lama perlu tahu.
+- ea-r16 `MatrixMatcher.snapshot()` publik. ea-r17 default berubah tanpa flag; `recognitions_empty` lebih sempit.
+- be-r2 batas 5/username, 20/IP per 5 menit (bisa mengunci akun karyawan 5 menit oleh penebak). eb-r13, fe-r1 default mati.
 
-## Uji manual di laptop (ea-r16)
+## Uji manual di 4060 (urut)
 
-1. `python -m pytest engine/tests/test_matcher_race.py -q` di Windows (penjadwal thread berbeda).
-2. Engine biasa dengan wajah terdaftar, lalu enroll/hapus karyawan saat kamera jalan: tidak ada exception
-   dari `match()` di log, nama yang dikenali tetap benar.
-
-3. ea-r17: engine `demo-4060` + worker asinkron, 5 menit: `metric_recognitions_not_attempted` > 0 bila ada job
-   basi; waktu dikenali tidak lebih buruk dari sebelum.
+1. Baseline `c990bc4` vs paket ini, rekaman sama, 5 kamera: `identify_delays` median/p95, `unidentified_closed`,
+   `metric_recognitions_not_attempted`, jumlah track per orang, ANON per jam; `py-spy` 5 menit.
+2. Ulangi dengan `detector.nms_iou_threshold: 0.7`; bandingkan track per orang dan ANON per jam.
+3. Dashboard `?boxage=1000`: kotak tidak tertinggal; bila semua kotak hilang, cek `clock_drift_seconds`.
+4. 6 login gagal ke satu akun -> 429; cookie bertanda Secure di HTTPS. Log `ReID tidak digabung` muncul.
 
 ## Langkah berikutnya
 
-P1 bagian config (pilot) → ukur P2 → P3 (perlu tangkapan layar bentuk kotak ganda dari pilot).
+Isi pilot: `AUTH_COOKIE_SECURE=true` + allowlist Traefik -> data §3 -> uji di atas -> putuskan P8 (1) dan P3.

@@ -195,6 +195,7 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
             swscale_resize=bool(det.get("swscale_resize", False)),
             share_across_cameras=bool(det.get("share_across_cameras", True)),
             batch_inference=bool(det.get("batch_inference", False)),
+            nms_iou_threshold=_optional_float(det.get("nms_iou_threshold")),
             max_batch=int(det.get("max_batch", 8)),
             batch_wait_ms=float(det.get("batch_wait_ms", 4.0)),
         ),

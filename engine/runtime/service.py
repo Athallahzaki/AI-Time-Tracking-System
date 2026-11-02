@@ -685,6 +685,10 @@ class EngineRuntime:
                 core["resolutions"], core["revoked"], int(rw["processed"]), int(rw["batches"]),
                 int(rw["dropped_stale"]), int(rw["rejected_full"]), rw["avg_batch_ms"],
             )
+            reid_core = self._reid.coordinator.core
+            if reid_core is not None and reid_core.rejections:
+                logger.info("ReID tidak digabung (P6, bahan kalibrasi): %s",
+                            ", ".join(f"{k} {v}" for k, v in sorted(dict(reid_core.rejections).items())))
         shared = self._shared_detector
         if shared is not None:
             d = shared.metrics.as_dict()

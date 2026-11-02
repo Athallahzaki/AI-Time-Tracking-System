@@ -134,6 +134,7 @@ def build_detector(config: EngineConfig) -> Any:
         cuda_graph=config.detector.cuda_graph,
         fast_preprocess=config.detector.fast_preprocess,
         swscale_resize=config.detector.swscale_resize,
+        nms_iou_threshold=config.detector.nms_iou_threshold,
     )
 
 

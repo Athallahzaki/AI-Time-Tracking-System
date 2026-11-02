@@ -29,12 +29,13 @@ Batas yang dijaga:
 from __future__ import annotations
 
 import itertools
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from .gallery import DailyGallery, PrototypeSet
-from .merge import ReidConfig, TrackSpan, check_group, pick_best
+from .merge import ReidConfig, TrackSpan, check_group, pick_best, pick_with_reason
 from .messages import BodyObservation, TrackClosed
 
 # Nilai identity_source di kontrak ($defs.identity_source).
@@ -139,6 +140,9 @@ class PendingIdentities:
         self._groups: Dict[str, _Group] = {}
         self._seq = itertools.count(1)
         self._anon_seq = itertools.count(1)
+        # P6: kenapa embedding tanpa wajah TIDAK digabung, per tahap, mis.
+        # "galeri_ambang", "anon_travel_time". Bahan kalibrasi, bukan keputusan.
+        self.rejections: Counter = Counter()
 
     # ------------------------------------------------------------------ query
 
@@ -253,23 +257,29 @@ class PendingIdentities:
 
     def _assign_without_face(self, track: _Track, obs: BodyObservation) -> None:
         assert obs.embedding is not None
-        person = pick_best(self.gallery.scores(obs.embedding), self.config)
-        if person is not None and check_group(self._person_spans(person), track.span,
-                                              self.config).ok:
-            track.person_id = person
-            track.source = SOURCE_REID
-            return
+        person, reason = pick_with_reason(self.gallery.scores(obs.embedding), self.config)
+        if person is not None:
+            verdict = check_group(self._person_spans(person), track.span, self.config)
+            if verdict.ok:
+                track.person_id = person
+                track.source = SOURCE_REID
+                return
+            reason = verdict.reason
+        self.rejections[f"galeri_{reason}"] += 1
 
         scored = [(g.anon_id, g.protos.score(obs.embedding)) for g in self._groups.values()
                   if g.resolved_to is None and g.members]
         scored.sort(key=lambda item: item[1], reverse=True)
-        anon = pick_best(scored, self.config)
+        anon, reason = pick_with_reason(scored, self.config)
         if anon is not None:
             group = self._groups[anon]
             members = [self._tracks[u].span for u in group.members]
-            if check_group(members, track.span, self.config).ok:
+            verdict = check_group(members, track.span, self.config)
+            if verdict.ok:
                 self._join(group, track, obs)
                 return
+            reason = verdict.reason
+        self.rejections[f"anon_{reason}"] += 1
         anon = self._anon_factory(self.day, next(self._anon_seq))
         group = self._groups[anon] = _Group(
             anon, PrototypeSet(self.config.gallery_capacity,

@@ -144,6 +144,22 @@ const MAX_PTS_BUFFER_FRAMES = 20_000;
 const MAX_DIRECT_PTS_DIFFERENCE_SECONDS = 1.0;
 const MAX_CLOCK_DIFFERENCE_MS = 30_000;
 
+// Overhaul P5: batas umur kotak live (ms) lewat `?boxage=1000`. Tanpa parameter =
+// tanpa batas (perilaku lama). Dengan batas, video yang lebih segar dari kotak
+// terakhir menampilkan tanpa kotak, bukan kotak yang tertinggal di belakang orang.
+let maxLiveBoxAgeCache: number | null | undefined;
+export function maxLiveBoxAgeMs(): number | null {
+  if (maxLiveBoxAgeCache === undefined) {
+    try {
+      const raw = Number(new URLSearchParams(window.location.search).get('boxage'));
+      maxLiveBoxAgeCache = Number.isFinite(raw) && raw > 0 ? raw : null;
+    } catch {
+      maxLiveBoxAgeCache = null;
+    }
+  }
+  return maxLiveBoxAgeCache;
+}
+
 function formatDuration(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));
   if (s < 60) return `${s}s`;
@@ -154,9 +170,10 @@ function formatDuration(seconds: number): string {
 function nearestFrameDetections(
   camera: CameraItem,
   targetMs: number,
+  maxAgeMs: number | null,
 ): DetectionItem[] {
   const buffer = camera.frameBuffer;
-  if (!buffer?.length) return camera.detections || [];
+  if (!buffer?.length) return maxAgeMs === null ? camera.detections || [] : [];
 
   let best = buffer[0];
   let bestDiff = Math.abs(best.atMs - targetMs);
@@ -167,7 +184,7 @@ function nearestFrameDetections(
       bestDiff = difference;
     }
   }
-  return best.detections;
+  return maxAgeMs === null || bestDiff <= maxAgeMs ? best.detections : [];
 }
 
 /** Kotak pada waktu jam dinding `targetMs` (mode HLS/WebRTC), dengan interpolasi. */
@@ -175,14 +192,16 @@ export function resolveDetectionsAt(
   camera: CameraItem,
   targetMs: number,
 ): DetectionItem[] {
-  if (!interpolationEnabled()) return nearestFrameDetections(camera, targetMs);
+  const maxAgeMs = maxLiveBoxAgeMs();
+  if (!interpolationEnabled()) return nearestFrameDetections(camera, targetMs, maxAgeMs);
   const resolved = resolveInterpolated(
     camera.frameBuffer || [],
     (frame) => frame.atMs,
     (frame) => frame.detections,
     targetMs,
   );
-  return resolved ? resolved.boxes : camera.detections || [];
+  if (!resolved) return maxAgeMs === null ? camera.detections || [] : [];
+  return maxAgeMs === null || resolved.nearestDistance <= maxAgeMs ? resolved.boxes : [];
 }
 
 /** Kotak pada posisi video `targetPts` detik (mode direct/MP4), dengan interpolasi. */

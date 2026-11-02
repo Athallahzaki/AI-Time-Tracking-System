@@ -371,3 +371,15 @@ def test_api_employee_anon_ditolak_422(tmp_path):
     internal_id = ok.json().get("id") or ok.json().get("employee", {}).get("id")
     ubah = client.patch(f"/api/employees/{internal_id}", json={"employee_id": "ANON-2"}, headers=headers)
     assert ubah.status_code == 422
+
+
+def test_enrollment_menolak_person_id_anon():
+    """P10: wajah tidak boleh didaftarkan ke kelompok ReID ANON-."""
+    import pytest
+    from pydantic import ValidationError
+
+    from backend.schemas.enrollment import EnrollmentRequest
+
+    with pytest.raises(ValidationError):
+        EnrollmentRequest(person_id="ANON-20261103-1", images=[])
+    assert EnrollmentRequest(person_id="4471", images=[]).person_id == "4471"

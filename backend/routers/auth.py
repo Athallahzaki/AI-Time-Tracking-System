@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import sqlite3
 import secrets
+import threading
+import time
+from collections import defaultdict, deque
 
 from fastapi import (
     APIRouter,
@@ -56,21 +59,88 @@ def _public_user(user):
     }
 
 
+class _LoginLimiter:
+    """Batas login GAGAL per IP dan per username dalam jendela geser (overhaul P1).
+
+    shortcut: state di memori satu proses (uvicorn --workers 1); reset saat restart.
+    Naikkan ke tabel SQLite bila backend jalan lebih dari satu worker.
+    IP dari uvicorn `--forwarded-allow-ips='*'` bisa dipalsukan lewat X-Forwarded-For,
+    karena itu batas per username yang menahan tebakan password satu akun.
+    """
+
+    def __init__(self, window_seconds: float, max_per_ip: int, max_per_user: int) -> None:
+        self.window = window_seconds
+        self.max_per_ip = max_per_ip
+        self.max_per_user = max_per_user
+        self._failures: dict = defaultdict(deque)
+        self._lock = threading.Lock()
+
+    def _recent(self, key, now: float) -> deque:
+        bucket = self._failures[key]
+        while bucket and now - bucket[0] > self.window:
+            bucket.popleft()
+        return bucket
+
+    def retry_after(self, ip: str, username: str, now: float) -> int:
+        """Detik sampai boleh mencoba lagi; 0 = boleh."""
+        with self._lock:
+            waits = []
+            for key, limit in ((("ip", ip), self.max_per_ip), (("user", username), self.max_per_user)):
+                bucket = self._recent(key, now)
+                if len(bucket) >= limit:
+                    waits.append(self.window - (now - bucket[0]))
+                if not bucket:
+                    self._failures.pop(key, None)
+            return int(max(waits) + 1) if waits else 0
+
+    def failed(self, ip: str, username: str, now: float) -> None:
+        with self._lock:
+            self._failures[("ip", ip)].append(now)
+            self._failures[("user", username)].append(now)
+
+    def succeeded(self, username: str) -> None:
+        with self._lock:
+            self._failures.pop(("user", username), None)
+
+    def reset(self) -> None:
+        with self._lock:
+            self._failures.clear()
+
+
+login_limiter = _LoginLimiter(
+    window_seconds=float(os.getenv("AUTH_LOGIN_WINDOW_SECONDS", "300")),
+    max_per_ip=int(os.getenv("AUTH_LOGIN_MAX_FAILURES_PER_IP", "20")),
+    max_per_user=int(os.getenv("AUTH_LOGIN_MAX_FAILURES_PER_USER", "5")),
+)
+
+
 @router.post("/login")
-def login(req: LoginRequest, response: Response):
+def login(req: LoginRequest, request: Request, response: Response):
+    ip = request.client.host if request.client else "unknown"
+    username = req.username.strip().lower()
+    now = time.monotonic()
+    wait = login_limiter.retry_after(ip, username, now)
+    if wait:
+        raise HTTPException(
+            status_code=429,
+            detail="Terlalu banyak percobaan login gagal. Coba lagi nanti.",
+            headers={"Retry-After": str(wait)},
+        )
     try:
         result = auth_service.login(
             req.username,
             req.password,
         )
+        login_limiter.succeeded(username)
         response.set_cookie(
             "access_token", result["access_token"], httponly=True, samesite="lax",
             secure=os.getenv("AUTH_COOKIE_SECURE", "false").lower() in {"1", "true", "yes"},
-            max_age=max(1, int(result["expires_at"] - __import__("time").time())), path="/",
+            max_age=max(1, int(result["expires_at"] - time.time())), path="/",
         )
         return result
 
     except AuthenticationError as exc:
+        login_limiter.failed(ip, username, now)
         raise HTTPException(
             status_code=401,
             detail=str(exc),

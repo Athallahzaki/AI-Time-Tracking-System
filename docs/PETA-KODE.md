@@ -31,18 +31,18 @@ frontend (Vue + Vite): dashboard, overlay kotak, enrollment, pengaturan
 | Mailbox frame terbaru generik | `ingest/mailbox.py` |
 | NVDEC (kerangka, menunggu spike) | `ingest/nvdec_source.py` |
 | PTS, epoch, offset jam; epoch bertahan saat kamera dibuka ulang (`camera.py::_epoch_announced`, ea-r14) | `ingest/timeline.py` (tes `test_epoch_buka_ulang.py`) |
-| D-FINE (LibreYOLO), pra-proses GPU, CUDA graph | `perception/dfine_detector.py` |
+| D-FINE (LibreYOLO), pra-proses GPU, CUDA graph, NMS engine `nms_result` (eb-r13) | `perception/dfine_detector.py` (tes `test_dfine_nms.py`) |
 | Satu detector untuk semua kamera, batching, berhenti memanggil model sesudah error GPU fatal (`fatal_error`) | `perception/shared_detector.py` |
 | Pengenal error CUDA fatal (`is_fatal_gpu_error`, pola teks) | `perception/gpu_fatal.py` (tes `test_gpu_fatal.py`) |
 | Tracker | `perception/bytetrack_tracker.py`, `perception/iou_tracker.py` |
 | Crop orang/kepala | `perception/person_cropper.py` |
 | Wajah (SCRFD + AuraFace ONNX), gerbang kualitas sebelum embedding (`embed_*`, `yaw_ratio`), cek bentuk model SCRFD (`_check_static_size`), TensorRT EP + cache (`recognition_providers`, `tensorrt_options`, `ProviderUnavailable`), potongan kepala (`head_crop`) | `identity/face_onnx.py` (tes `test_rekognisi_beban.py`, `test_tensorrt_rekognisi.py`) |
 | Matcher (roster atomik `snapshot()`, ea-r16), arbiter identitas, admission, enrollment | `identity/matcher.py` (tes `test_matcher_race.py`), `identity/arbiter.py`, `identity/admission.py` (`NOT_ATTEMPTED`, ea-r17), `identity/enrollment.py` |
-| ReID berjangkar wajah (logika): pesan antrean, galeri harian, aturan gabung, ANON-xxxx | `identity/reid/messages.py`, `identity/reid/gallery.py`, `identity/reid/merge.py`, `identity/reid/pending.py` (tes `test_reid_*.py`) |
+| ReID berjangkar wajah (logika): pesan antrean, galeri harian, aturan gabung, ANON-xxxx | `identity/reid/messages.py`, `identity/reid/gallery.py`, `identity/reid/merge.py`, `identity/reid/pending.py` (`rejections`, ea-r18; tes `test_reid_*.py`) |
 | ReID model + gerbang crop (dimuat hanya bila `reid.enabled`): OSNet ONNX, pra-proses = kit latih, SHA-256, `ReidBucketRunner` (satu session per `reid.batch_buckets`) | `identity/reid/embedder_onnx.py`, `identity/reid/quality.py` (tes `test_reid_embedder.py`, `test_reid_bucket.py`) |
 | ReID dirakit ke kamera (default mati): koordinator + `identity.resolved`, worker embedding, sisi kamera | `pipeline/reid_coordinator.py`, `pipeline/reid_worker.py`, `pipeline/reid_tap.py` (tes `test_reid_runtime.py`); model di `engine/models/reid/` (di-ignore) |
 | Binding track ↔ identitas, interval presence, waktu sampai dikenali (`AssemblerMetrics.identify_delays`) | `presence/binding.py`, `presence/assembler.py` (tes `test_waktu_kenali.py`) |
-| Server NDJSON, pembuat event, outbox SQLite | `api/server.py`, `api/events.py`, `api/outbox.py` |
+| Server NDJSON, pembuat event, outbox SQLite (pangkas per gugus, eb-r14) | `api/server.py`, `api/events.py`, `api/outbox.py` (tes `test_outbox_prune.py`) |
 | Referensi wajah tersimpan | `store/references.py` (data: `engine/data/references.sqlite3`, di-ignore) |
 | Skema + loader config, profil | `config/schema.py`, `config/loader.py`, `config/*.yaml` (`demo-4060.yaml`, `demo-4060-tick.yaml`, `demo-1060.yaml`; hemat 5 kamera, belum diukur: `demo-1060-hemat.yaml`, `demo-4060-hemat.yaml`) |
 | Mematikan power throttling Windows | `runtime/winpower.py` |
@@ -57,7 +57,7 @@ frontend (Vue + Vite): dashboard, overlay kotak, enrollment, pengaturan
 | App, daftar router, startup | `main.py` |
 | Config env, database (WAL), keamanan, state | `core/config.py`, `core/database.py`, `core/security.py`, `core/state.py` |
 | Aturan ID ANON- (dicadangkan, bukan karyawan): `is_anon_id`, dipakai ledger/pelanggaran/state/skema employee | `core/identity.py` (tes `test_anon_identity_resolved.py`) |
-| Router (`/api/...`) | `routers/attendance.py`, `auth.py`, `cameras.py`, `enrollments.py`, `notifications.py`, `settings.py`, `stats.py`, `streams.py` (`/api/detections/*`), `system.py`, `violations.py` |
+| Router (`/api/...`); rate limit login `login_limiter` di `auth.py` (be-r2) | `routers/attendance.py`, `auth.py`, `cameras.py`, `enrollments.py`, `notifications.py`, `settings.py`, `stats.py`, `streams.py` (`/api/detections/*`), `system.py`, `violations.py` |
 | Skema Pydantic | `schemas/*.py` (`protocol.py` = pesan engine) |
 | Koneksi ke engine, adaptasi protokol, ingest event (termasuk `identity.resolved` -> atribusi `reid_retro`, `_resolve_identity`) | `services/engine_client.py`, `engine_connection_manager.py`, `engine_integration.py`, `protocol_adapter.py`, `event_ingestion.py` |
 | Jatah free time (ledger kunjungan) | `services/free_time.py`, `break_policy.py`, `policy_service.py` (`configs/policy.yaml`) |
@@ -78,7 +78,7 @@ generator `.xlsx`, halaman report, penyaringan per peran di semua endpoint.
 |---|---|
 | Halaman | `views/DashboardView.vue`, `EnrollmentView.vue`, `SettingsView.vue`, `LoginView.vue` |
 | Layout, sidebar, notifikasi | `layouts/DashboardLayout.vue`, `components/layout/*` |
-| Video + overlay kotak | `components/dashboard/LiveFeedSection.vue`, `CameraFeedCard.vue`, `DetectionBox.vue`, `composables/useDetectionStream.ts` |
+| Video + overlay kotak | `components/dashboard/LiveFeedSection.vue`, `CameraFeedCard.vue`, `DetectionBox.vue`, `composables/useDetectionStream.ts` (`?boxage=`, fe-r1) |
 | Data (composable) | `composables/useAuth.ts`, `useNotifications.ts`, `useSettings.ts`, `useEnrollment.ts`, `useEmployeeAllowance.ts`, `useUnidentifiedAlerts.ts` |
 | Komponen UI dasar (shadcn-vue, jangan diubah tanpa perlu) | `components/ui/` |
 

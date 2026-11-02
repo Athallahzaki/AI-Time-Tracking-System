@@ -115,7 +115,9 @@ class DFINEDetector:
         cuda_graph: Union[bool, str] = False,
         fast_preprocess: bool = False,
         swscale_resize: bool = False,
+        nms_iou_threshold: Optional[float] = None,
     ) -> None:
+        self._nms_iou = nms_iou_threshold
         self._model_path = self._resolve_model_path(model_path)
         self._conf = confidence_threshold
         # What the model is asked for. Never above the detection threshold:
@@ -408,6 +410,8 @@ class DFINEDetector:
         result = self._call(model_input, colour_format, confidence)
         if scale is not None:
             rescale_result(result, *scale)
+        if self._nms_iou is not None:
+            nms_result(result, self._nms_iou)
         t2 = time.perf_counter()
         # Sub-span untuk bench (pipeline mencatatnya bila ada). LibreYOLO
         # memanggil .cpu() di pasca-prosesnya, jadi t2 sudah menunggu GPU.
@@ -434,6 +438,8 @@ class DFINEDetector:
         for result, (_, _, scale) in zip(results, prepared):
             if scale is not None:
                 rescale_result(result, *scale)
+            if self._nms_iou is not None:
+                nms_result(result, self._nms_iou)
         return results
 
     def _try_batch(self, inputs: List[np.ndarray], colour_format: str,
@@ -706,4 +712,62 @@ def rescale_result(result: Any, sx: float, sy: float, height: int, width: int) -
         raise RuntimeError(
             "detector.pre_resize could not map boxes back to the frame on this "
             f"LibreYOLO version ({exc!r}). Set detector.pre_resize: false."
+        ) from exc
+
+
+def nms_keep(xyxy: np.ndarray, scores: np.ndarray, classes: np.ndarray, iou_threshold: float) -> np.ndarray:
+    """Indeks kotak yang dipertahankan NMS per kelas, terurut skor menurun."""
+    keep: List[int] = []
+    for cls in np.unique(classes):
+        idx = np.flatnonzero(classes == cls)
+        idx = idx[np.argsort(-scores[idx], kind="stable")]
+        while idx.size:
+            best, rest = idx[0], idx[1:]
+            keep.append(int(best))
+            if not rest.size:
+                break
+            x1 = np.maximum(xyxy[best, 0], xyxy[rest, 0])
+            y1 = np.maximum(xyxy[best, 1], xyxy[rest, 1])
+            x2 = np.minimum(xyxy[best, 2], xyxy[rest, 2])
+            y2 = np.minimum(xyxy[best, 3], xyxy[rest, 3])
+            inter = np.clip(x2 - x1, 0, None) * np.clip(y2 - y1, 0, None)
+            area = lambda b: (b[..., 2] - b[..., 0]) * (b[..., 3] - b[..., 1])  # noqa: E731
+            union = area(xyxy[best]) + area(xyxy[rest]) - inter
+            iou = np.where(union > 0, inter / np.where(union > 0, union, 1), 0.0)
+            idx = rest[iou <= iou_threshold]
+    keep.sort(key=lambda i: -float(scores[i]))
+    return np.asarray(keep, dtype=np.int64)
+
+
+def nms_result(result: Any, iou_threshold: float) -> None:
+    """NMS pada Results LibreYOLO, di tempat (overhaul P3).
+
+    Kotak dibangun ulang dengan kelas yang sama seperti `rescale_result`, jadi
+    `detect()`, `postprocess()` dan ByteTrack membaca hasil yang sama.
+    """
+    boxes = getattr(result, "boxes", None)
+    if boxes is None or len(boxes) < 2:
+        return
+    keep = nms_keep(_to_numpy(boxes.xyxy, np.float32), _to_numpy(boxes.conf, np.float32),
+                    _to_numpy(boxes.cls, np.float32).astype(int), iou_threshold)
+    if len(keep) == len(boxes):
+        return
+
+    def pick(value: Any) -> Any:
+        if value is None:
+            return None
+        if hasattr(value, "detach"):
+            return value[value.new_tensor(keep).long()]
+        return np.asarray(value)[keep]
+
+    try:
+        result.boxes = type(boxes)(
+            pick(boxes.xyxy), pick(boxes.conf), pick(boxes.cls),
+            pick(getattr(boxes, "id", None)),
+            getattr(boxes, "orig_shape", None) or getattr(result, "orig_shape", None),
+        )
+    except (AttributeError, TypeError) as exc:
+        raise RuntimeError(
+            f"detector.nms_iou_threshold tidak bisa membangun ulang kotak pada versi LibreYOLO ini ({exc!r}). "
+            "Set detector.nms_iou_threshold: null."
         ) from exc

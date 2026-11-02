@@ -138,8 +138,14 @@ class SqliteOutbox(_OutboxBase):
         self,
         path: Union[str, Path],
         max_entries: Optional[int] = 200_000,
+        prune_batch: int = 1_000,
     ) -> None:
+        if prune_batch < 1:
+            raise ValueError("prune_batch harus >= 1")
         self._path = Path(path)
+        # P7: pangkas per gugus, bukan 1 baris + 1 commit tambahan di setiap append
+        # begitu batas tercapai. Isi boleh melebihi max_entries sampai prune_batch-1.
+        self._prune_batch = int(prune_batch)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._max_entries = max_entries
         self._lock = threading.RLock()
@@ -230,7 +236,7 @@ class SqliteOutbox(_OutboxBase):
         if oldest is None:
             return
         cutoff = self._high_water - self._max_entries
-        if oldest > cutoff:
+        if cutoff - oldest + 1 < self._prune_batch:
             return
         self._db.execute("DELETE FROM outbox WHERE seq <= ?", (cutoff,))
         self._db.commit()

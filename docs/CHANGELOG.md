@@ -7,6 +7,54 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-11-03 · paket be-r3 — Overhaul P10: enrollment menolak `ANON-`; `onnx` di requirements-dev
+
+Jalur BE + umum. `backend/schemas/enrollment.py`: `person_id` berawalan `ANON-` ditolak (validator yang sama dengan
+`EmployeeCreateRequest`). `requirements-dev.txt`: `onnx`, `onnxruntime` (CPU); tanpa ini tes SCRFD/ReID ONNX dilewati
+diam-diam. Dengan keduanya terpasang, skip engine turun 20 -> 8 dan tidak ada kegagalan baru.
+Uji: `python -m pytest backend/tests/test_anon_identity_resolved.py -q`.
+
+## 2026-11-03 · paket ea-r18 — Overhaul P6: alasan ReID tidak menggabungkan dicatat
+
+Jalur EA. Keputusan gabung TIDAK berubah. `identity/reid/merge.py`: `pick_with_reason` (`pick_best` memakainya).
+`identity/reid/pending.py`: `PendingIdentities.rejections` (Counter, direset per hari) per tahap: `galeri_*`/`anon_*`
+x `kosong`/`ambang`/`margin`/`travel_time`/`cannot_link`. `runtime/service.py`: satu baris log INFO per laporan
+health bila ada. Bahan kalibrasi `match_threshold` dan tabel waktu tempuh. Uji: `test_reid_pending.py` (+1).
+
+## 2026-11-03 · paket fe-r1 — Overhaul P5: batas umur kotak live (`?boxage=`)
+
+Jalur FE. `frontend/src/composables/useDetectionStream.ts` `resolveDetectionsAt`: dengan `?boxage=1000` di URL,
+kotak yang lebih tua dari 1000 ms dari waktu video tidak ditampilkan (termasuk fallback `camera.detections`).
+Tanpa parameter = perilaku lama. Sengaja lewat URL: diuji di 4060 tanpa build ulang. Risiko: bila jam MediaMTX dan
+server meleset > batas, SEMUA kotak hilang; itu justru gejala P5(a), cek `clock_drift_seconds` dulu.
+`liveSyncDuration` HLS belum disetel (menunggu angka latensi engine dari log pilot). Uji: `npm run build`.
+
+## 2026-11-03 · paket eb-r14 — Overhaul P7 (1): outbox dipangkas per gugus
+
+Jalur EB. `engine/api/outbox.py` `SqliteOutbox(prune_batch=1000)`: setelah `max_entries`, DELETE + commit kedua hanya
+tiap 1.000 append, bukan setiap append. Isi boleh melebihi batas sampai 999 baris. `prune_batch=1` = perilaku lama.
+Group commit (P7 (2)) **belum**: menunggu jenis disk pilot (§3); di NVMe tidak terasa. Uji: `test_outbox_prune.py`.
+
+## 2026-11-03 · paket eb-r13 — Overhaul P3: NMS untuk D-FINE (di belakang config)
+
+Jalur EB. `detector.nms_iou_threshold` (baru, default `null` = mati). Bila diisi (usulan 0,7), `nms_result` menjalankan
+NMS per kelas pada `Results` mentah di `_predict` dan `predict_images`, jadi `detect()`, detektor bersama, dan ByteTrack
+membaca kotak yang sama. Implementasi numpy (tanpa torchvision); kotak dibangun ulang seperti `rescale_result`.
+`detector.iou_threshold` tetap tidak berefek (diteruskan ke LibreYOLO yang tidak memakainya). Cek containment dan
+`track_threshold` 0,45 < `confidence_threshold` 0,50 belum diputuskan. File: `config/schema.py`, `config/loader.py`,
+`factory.py`, `perception/dfine_detector.py`. Uji: `test_dfine_nms.py` (jalur numpy; jalur tensor torch belum diuji
+di cloud).
+
+## 2026-11-03 · paket be-r2 — Overhaul P1: rate limit login + `AUTH_COOKIE_SECURE` sampai ke container
+
+Jalur BE. `backend/routers/auth.py`: login GAGAL dibatasi per username (5) dan per IP (20) dalam 300 dtk -> 429 +
+`Retry-After`; berhasil mereset kuota username; username dinormalisasi (huruf kecil, trim). Env
+`AUTH_LOGIN_WINDOW_SECONDS`, `AUTH_LOGIN_MAX_FAILURES_PER_IP`, `AUTH_LOGIN_MAX_FAILURES_PER_USER`. State di memori
+(uvicorn 1 worker). **Temuan:** `deploy/docker-compose.yml` tidak meneruskan `AUTH_COOKIE_SECURE` ke container, jadi
+mengisinya di `.env` tidak berefek; kini diteruskan (default tetap `false`). `portainer.env.example`: `true`.
+Catatan: uvicorn `--forwarded-allow-ips='*'` membuat IP bisa dipalsukan lewat X-Forwarded-For; batas per username yang
+menahan tebakan satu akun. Uji: `test_login_rate_limit.py`.
+
 ## 2026-11-03 · paket ea-r17 — Overhaul P2: kegagalan sistem tidak lagi dihitung sebagai kegagalan wajah
 
 Jalur EA. Butir P2 `docs/RENCANA-OVERHAUL.md`. Ditumpuk di atas ea-r16. Kontrak, `engine/ports/`, backend, config
