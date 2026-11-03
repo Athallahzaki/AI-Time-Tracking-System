@@ -86,6 +86,11 @@ zones:
 recognition:
   enabled: false
   max_requests_per_frame: 2
+  # P8: klaim wajah lintas kamera (identity/cross_camera.py). false = perilaku lama.
+  # true: bersamaan di dua kamera sah hanya untuk pasangan yang bidang pandangnya
+  # tumpang-tindih (bukti penguat); selain itu skor wajah tertinggi menang.
+  cross_camera_claims: false
+  overlapping_cameras: []      # mis. [[cam_lobby, cam_luar]] (camera_id)
   execution: "async"         # "async" = SCRFD+AuraFace di worker terpisah, loop frame
                              # tidak menunggu (P7). "sync" = cara lama, untuk pembanding.
   worker_queue: 8            # penuh -> permintaan ditolak seketika, dicoba frame lain

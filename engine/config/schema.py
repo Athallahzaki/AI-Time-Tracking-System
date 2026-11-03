@@ -258,6 +258,14 @@ class RecognitionConfig:
     # overlap with, so this is a throttle on bookkeeping, not on GPU work.
     max_requests_per_frame: int = 2
 
+    # P8: klaim wajah lintas kamera (identity/cross_camera.py). False = perilaku lama:
+    # satu orang boleh diklaim di beberapa kamera sekaligus tanpa pemeriksaan.
+    # True = bersamaan di dua kamera hanya sah untuk pasangan `overlapping_cameras`
+    # (bukti penguat); selain itu skor wajah tertinggi menang. Isi pasangan dari
+    # pengamatan di lokasi: [[cam01, cam02], ...] (camera_id, bukan nama zona).
+    cross_camera_claims: bool = False
+    overlapping_cameras: Tuple[Tuple[str, str], ...] = ()
+
     # --- the recognizer slot --------------------------------------------
     # "none" (default): no face model is loaded, enrollment answers
     # `recognizer_disabled`, every track stays nameless. "onnx_face": SCRFD +

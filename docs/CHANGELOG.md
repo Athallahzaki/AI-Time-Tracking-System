@@ -7,6 +7,23 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-11-03 · paket ea-r19 — Overhaul P8 (1): klaim wajah lintas kamera (di belakang config)
+
+Jalur EA. Keputusan tim 3 Nov: satu orang boleh diklaim wajah di dua kamera sekaligus bila secara spasial masuk akal
+(bidang pandang tumpang-tindih, dideklarasikan) -> kamera kedua jadi bukti penguat; selain itu skor wajah tertinggi
+menang, seri = pemegang lama, yang kalah kembali tidak dikenal (bukan pindah nama).
+`engine/identity/cross_camera.py` (baru): `CrossCameraClaims`, registry bersama ber-lock. `identity/arbiter.py`:
+klaim baru diperiksa registry setelah dedup per kamera (`reason="cross_camera_lost_claim"`); pemegang yang kalah
+dilepas oleh arbiter kameranya sendiri di `tick` (tidak ada thread yang menyentuh arbiter kamera lain);
+`_release`/`close_track`/`adopt` menjaga registry. `presence/binding.py`: `IDENTITY_RELEASED` dari `tick` menutup
+interval (`identity_released`), track lanjut tanpa nama. Config `recognition.cross_camera_claims` (default **false** =
+perilaku lama) + `recognition.overlapping_cameras` (pasangan camera_id). `runtime/service.py`/`camera.py`: satu
+registry untuk semua kamera; log health `klaim wajah lintas kamera (P8)`. `engine/ports/` dan kontrak tidak berubah.
+Batas (shortcut, tercatat di modul): hanya klaim yang hidup BERSAMAAN yang diperiksa; klaim berurutan yang melanggar
+waktu tempuh tidak (arbiter memakai PTS per kamera, tanpa jam bersama). Fusi wajah+tubuh+ruang-waktu BELUM: alur masih
+kaskade dengan veto (lihat SERAH-TERIMA).
+Uji: `test_klaim_lintas_kamera.py` (8), `test_binding.py` (+1).
+
 ## 2026-11-03 · paket fe-r2 — Pengaturan tampilan video dari `display-config.json`
 
 Jalur FE + deploy. Konstanta tampilan pindah dari kode ke `frontend/public/display-config.json`, dibaca saat start

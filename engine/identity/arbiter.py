@@ -41,6 +41,7 @@ from .evidence import (
     DEFAULT_WINDOW,
     EvidenceWindow,
 )
+from .cross_camera import CrossCameraClaims
 from .matcher import MatrixMatcher
 from .ports import Evidence, IdentityState, Match, TrackIdentity
 
@@ -82,8 +83,12 @@ class IdentityArbiter:
         held_after_seconds: float = DEFAULT_HELD_AFTER_SECONDS,
         ttl_seconds: float = DEFAULT_TTL_SECONDS,
         held_halflife_seconds: float = DEFAULT_HELD_HALFLIFE_SECONDS,
+        cross_camera: Optional[CrossCameraClaims] = None,
     ) -> None:
         self._matcher = matcher
+        # P8: registry klaim wajah bersama semua kamera. None = perilaku lama
+        # (dedup hanya di dalam kamera ini).
+        self._cross = cross_camera
         self._window = window
         self._min_evidence = min_evidence
         self._min_spread = min_spread_seconds
@@ -116,6 +121,8 @@ class IdentityArbiter:
         self._windows.pop(track_uuid, None)
         if identity and identity.person_id:
             self._claims.pop((identity.camera_id, identity.person_id), None)
+            if self._cross is not None:
+                self._cross.release(identity.camera_id, track_uuid, identity.person_id)
         return identity
 
     def identity_of(self, track_uuid: str) -> Optional[TrackIdentity]:
@@ -145,6 +152,8 @@ class IdentityArbiter:
         identity.history.append(f"adopted_from:{previous_uuid}")
 
         self._claims[(camera_id, previous.person_id)] = track_uuid
+        if self._cross is not None:
+            self._cross.transfer(camera_id, previous_uuid, track_uuid, previous.person_id)
         previous.person_id = None
         previous.state = IdentityState.EXPIRED
         return identity
@@ -205,6 +214,19 @@ class IdentityArbiter:
         """
         changes: List[Decision] = []
 
+        if self._cross is not None:
+            # P8: klaim yang kalah di kamera lain dilepas di thread kamera ini.
+            for track_uuid in sorted(self._cross.take_evicted(self._identities)):
+                identity = self._identities[track_uuid]
+                previous_person = identity.person_id
+                if previous_person is None:
+                    continue
+                self._release(identity)
+                self._windows[track_uuid].clear()
+                identity.history.append(f"cross_camera_lost:{previous_person}@{pts:.2f}")
+                changes.append(Decision(Outcome.IDENTITY_RELEASED, identity,
+                                        from_person_id=previous_person, reason="cross_camera_lost_claim"))
+
         for identity in self._identities.values():
             if identity.person_id is None or identity.last_face_pts is None:
                 continue
@@ -250,6 +272,13 @@ class IdentityArbiter:
         if loser is identity:
             identity.state = IdentityState.PROVISIONAL
             return Decision(Outcome.NOTHING, identity, match, reason="dedup_lost_claim")
+
+        if self._cross is not None and not self._cross.claim(
+                identity.camera_id, identity.track_uuid, match.person_id, match.similarity):
+            identity.state = IdentityState.PROVISIONAL
+            identity.similarity = match.similarity
+            identity.margin = match.margin
+            return Decision(Outcome.NOTHING, identity, match, reason="cross_camera_lost_claim")
 
         self._confirm(identity, match, window)
         return Decision(Outcome.IDENTIFIED, identity, match)
@@ -318,12 +347,16 @@ class IdentityArbiter:
         if identity.confirmed_at_pts is None:
             identity.confirmed_at_pts = window.last_pts
         self._claims[(identity.camera_id, match.person_id)] = identity.track_uuid
+        if self._cross is not None:
+            self._cross.refresh(identity.camera_id, identity.track_uuid, match.person_id, match.similarity)
 
     def _release(self, identity: TrackIdentity) -> None:
         if identity.person_id:
             claim = (identity.camera_id, identity.person_id)
             if self._claims.get(claim) == identity.track_uuid:
                 self._claims.pop(claim, None)
+            if self._cross is not None:
+                self._cross.release(identity.camera_id, identity.track_uuid, identity.person_id)
         identity.person_id = None
         identity.state = IdentityState.PROVISIONAL
         identity.confidence = 0.0

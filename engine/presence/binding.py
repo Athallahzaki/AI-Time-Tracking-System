@@ -180,9 +180,14 @@ class EngineBinding:
         # berjalan lebih cepat dari waktu nyata harus meluruh dengan laju yang
         # sama supaya angkanya sebanding.
         for decision in self._arbiter.tick(pts):
-            track = self._track_by_uuid.get(decision.identity.track_uuid)
+            uuid = decision.identity.track_uuid
+            if decision.outcome is Outcome.IDENTITY_RELEASED:
+                # P8: kalah klaim wajah ke kamera lain.
+                self.metrics.released += 1
+                self._assembler.identity_released(uuid, pts=pts)
+            track = self._track_by_uuid.get(uuid)
             if track is not None:
-                self._publish_identity(track, decision.identity.track_uuid)
+                self._publish_identity(track, uuid)
 
     def on_track_lost(self, track: Track) -> None:
         """Hilang sementara, bukan hilang permanen.

@@ -222,6 +222,10 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
             backoff_interval_seconds=_optional_float(rec.get("backoff_interval_seconds")),
             attempts_before_backoff=_optional_int(rec.get("attempts_before_backoff")),
             max_requests_per_frame=int(rec.get("max_requests_per_frame", 2)),
+            cross_camera_claims=bool(rec.get("cross_camera_claims", False)),
+            overlapping_cameras=tuple(
+                tuple(str(c) for c in pair) for pair in (rec.get("overlapping_cameras") or ())
+            ),
             recognizer=str(rec.get("recognizer", "none") or "none"),
             face_detector_model=rec.get("face_detector_model"),
             face_embedder_model=rec.get("face_embedder_model"),

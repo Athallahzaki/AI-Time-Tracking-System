@@ -145,8 +145,11 @@ class CameraSupervisor:
         tick_gate: Any = None,
         reid: Any = None,
         on_fatal: Optional[Callable[[str, str], None]] = None,
+        cross_camera: Any = None,
     ) -> None:
         self.spec = spec
+        # P8: identity.cross_camera.CrossCameraClaims bersama; None = mati.
+        self._cross_camera = cross_camera
         # Dipanggil (camera_id, ringkasan error) saat error GPU fatal terlihat
         # di thread ini. None = perilaku lama: dicatat lalu dicoba ulang terus.
         self._on_fatal = on_fatal
@@ -437,7 +440,8 @@ class CameraSupervisor:
         if self._reid is not None:
             self._reid_tap = self._reid.tap_for(camera_id, self._assembler)
         self._binding = EngineBinding(
-            arbiter=IdentityArbiter(matcher=self._matcher or _empty_matcher()),
+            arbiter=IdentityArbiter(matcher=self._matcher or _empty_matcher(),
+                                    cross_camera=self._cross_camera),
             assembler=self._assembler,
             scheduler=self._scheduler,
             recognize=self._recognize,

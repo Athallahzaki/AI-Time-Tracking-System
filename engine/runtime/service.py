@@ -63,6 +63,7 @@ from ..api import EngineApi, events
 from ..api.outbox import Outbox, SqliteOutbox
 from ..config import EngineConfig, load_config
 from ..identity import RecognitionScheduler
+from ..identity.cross_camera import CrossCameraClaims
 from .camera import CameraSpec, CameraSupervisor
 
 logger = logging.getLogger("engine.runtime")
@@ -231,6 +232,11 @@ class EngineRuntime:
         # `pop` dipanggil per kamera (pipeline/zoning.py).
         self._scheduler = _LockedScheduler(
             RecognitionScheduler(**self.config.recognition.scheduler_kwargs(), clock=time.monotonic)
+        )
+        # P8: klaim wajah lintas kamera, satu untuk semua kamera.
+        self._cross_camera: Optional[CrossCameraClaims] = (
+            CrossCameraClaims(self.config.recognition.overlapping_cameras)
+            if self.config.recognition.cross_camera_claims else None
         )
         self._cameras: Dict[str, CameraSupervisor] = {}
         self._close_lock = threading.Lock()
@@ -419,6 +425,7 @@ class EngineRuntime:
             tick_gate=self._tick_gate,
             reid=self._reid,
             on_fatal=self._on_camera_fatal if self.config.gpu_fatal_action == "exit" else None,
+            cross_camera=self._cross_camera,
         )
         if self._tick_gate is not None and not self._tick_gate.running:
             self._tick_gate.start()
@@ -689,6 +696,11 @@ class EngineRuntime:
             if reid_core is not None and reid_core.rejections:
                 logger.info("ReID tidak digabung (P6, bahan kalibrasi): %s",
                             ", ".join(f"{k} {v}" for k, v in sorted(dict(reid_core.rejections).items())))
+        if self._cross_camera is not None:
+            m = self._cross_camera.metrics()
+            if any(m.values()):
+                logger.info("klaim wajah lintas kamera (P8): penguat %d, dicabut %d, ditolak %d",
+                            m["cross_corroborated"], m["cross_evicted"], m["cross_rejected"])
         shared = self._shared_detector
         if shared is not None:
             d = shared.metrics.as_dict()

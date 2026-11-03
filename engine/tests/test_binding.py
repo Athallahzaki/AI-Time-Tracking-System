@@ -300,3 +300,25 @@ class _Request:
 
 def _request(binding, camera, track_id, pts):
     return _Request(binding.uuid_for(camera, track_id), camera, pts)
+
+
+def test_kalah_klaim_lintas_kamera_menutup_interval_dan_track_lanjut_tanpa_nama():
+    """P8: kamera lain memegang 4471 dengan skor lebih tinggi -> interval kamera ini
+    ditutup `identity_released` pada tick berikutnya; track tetap hidup tanpa nama."""
+    from engine.identity.cross_camera import CrossCameraClaims
+
+    binding, _, arbiter, _, keluaran = build(recognize=kenali(ALICE))
+    cross = CrossCameraClaims()
+    arbiter._cross = cross
+    for index, pts in enumerate((1.0, 1.5, 2.1)):
+        binding.on_tracks_updated([track(1)], frame(pts, frame_id=index))
+        binding(_request(binding, "r1", 1, pts))
+    assert binding.metrics.identified == 1
+
+    assert cross.claim("r2", "tr_lain", "4471", 1.0)     # wajah lebih jelas di kamera lain
+    binding.on_tracks_updated([track(1)], frame(2.5, frame_id=3))
+
+    intervals = jenis(keluaran, "presence.interval")
+    assert [(i["person_id"], i["end_reason"]) for i in intervals] == [("4471", "identity_released")]
+    assert binding.metrics.released == 1
+    assert arbiter.identity_of(binding.uuid_for("r1", 1)).person_id is None
