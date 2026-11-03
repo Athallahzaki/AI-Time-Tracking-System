@@ -171,6 +171,25 @@ Nilai `reason` untuk keseluruhan: `collision`, `insufficient_references`, `ok`.
 **Ack hanya berarti perintah diterima, bukan selesai.** Hasil sebenarnya menyusul
 sebagai event. Membuka RTSP bisa makan lima detik dan bisa gagal.
 
+### 3.6 `set_tuning` (overhaul 3 Nov 2026)
+
+Pengaturan realtime dari dashboard admin (tab Pengaturan → Kalibrasi), tanpa restart engine.
+Deklaratif seperti `set_cameras`: membawa SELURUH override di atas config file engine; `{}` =
+kembali ke file. Backend menyimpannya dan mengirim ulang setiap tersambung.
+
+```json
+{ "type": "set_tuning", "v": 1, "ts": "...", "tuning": {
+    "recognition": { "match_threshold": 0.42, "cross_camera_claims": true,
+                     "overlapping_cameras": [["cam01", "cam02"]] },
+    "analysis_trigger": { "enabled": true, "sustain_frames": 4 } } }
+```
+
+Engine membalas `ack` `in_reply_to: "set_tuning"` dengan `accepted` dan `effective_tuning` (nilai
+yang sedang berlaku untuk setiap kunci yang bisa diubah). Satu nilai tidak sah = seluruh pesan
+ditolak, pengaturan lama tetap berlaku; backend lalu mengembalikan override-nya ke yang terakhir
+diterima. Kunci yang boleh: `engine/runtime/tuning.py` `TUNABLE` (konstanta perseptual saja).
+Butuh restart: tracker, model, ukuran input.
+
 ---
 
 ## 4. Kanal `events` — Engine → Backend

@@ -1,5 +1,5 @@
 fastapi>=0.115,<1
-uvicorn[standard]>=0.30,<1
+uvicorn[standard]>=0.32,<1  # >=0.32: CIDR di --forwarded-allow-ips
 sse-starlette>=2,<4
 pyyaml>=6,<7
 pydantic>=2.7,<3

@@ -75,10 +75,13 @@ def test_reid_mati_tidak_memuat_apa_pun(monkeypatch):
     monkeypatch.setattr(embedder_onnx, "OnnxReidEmbedder", jangan_dipanggil)
     monkeypatch.setattr(face_onnx, "_session", jangan_dipanggil)
     assert build_reid_embedder(ReidSettings()) is None
-    for name in ("default_config", "demo-4060", "demo-4060-tick", "demo-1060"):
+    for name in ("default_config", "demo-4060-tick", "demo-4060-hemat", "demo-1060-hemat"):
         config = load_config(f"engine/config/{name}.yaml")
         assert config.reid.enabled is False, name
         assert build_reid_embedder(config.reid) is None
+    # Keputusan demo: ReID wajib tampil, jadi kedua profil demo utama menyalakannya.
+    for name in ("demo-4060", "demo-1060"):
+        assert load_config(f"engine/config/{name}.yaml").reid.enabled is True, name
 
 
 def test_berkas_model_hilang_ditolak(tmp_path):

@@ -42,6 +42,7 @@ from typing import Any, Callable, Deque, Dict, List, Optional, Tuple
 import numpy as np
 
 from ..api import events
+from ..identity.reid.pending import REASON_GROUP_MERGED
 from ..identity.reid import (
     Assignment, BodyObservation, PendingIdentities, ReidConfig, Resolution, TrackClosed,
 )
@@ -82,6 +83,7 @@ class ReidMetrics:
     resolutions: int = 0
     revoked: int = 0
     days_purged: int = 0
+    anon_merged: int = 0
 
     def as_dict(self) -> Dict[str, int]:
         return dict(self.__dict__)
@@ -106,6 +108,9 @@ class ReidCoordinator:
         self._resolved: Dict[str, str] = {}         # anon_id -> person_id
         self._anon_intervals: Dict[str, List[str]] = {}
         self._known_anon: set = set()
+        # Penilaian ulang: anon_asal -> anon_tujuan, dan tujuan -> [(asal, anggota)].
+        self._merged_into: Dict[str, str] = {}
+        self._merged_children: Dict[str, List[Tuple[str, Tuple[str, ...]]]] = {}
         self.metrics = ReidMetrics()
 
     # -- kamera ---------------------------------------------------------------
@@ -116,6 +121,13 @@ class ReidCoordinator:
             if inbox is None:
                 inbox = self._inboxes[camera_id] = collections.deque()
             return inbox
+
+    def update_config(self, config: ReidConfig) -> None:
+        """Pengaturan realtime: ambang, waktu tempuh, penilaian ulang. Galeri hari ini tetap."""
+        with self._lock:
+            self.config = config
+            if self._core is not None:
+                self._core.config = config
 
     @property
     def core(self) -> Optional[PendingIdentities]:
@@ -190,7 +202,10 @@ class ReidCoordinator:
 
     def interval_gate(self, person_id: str, track_uuid: str, emit: Callable[[str], str]) -> str:
         with self._lock:
-            label = self._resolved.get(person_id, person_id)
+            label = person_id
+            while label in self._merged_into:
+                label = self._merged_into[label]
+            label = self._resolved.get(label, label)
             interval_id = emit(label)
             if label.upper().startswith("ANON-"):
                 self._anon_intervals.setdefault(label, []).append(interval_id)
@@ -224,6 +239,8 @@ class ReidCoordinator:
         self._resolved.clear()
         self._anon_intervals.clear()
         self._known_anon.clear()
+        self._merged_into.clear()
+        self._merged_children.clear()
 
     def _push(self, camera_id: Optional[str], item: InboxItem) -> None:
         if camera_id is None:
@@ -250,6 +267,14 @@ class ReidCoordinator:
         for uuid in assignment.revoked:
             self.metrics.revoked += 1
             self._push(self._owner.get(uuid), (KIND_LABEL, uuid, None, None))
+        for source, target, members in assignment.merged:
+            self.metrics.anon_merged += 1
+            self._merged_into[source] = target
+            self._merged_children.setdefault(target, []).append((source, members))
+            logger.info("[%s] %s digabung ke %s (penilaian ulang ReID, %d track)",
+                        camera_id, source, target, len(members))
+            for uuid in members:
+                self._push(self._owner.get(uuid), (KIND_LABEL, uuid, target, "reid"))
         for resolution in assignment.resolutions:
             self._resolve(resolution)
 
@@ -270,6 +295,11 @@ class ReidCoordinator:
                 continue
             self._push(self._owner.get(uuid),
                        (KIND_LABEL, uuid, resolution.person_id, SOURCE_REID_RETRO))
+        # Kelompok yang dulu digabung ke sini: intervalnya masih berlabel ANON lamanya,
+        # dan backend hanya memindahkan interval yang person_id-nya = anon_id pesan.
+        for child, members in self._merged_children.pop(resolution.anon_id, []):
+            self._resolve(Resolution(child, resolution.person_id, resolution.at,
+                                     REASON_GROUP_MERGED, members, None))
 
 
 class ReidRuntime:

@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Set, Union
 
 from .schema import (
+    AnalysisTriggerConfig,
     DetectorConfig,
     EngineConfig,
     IngestConfig,
@@ -75,7 +76,7 @@ def _field_names(cls: type) -> Set[str]:
 # Derived from the dataclasses, so the schema cannot drift from what the loader
 # accepts. These are nested objects on EngineConfig and sections in the file,
 # not keys inside `core`.
-_NESTED = {"ingest", "detector", "tracker", "zones", "recognition", "reid"}
+_NESTED = {"ingest", "detector", "tracker", "zones", "recognition", "reid", "analysis_trigger"}
 _CORE_KEYS = _field_names(EngineConfig) - _NESTED
 _SECTIONS: Dict[str, Set[str]] = {
     "core": _CORE_KEYS,
@@ -85,6 +86,7 @@ _SECTIONS: Dict[str, Set[str]] = {
     "zones": _field_names(ZoneConfig),
     "recognition": _field_names(RecognitionConfig),
     "reid": _field_names(ReidSettings),
+    "analysis_trigger": _field_names(AnalysisTriggerConfig),
 }
 
 
@@ -250,6 +252,7 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
             match_margin=_optional_float(rec.get("match_margin")),
         ),
         reid=_reid_settings(rid),
+        analysis_trigger=AnalysisTriggerConfig(**(raw.get("analysis_trigger") or {})),
     )
 
 
@@ -283,6 +286,7 @@ def _reid_settings(rid: Dict[str, Any]) -> ReidSettings:
         default_travel_time_seconds=float(
             rid.get("default_travel_time_seconds", defaults.default_travel_time_seconds)
         ),
+        reevaluate=bool(rid.get("reevaluate", False)),
         # YAML membaca 00:00 tanpa kutip sebagai angka sexagesimal; terima keduanya.
         daily_purge_time=_hhmm(rid.get("daily_purge_time", defaults.daily_purge_time)),
     )

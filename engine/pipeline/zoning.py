@@ -48,6 +48,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
+from ..identity.admission import Priority
+from ..identity.ports import IdentityState
 from ..ports.frame import Frame
 from ..ports.geometry import NormalizedBox
 from ..ports.tracking import Track, TrackState
@@ -174,7 +176,10 @@ class ZonePriorityQueue:
         zoner: TrackZoner,
         max_requests_per_frame: int = 2,
         consumer: Optional[RequestConsumer] = None,
+        change_gate: Optional[Any] = None,
     ) -> None:
+        # Gerbang perubahan kotak (pipeline/change_gate.py). None = interval tetap (perilaku lama).
+        self.change_gate = change_gate
         self._scheduler = scheduler
         self._zoner = zoner
         self._max_per_frame = max(0, int(max_requests_per_frame))
@@ -195,6 +200,12 @@ class ZonePriorityQueue:
             return []
 
         camera_id = frame.metadata.source_id
+        gate = self.change_gate
+        if gate is not None and not gate.params.enabled:
+            gate = None
+        if gate is not None:
+            gate.observe(frame.metadata.frame_id, tracks, now_pts)
+        track_of_key: Dict[str, int] = {}
 
         for track in tracks:
             if track.state not in (TrackState.NEW, TrackState.TRACKED):
@@ -211,6 +222,16 @@ class ZonePriorityQueue:
                 zone=track.attributes.get(ZONE_ATTRIBUTE, ZONE_INTERIOR),
                 track_age_seconds=track.dwell_time,
             )
+            if gate is not None:
+                due = gate.due(track.track_id, "face")
+                state = getattr(identity, "state", None)
+                if due and priority is None and state is IdentityState.CONFIRMED:
+                    # Kotak berubah / overlap / kembali dari hilang: verifikasi ulang
+                    # sekarang, tidak menunggu reverify_interval.
+                    priority = Priority.REVERIFY
+                elif not due and priority is not None:
+                    gate.skip("face")
+                    continue
             if priority is None:
                 continue
             # `track_uuid` is the identity layer's key and does not exist yet
@@ -225,6 +246,7 @@ class ZonePriorityQueue:
             # ada yang menuliskannya -- ini "satu baris" yang dijanjikan
             # komentar di atas.
             track_uuid = track.attributes.get("track_uuid") or f"{camera_id}-t{track.track_id}"
+            track_of_key[track_uuid] = track.track_id
             if self._scheduler.submit(
                 track_uuid=track_uuid,
                 camera_id=camera_id,
@@ -246,6 +268,8 @@ class ZonePriorityQueue:
                 break
             handed.append(request)
             self._handed_out += 1
+            if gate is not None and request.track_uuid in track_of_key:
+                gate.mark(track_of_key[request.track_uuid], "face", now_pts)
             self._consumer(request)
         return handed
 

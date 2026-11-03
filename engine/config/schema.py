@@ -423,6 +423,9 @@ class ReidSettings:
     # Pasangan yang tidak tercantum memakai default yang sengaja besar (ketat).
     travel_time_seconds: dict = field(default_factory=dict)
     default_travel_time_seconds: float = 30.0
+    # Nilai ulang kelompok ANON pada embedding berikutnya (identity/reid/merge.py
+    # ReidConfig.reevaluate). Default mati; nyalakan setelah match_threshold dikalibrasi.
+    reevaluate: bool = False
     # Jam lokal (HH:MM) galeri tubuh + kelompok ANON dikosongkan setiap hari.
     # Pakaian berganti antar hari; penampilan kemarin hanya menambah peluang tertukar,
     # dan data penampilan tidak disimpan lebih lama dari perlu. Pilih jam di luar
@@ -484,7 +487,64 @@ class ReidSettings:
             raw["match_threshold"] = float(self.match_threshold)
         if self.match_margin is not None:
             raw["match_margin"] = float(self.match_margin)
+        raw["reevaluate"] = bool(self.reevaluate)
         return ReidConfig.from_mapping(raw)
+
+
+@dataclass(frozen=True)
+class AnalysisTriggerConfig:
+    """Kapan rekognisi wajah / embedding ReID dijalankan (pipeline/change_gate.py).
+
+    `enabled: false` (default) = perilaku lama: interval tetap (reverify/retry
+    scheduler, `reid.embed_interval_seconds`). `true` = berdasarkan perubahan kotak
+    sejak snapshot terakhir yang dianalisis, plus overlap cepat dan hilang lama.
+    Semua angka perseptual; boleh diubah saat jalan lewat pengaturan realtime.
+    """
+
+    enabled: bool = False
+    # EMA kotak sebelum dibandingkan: 1.0 = tanpa penghalusan, kecil = lebih tahan jitter.
+    smoothing_alpha: float = 0.5
+    # Berubah bila salah satu lewat: geser pusat (x tinggi badan), skala tinggi (+-25%), rasio aspek.
+    displacement_ratio: float = 0.5
+    scale_ratio: float = 0.25
+    aspect_ratio: float = 0.25
+    # Harus bertahan sekian frame berturut-turut: drift satu frame tidak memicu apa pun.
+    sustain_frames: int = 3
+    # Kredit analisis per pemicu. Wajah butuh beberapa bukti tersebar untuk konfirmasi.
+    face_burst: int = 3
+    reid_burst: int = 1
+    # Hilang selama ini lalu kembali = cek ulang (bisa orang lain). Lebih singkat diabaikan.
+    lost_recheck_seconds: float = 1.0
+    # Overlap: mulai dihitung di IoU ini; berisiko tukar ID bila puncaknya >= swap_iou
+    # dan berlangsung <= fast_overlap_seconds, lalu kedua track dapat overlap_recheck kredit.
+    overlap_iou: float = 0.1
+    swap_iou: float = 0.3
+    fast_overlap_seconds: float = 3.0
+    overlap_recheck: int = 3
+    # Pengaman: analisis paling jarang sekali per ini walau tidak ada perubahan. null = mati.
+    max_interval_seconds: Optional[float] = 120.0
+
+    def __post_init__(self) -> None:
+        ranges = {
+            "smoothing_alpha": (0.05, 1.0), "displacement_ratio": (0.05, 5.0),
+            "scale_ratio": (0.02, 3.0), "aspect_ratio": (0.02, 3.0),
+            "lost_recheck_seconds": (0.0, 60.0), "overlap_iou": (0.0, 1.0),
+            "swap_iou": (0.0, 1.0), "fast_overlap_seconds": (0.0, 60.0),
+        }
+        for name, (low, high) in ranges.items():
+            value = getattr(self, name)
+            if not isinstance(value, (int, float)) or isinstance(value, bool) or not low <= value <= high:
+                raise ValueError(f"analysis_trigger.{name}={value!r} di luar {low}..{high}")
+        for name, low, high in (("sustain_frames", 1, 100), ("face_burst", 0, 20),
+                                ("reid_burst", 0, 20), ("overlap_recheck", 0, 20)):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or not low <= value <= high:
+                raise ValueError(f"analysis_trigger.{name}={value!r} harus bilangan bulat {low}..{high}")
+        if self.swap_iou < self.overlap_iou:
+            raise ValueError("analysis_trigger.swap_iou tidak boleh di bawah overlap_iou")
+        limit = self.max_interval_seconds
+        if limit is not None and (isinstance(limit, bool) or not 1.0 <= float(limit) <= 3600.0):
+            raise ValueError("analysis_trigger.max_interval_seconds harus 1..3600 atau null")
 
 
 @dataclass(frozen=True)
@@ -601,6 +661,7 @@ class EngineConfig:
     zones: ZoneConfig = field(default_factory=ZoneConfig)
     recognition: RecognitionConfig = field(default_factory=RecognitionConfig)
     reid: ReidSettings = field(default_factory=ReidSettings)
+    analysis_trigger: AnalysisTriggerConfig = field(default_factory=AnalysisTriggerConfig)
 
     def effective_fps(self, source_fps: float) -> float:
         """

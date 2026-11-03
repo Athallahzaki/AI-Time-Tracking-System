@@ -136,6 +136,9 @@ reid:
   # memakai default_travel_time_seconds yang sengaja ketat. Isi setelah diukur di lokasi.
   travel_time_seconds: {}
   default_travel_time_seconds: 30
+  # Nilai ulang kelompok ANON pada embedding berikutnya (overhaul 3 Nov).
+  # Nyalakan SETELAH match_threshold dikalibrasi; mati = perilaku lama.
+  reevaluate: false
   # Jam lokal galeri tubuh + kelompok ANON dikosongkan tiap hari (terjadwal, walau kamera
   # sepi). Pilih jam di luar jam operasional.
   daily_purge_time: "00:00"

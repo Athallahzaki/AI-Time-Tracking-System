@@ -140,3 +140,22 @@ tracker:
   track_threshold: 0.45
   match_threshold: 0.8
   track_buffer_seconds: 1.0
+
+# Kapan rekognisi wajah / embedding ReID dijalankan (pipeline/change_gate.py).
+# false = perilaku lama (interval tetap). true = berdasarkan perubahan kotak sejak
+# snapshot terakhir yang dianalisis, overlap cepat (risiko tukar ID), dan hilang lama.
+analysis_trigger:
+  enabled: false
+  smoothing_alpha: 0.5        # EMA kotak; kecil = lebih tahan jitter
+  displacement_ratio: 0.5     # geser pusat, x tinggi badan
+  scale_ratio: 0.25           # perubahan tinggi kotak (+-25%)
+  aspect_ratio: 0.25
+  sustain_frames: 3           # harus bertahan sekian frame: drift sesaat diabaikan
+  face_burst: 3               # kredit analisis wajah per pemicu (arbiter butuh >1 bukti)
+  reid_burst: 1
+  lost_recheck_seconds: 1.0   # hilang selama ini lalu kembali = cek ulang
+  overlap_iou: 0.1
+  swap_iou: 0.3               # overlap berisiko tukar ID bila puncaknya >= ini ...
+  fast_overlap_seconds: 3.0   # ... dan berlangsung singkat
+  overlap_recheck: 3
+  max_interval_seconds: 120   # pengaman; null = tanpa

@@ -31,4 +31,20 @@ globalThis.fetch = async () => new Response('<!doctype html>', { status: 200 });
 await loadDisplayConfig();
 console.warn = warn;
 assert.equal(interp.maxGapMs, 500, 'file rusak kembali ke default');
+// Lapisan: file server sebagai dasar, pengaturan admin (API) di atasnya, per kunci.
+globalThis.fetch = async (url) => new Response(JSON.stringify(String(url).includes('/api/')
+  ? { interpolation: { maxGapMs: 700 }, webrtc: { playoutDelaySeconds: 5 } }
+  : { interpolation: { maxGapMs: 900, lostHoldMs: 250 } }));
+await loadDisplayConfig();
+assert.equal(interp.maxGapMs, 700, 'admin menimpa file');
+assert.equal(interp.lostHoldMs, 250, 'kunci yang tidak disentuh admin tetap dari file');
+assert.equal(displayConfig.webrtc.playoutDelaySeconds, 5);
+// API mati / belum login (401): file tetap dipakai.
+globalThis.fetch = async (url) => String(url).includes('/api/')
+  ? new Response('{"detail":"x"}', { status: 401 })
+  : new Response(JSON.stringify({ interpolation: { maxGapMs: 900 } }));
+console.warn = () => {};
+await loadDisplayConfig();
+console.warn = warn;
+assert.equal(interp.maxGapMs, 900);
 console.log('display-config: semua cek lulus');

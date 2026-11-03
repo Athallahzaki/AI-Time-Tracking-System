@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from .gallery import DailyGallery, PrototypeSet
-from .merge import ReidConfig, TrackSpan, check_group, pick_best, pick_with_reason
+from .merge import ReidConfig, TrackSpan, check_group, check_pair, pick_best, pick_with_reason
 from .messages import BodyObservation, TrackClosed
 
 # Nilai identity_source di kontrak ($defs.identity_source).
@@ -92,6 +92,10 @@ class Assignment:
     anon_id: Optional[str] = None
     resolutions: Tuple[Resolution, ...] = ()
     revoked: Tuple[str, ...] = ()
+    # (anon_asal, anon_tujuan, track_uuid anggota asal): kelompok asal digabung ke
+    # tujuan oleh penilaian ulang. Kontrak tidak punya pesan ANON->ANON; koordinator
+    # menyelesaikan anon_asal sendiri saat tujuannya terselesaikan.
+    merged: Tuple[Tuple[str, str, Tuple[str, ...]], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -143,6 +147,8 @@ class PendingIdentities:
         # P6: kenapa embedding tanpa wajah TIDAK digabung, per tahap, mis.
         # "galeri_ambang", "anon_travel_time". Bahan kalibrasi, bukan keputusan.
         self.rejections: Counter = Counter()
+        # Hasil penilaian ulang (reevaluate): "galeri", "anon_gabung".
+        self.reevaluations: Counter = Counter()
 
     # ------------------------------------------------------------------ query
 
@@ -185,6 +191,8 @@ class PendingIdentities:
             return self._observe_face(track, obs)
 
         revoked: List[str] = []
+        resolutions: List[Resolution] = []
+        merged: List[Tuple[str, str, Tuple[str, ...]]] = []
         if track.person_id is None and track.anon_id is None:
             if obs.embedding is not None:
                 self._assign_without_face(track, obs)
@@ -193,13 +201,54 @@ class PendingIdentities:
                 group = self._groups.get(track.anon_id) if track.anon_id else None
                 if group is not None and group.resolved_to is None:
                     group.protos.add(obs.embedding)
+                    if self.config.reevaluate:
+                        resolutions, merged = self._reevaluate(group, obs.at)
             revoked = self._enforce(track)
         person_id, source = self._effective(track)
         if source == SOURCE_FACE:
             # Identitas dari wajah yang kini dipegang tracker (pesan ini tanpa wajah).
             source = SOURCE_TRACKING
         return Assignment(track.span.track_uuid, person_id, source, track.anon_id,
-                          revoked=tuple(revoked))
+                          tuple(resolutions), tuple(revoked), tuple(merged))
+
+    # ------------------------------------------------------- penilaian ulang
+
+    def _reevaluate(self, group: _Group, at: float
+                    ) -> Tuple[List[Resolution], List[Tuple[str, str, Tuple[str, ...]]]]:
+        """Kelompok ANON dengan prototipe baru: kini cocok ke karyawan atau ANON lain?
+
+        Ambang + margin + aturan waktu yang sama dengan penugasan pertama; setiap
+        anggota harus lolos aturan waktu terhadap setiap anggota lawan. Lebih baik
+        terpecah daripada tertukar: ragu = tidak digabung.
+        """
+        person = pick_best(self.gallery.scores_set(group.protos), self.config)
+        if person is not None:
+            spans = self._person_spans(person)
+            if all(check_group(spans, self._tracks[u].span, self.config).ok for u in group.members):
+                self.reevaluations["galeri"] += 1
+                return [self._resolve(group, person, at, REASON_GROUP_MERGED, None)], []
+        others = [g for g in self._groups.values()
+                  if g is not group and g.resolved_to is None and g.members and len(g.protos)]
+        scored = sorted(((g.anon_id, g.protos.score_set(group.protos)) for g in others),
+                        key=lambda item: item[1], reverse=True)
+        target = pick_best(scored, self.config)
+        if target is None:
+            return [], []
+        other = self._groups[target]
+        if not all(check_pair(self._tracks[a].span, self._tracks[b].span, self.config).ok
+                   for a in group.members for b in other.members):
+            return [], []
+        order = list(self._groups)
+        keep, gone = (other, group) if order.index(other.anon_id) < order.index(group.anon_id) else (group, other)
+        members = tuple(sorted(gone.members))
+        for uuid in members:
+            self._tracks[uuid].anon_id = keep.anon_id
+        keep.members |= gone.members
+        for vector in gone.protos.matrix():
+            keep.protos.add(vector)
+        del self._groups[gone.anon_id]
+        self.reevaluations["anon_gabung"] += 1
+        return [], [(gone.anon_id, keep.anon_id, members)]
 
     # ------------------------------------------------------------- jalur wajah
 

@@ -64,8 +64,8 @@ class _LoginLimiter:
 
     shortcut: state di memori satu proses (uvicorn --workers 1); reset saat restart.
     Naikkan ke tabel SQLite bila backend jalan lebih dari satu worker.
-    IP dari uvicorn `--forwarded-allow-ips='*'` bisa dipalsukan lewat X-Forwarded-For,
-    karena itu batas per username yang menahan tebakan password satu akun.
+    IP klien dari X-Forwarded-For hanya dipercaya dari jaringan proxy (FORWARDED_ALLOW_IPS,
+    deploy/backend/Dockerfile); batas per username tetap menahan tebakan satu akun.
     """
 
     def __init__(self, window_seconds: float, max_per_ip: int, max_per_user: int) -> None:

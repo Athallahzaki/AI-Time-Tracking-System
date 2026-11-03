@@ -69,7 +69,7 @@ services:
       - >-
         [ -f /data/policy.yaml ] || cp /app/backend/configs/policy.yaml /data/policy.yaml;
         exec uvicorn backend.main:app --host 0.0.0.0 --port 8000 --workers 1
-        --proxy-headers --forwarded-allow-ips='*' --timeout-graceful-shutdown 10
+        --proxy-headers --forwarded-allow-ips="$${FORWARDED_ALLOW_IPS:-127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10}" --timeout-graceful-shutdown 10
     volumes:
       - backend-data:/data
     # Hanya untuk debugging di server. Akses normal lewat nginx (/api).

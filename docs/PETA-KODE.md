@@ -38,6 +38,8 @@ frontend (Vue + Vite): dashboard, overlay kotak, enrollment, pengaturan
 | Crop orang/kepala | `perception/person_cropper.py` |
 | Wajah (SCRFD + AuraFace ONNX), gerbang kualitas sebelum embedding (`embed_*`, `yaw_ratio`), cek bentuk model SCRFD (`_check_static_size`), TensorRT EP + cache (`recognition_providers`, `tensorrt_options`, `ProviderUnavailable`), potongan kepala (`head_crop`) | `identity/face_onnx.py` (tes `test_rekognisi_beban.py`, `test_tensorrt_rekognisi.py`) |
 | Klaim wajah lintas kamera (P8, ea-r19; `recognition.cross_camera_claims`) | `identity/cross_camera.py` (tes `test_klaim_lintas_kamera.py`) |
+| Pemicu analisis berbasis perubahan kotak (eb-r15; `analysis_trigger`) | `pipeline/change_gate.py` (dipakai `pipeline/zoning.py`, `pipeline/reid_tap.py`; tes `test_change_gate.py`) |
+| Pengaturan realtime `set_tuning` (ea-r23) | `runtime/tuning.py`, `runtime/service.py::_on_set_tuning`, `runtime/camera.py::apply_tuning` (tes `test_tuning.py`) |
 | Matcher (roster atomik `snapshot()`, ea-r16), arbiter identitas, admission, enrollment | `identity/matcher.py` (tes `test_matcher_race.py`), `identity/arbiter.py`, `identity/admission.py` (`NOT_ATTEMPTED`, ea-r17), `identity/enrollment.py` |
 | ReID berjangkar wajah (logika): pesan antrean, galeri harian, aturan gabung, ANON-xxxx | `identity/reid/messages.py`, `identity/reid/gallery.py`, `identity/reid/merge.py`, `identity/reid/pending.py` (`rejections`, ea-r18; tes `test_reid_*.py`) |
 | ReID model + gerbang crop (dimuat hanya bila `reid.enabled`): OSNet ONNX, pra-proses = kit latih, SHA-256, `ReidBucketRunner` (satu session per `reid.batch_buckets`) | `identity/reid/embedder_onnx.py`, `identity/reid/quality.py` (tes `test_reid_embedder.py`, `test_reid_bucket.py`) |
@@ -58,7 +60,7 @@ frontend (Vue + Vite): dashboard, overlay kotak, enrollment, pengaturan
 | App, daftar router, startup | `main.py` |
 | Config env, database (WAL), keamanan, state | `core/config.py`, `core/database.py`, `core/security.py`, `core/state.py` |
 | Aturan ID ANON- (dicadangkan, bukan karyawan): `is_anon_id`, dipakai ledger/pelanggaran/state/skema employee | `core/identity.py` (tes `test_anon_identity_resolved.py`) |
-| Router (`/api/...`); rate limit login `login_limiter` di `auth.py` (be-r2) | `routers/attendance.py`, `auth.py`, `cameras.py`, `enrollments.py`, `notifications.py`, `settings.py`, `stats.py`, `streams.py` (`/api/detections/*`), `system.py`, `violations.py` |
+| Router (`/api/...`); rate limit login `login_limiter` di `auth.py` (be-r2); kalibrasi `/api/settings/tuning` + `/display` di `settings.py` (be-r5) | `routers/attendance.py`, `auth.py`, `cameras.py`, `enrollments.py`, `notifications.py`, `settings.py`, `stats.py`, `streams.py` (`/api/detections/*`), `system.py`, `violations.py` |
 | Skema Pydantic | `schemas/*.py` (`protocol.py` = pesan engine) |
 | Koneksi ke engine, adaptasi protokol, ingest event (termasuk `identity.resolved` -> atribusi `reid_retro`, `_resolve_identity`) | `services/engine_client.py`, `engine_connection_manager.py`, `engine_integration.py`, `protocol_adapter.py`, `event_ingestion.py` |
 | Jatah free time (ledger kunjungan) | `services/free_time.py`, `break_policy.py`, `policy_service.py` (`configs/policy.yaml`) |
@@ -80,7 +82,8 @@ generator `.xlsx`, halaman report, penyaringan per peran di semua endpoint.
 | Halaman | `views/DashboardView.vue`, `EnrollmentView.vue`, `SettingsView.vue`, `LoginView.vue` |
 | Layout, sidebar, notifikasi | `layouts/DashboardLayout.vue`, `components/layout/*` |
 | Video + overlay kotak | `components/dashboard/LiveFeedSection.vue`, `CameraFeedCard.vue`, `DetectionBox.vue`, `composables/useDetectionStream.ts` (`?boxage=`, fe-r1) |
-| Pengaturan tampilan (delay WebRTC/HLS, kotak, interpolasi), dibaca saat start (fe-r2) | `frontend/public/display-config.json`, `src/config/display.ts` (cek `npm run check:display`) |
+| Tab Kalibrasi (engine realtime + tampilan, fe-r3) | `components/settings/CalibrationTab.vue` |
+| Pengaturan tampilan (delay WebRTC/HLS, kotak, interpolasi), dibaca saat start (fe-r2; file + API admin, fe-r3) | `frontend/public/display-config.json`, `src/config/display.ts` (cek `npm run check:display`) |
 | Data (composable) | `composables/useAuth.ts`, `useNotifications.ts`, `useSettings.ts`, `useEnrollment.ts`, `useEmployeeAllowance.ts`, `useUnidentifiedAlerts.ts` |
 | Komponen UI dasar (shadcn-vue, jangan diubah tanpa perlu) | `components/ui/` |
 

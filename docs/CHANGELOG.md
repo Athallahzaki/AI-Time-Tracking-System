@@ -7,6 +7,63 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-11-03 · paket ea-r23 + be-r5 + fe-r3 — Kalibrasi realtime tanpa restart (`set_tuning`)
+
+Lintas jalur; **perubahan kontrak disetujui Zena 3 Nov, perlu dicatat EA**. Admin mengubah pengaturan dari
+Pengaturan → Kalibrasi; engine menerapkannya tanpa restart.
+
+- **Kontrak:** pesan kontrol baru `set_tuning` (deklaratif: SELURUH override di atas config file; `{}` = file) dan
+  field opsional `effective_tuning` di `ack`. Pesan lama tidak berubah. `contracts/tests` mendaftarkannya di penjaga
+  evolusi. `docs/ENGINE_PROTOCOL.md` §3.6.
+- **Engine:** `runtime/tuning.py` (`TUNABLE`, `tuned_config` memakai validasi dataclass yang sama dengan file,
+  semua-atau-tidak); `service._on_set_tuning` -> matcher wajah, registry P8 (`configure`), `ReidCoordinator.
+  update_config`, detector (ambang + NMS, `apply_detector_tuning`), `CameraSupervisor.apply_tuning` (gerbang
+  perubahan kotak, idle). Registry P8 dan gerbang kini selalu ada dengan saklar `enabled`, supaya bisa dinyalakan
+  saat jalan. Butuh restart: tracker (ByteTrack LibreYOLO dibangun sekali), model, ukuran input.
+- **Backend:** `GET/PUT /api/settings/tuning` (admin, diaudit), `sync_tuning` dikirim setiap tersambung,
+  `handle_tuning_ack`: ditolak -> override kembali ke yang terakhir diterima. `GET /api/settings/display` (publik)
+  + `PUT` (admin) untuk tampilan dashboard.
+- **Frontend:** `components/settings/CalibrationTab.vue` (kunci dari `effective_tuning` engine, bukan salinan),
+  `config/display.ts` menumpuk display-config.json (file) + pengaturan admin (API).
+- **Temuan:** `test_engine_connection_manager` lama menulis ke `backend/data/backend.db` pengembang; kini tmp.
+Uji: `engine/tests/test_tuning.py`, `backend/tests/test_engine_tuning.py`, `npm run check:display`; tab dirender
+di Chromium (Playwright, API disadap): simpan mengirim override lama + baru, status "diterapkan".
+
+## 2026-11-03 · paket ea-r22 — ReID: penilaian ulang ANON + gabung ANON-ANON (`reid.reevaluate`, default mati)
+
+Jalur EA. Keluhan pilot: orang yang sama jadi ANON baru tiap pindah ruangan. Akar: keputusan hanya di embedding
+pertama (biasanya terburuk). `identity/reid/pending.py` `_reevaluate`: tiap embedding baru, kelompok ANON dinilai
+ulang -> cocok galeri = diselesaikan (`group_merged`, sama dengan `_sweep_groups`); cocok ANON lain + lolos aturan
+waktu untuk SETIAP pasangan anggota = digabung ke yang tertua. `pipeline/reid_coordinator.py`: label track hidup
+dipindah, interval berikutnya mengikuti induk, dan saat induk terselesaikan setiap anak dikirimi `identity.resolved`
+sendiri (backend hanya memindahkan interval yang person_id-nya = anon_id pesan). Kontrak tidak berubah; ANON->ANON
+belum punya pesan, jadi laporan masih menampilkan dua ANON sampai ada wajah. Ambang sama dengan penugasan pertama:
+nyalakan SETELAH kalibrasi. Uji: `test_reid_pending.py` (+4), `test_reid_runtime.py` (+1, ujung ke ujung, skema +
+conformance).
+
+## 2026-11-03 · paket eb-r15 — Pemicu analisis berbasis perubahan kotak (`analysis_trigger`, default mati)
+
+Jalur EB. Keputusan tim 3 Nov: rekognisi wajah/embedding ReID dipicu perubahan, bukan interval tetap.
+`pipeline/change_gate.py` (`ChangeGate`, satu per kamera, dibagi antrean wajah dan tap ReID): kotak dihaluskan EMA;
+berubah bila geser pusat (x tinggi badan) / skala / rasio aspek lewat ambang selama `sustain_frames` frame; hilang
+singkat diabaikan, hilang lama = cek ulang; overlap singkat ber-IoU tinggi lalu berpisah = rekalkulasi kedua track
+(risiko tukar ID); pengaman `max_interval_seconds`. Pemicu memberi KREDIT (`face_burst` 3), karena arbiter butuh
+beberapa bukti. `pipeline/zoning.py`: terkonfirmasi + berubah = REVERIFY segera; tidak berubah = dilewati.
+`pipeline/reid_tap.py`: embedding saat berubah. Metrik `trigger_*` di camera_metrics. Uji: `test_change_gate.py` (13).
+
+## 2026-11-03 · paket ea-r21 — 6 tes merah diselaraskan dengan profil lapangan
+
+Profil demo-1060/4060 disetel ulang di lapangan (D-FINE M 6 fps, NVDEC, ByteTrack, ReID nyala, model ReID lain
+dengan SHA) tanpa tes ikut. Tes kini mengunci keputusan itu; model ReID selain default sah bila hash-nya dikunci.
+Engine: 0 gagal.
+
+## 2026-11-03 · paket be-r4 + ea-r20 — X-Forwarded-For tepercaya; metrik identitas di `engine.health`
+
+`--forwarded-allow-ips` dari `'*'` ke jaringan proxy (`FORWARDED_ALLOW_IPS`, default privat + NetBird 100.64/10;
+uvicorn >= 0.32 untuk CIDR). Disimulasikan: dengan `'*'` IP palsu menang, kini alamat asli. Health: camera_metrics
+`identified`, `identity_released`, `recognitions_empty`, `recognitions_not_attempted`; field opsional baru
+`identity_metrics` (alasan ReID, penilaian ulang, klaim lintas kamera). `scripts/lag_probe.py` ikut mencatatnya.
+
 ## 2026-11-03 · paket ea-r19 — Overhaul P8 (1): klaim wajah lintas kamera (di belakang config)
 
 Jalur EA. Keputusan tim 3 Nov: satu orang boleh diklaim wajah di dua kamera sekaligus bila secara spasial masuk akal

@@ -20,12 +20,13 @@ PATH = "engine/config/demo-1060.yaml"
 def test_keputusan_demo_1060():
     config = load_config(PATH)
     detector = config.detector
-    assert detector.model_path == "LibreDFINEs.pt"
+    # Disetel ulang di lapangan (sebelum overhaul 3 Nov): D-FINE M + fast_preprocess pada 6 fps.
+    assert detector.model_path == "LibreDFINEm.pt"
     assert detector.half is False                 # Pascal
     assert detector.cuda_graph is True
-    assert detector.fast_preprocess is False
+    assert detector.fast_preprocess is True
     assert detector.batch_inference is False
-    assert config.target_fps == 8.0
+    assert config.target_fps == 6.0
     assert config.detection_interval == 1
     assert config.ingest.live_buffer == "latest"
     recognition = config.recognition
@@ -47,7 +48,11 @@ def test_sisanya_sama_dengan_profil_face():
     # Lokasi file model boleh beda per mesin (laptop 1060: engine/models/...);
     # yang dikunci adalah perilakunya, bukan tata letak folder.
     machine_paths = {"face_detector_model", "face_embedder_model"}
-    ignore = {"ingest": {"colour_conversion"}, "recognition": machine_paths}
+    # Disetel per mesin di lapangan: NVDEC (`hwaccel`), batas VRAM ORT, dan ByteTrack
+    # (profil face masih IoU). Perilaku rekognisi/zona selebihnya tetap dikunci sama.
+    ignore = {"ingest": {"colour_conversion", "hwaccel"},
+              "recognition": machine_paths | {"onnx_gpu_mem_limit_mb"},
+              "tracker": {"backend", "track_buffer_seconds"}}
     for section in ("ingest", "zones", "recognition", "tracker"):
         skip = ignore.get(section, set())
         keep = {k: v for k, v in (face.get(section) or {}).items() if k not in skip}

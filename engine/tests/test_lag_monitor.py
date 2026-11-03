@@ -164,3 +164,26 @@ def test_health_membawa_camera_metrics():
     finally:
         runtime._cameras.clear()
         runtime.close()
+
+
+def test_health_membawa_identity_metrics_dan_lolos_skema():
+    """Overhaul: penghitung klaim lintas kamera dan alasan ReID terbaca di health, bukan hanya di log."""
+    import time as _time
+
+    from contracts.validator import SchemaValidator
+    from engine.config import load_config
+    from engine.identity.cross_camera import CrossCameraClaims
+    from engine.runtime.service import EngineRuntime, RuntimeOptions
+
+    runtime = EngineRuntime(config=load_config("engine/config/default_config.yaml"),
+                            options=RuntimeOptions(tcp=None))
+    try:
+        runtime._cross_camera = CrossCameraClaims()
+        runtime._cross_camera.claim("cam01", "tr_a", "4471", 0.6)
+        runtime._cross_camera.claim("cam02", "tr_b", "4471", 0.9)
+        runtime._emit_health(_time.time())
+        health = runtime.api._outbox.since(0, 10)[-1]
+        assert health["identity_metrics"] == {"cross_corroborated": 0, "cross_evicted": 1, "cross_rejected": 0}
+        assert SchemaValidator().validate_message(health, expected_channel="events") == []
+    finally:
+        runtime.close()

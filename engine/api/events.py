@@ -354,6 +354,7 @@ def engine_health(
     gpu_util: Optional[float] = None, vram_mb: Optional[float] = None,
     outbox_depth: Optional[int] = None, disk_free_mb: Optional[float] = None,
     camera_metrics: Optional[Dict[str, Dict[str, float]]] = None,
+    identity_metrics: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
     """`models_loaded=False` berarti engine hidup tapi tidak mengenali siapa pun.
 
@@ -378,6 +379,8 @@ def engine_health(
         message["disk_free_mb"] = float(disk_free_mb)
     if camera_metrics:
         message["camera_metrics"] = {k: dict(v) for k, v in camera_metrics.items()}
+    if identity_metrics:
+        message["identity_metrics"] = {k: int(v) for k, v in identity_metrics.items()}
     return message
 
 

@@ -252,6 +252,76 @@ def put_engine_schedule(req: WeeklySettingsRequest, admin=Depends(require_admin)
     return _engine_schedule_payload()
 
 
+# ---------------------------------------------------------------------------
+# Pengaturan realtime engine (set_tuning) dan tampilan dashboard (overhaul 3 Nov)
+# ---------------------------------------------------------------------------
+
+_MAX_SETTINGS_BYTES = 16_384
+
+
+def _nested_object(value, name: str) -> dict:
+    """Bentuk saja: {bagian: {kunci: nilai}}. Nilai divalidasi pemiliknya (engine / frontend)."""
+    import json
+
+    if not isinstance(value, dict) or not all(isinstance(v, dict) for v in value.values()):
+        raise HTTPException(status_code=400, detail=f"{name} harus objek {{bagian: {{kunci: nilai}}}}")
+    if len(json.dumps(value)) > _MAX_SETTINGS_BYTES:
+        raise HTTPException(status_code=400, detail=f"{name} terlalu besar")
+    return value
+
+
+def _tuning_payload():
+    from backend.services.engine_client import engine_client
+    from backend.services.engine_connection_manager import TUNING_KEY, TUNING_STATUS_KEY
+
+    return {
+        "overrides": get_app_setting(TUNING_KEY, {}) or {},
+        "status": get_app_setting(TUNING_STATUS_KEY, {}) or {},
+        "engine_connected": bool(getattr(engine_client, "connected", False)),
+    }
+
+
+@router.get("/tuning")
+def get_engine_tuning(_admin=Depends(require_admin)):
+    return _tuning_payload()
+
+
+@router.put("/tuning")
+def put_engine_tuning(body: dict, admin=Depends(require_admin)):
+    """Simpan override, kirim ke engine bila tersambung. Hasil (diterima/ditolak) datang lewat ack;
+    frontend memantau `status.state` lewat GET."""
+    from backend.services.engine_client import EngineConnectionError
+    from backend.services.engine_connection_manager import (
+        TUNING_KEY, TUNING_STATUS_KEY, engine_connection_manager,
+    )
+
+    overrides = _nested_object(body.get("overrides", {}), "overrides")
+    before = get_app_setting(TUNING_KEY, {}) or {}
+    set_app_setting(TUNING_KEY, overrides)
+    add_settings_audit(admin["username"], "Kalibrasi engine (realtime)", before, overrides)
+    try:
+        engine_connection_manager.sync_tuning()
+    except EngineConnectionError:
+        set_app_setting(TUNING_STATUS_KEY, {"state": "offline", "reason": "engine tidak tersambung; "
+                                            "diterapkan saat tersambung", "effective": None})
+    return _tuning_payload()
+
+
+@router.get("/display")
+def get_display_settings():
+    """Publik: dibaca dashboard sebelum login (src/config/display.ts). Tidak ada data sensitif."""
+    return get_app_setting("display_config", {}) or {}
+
+
+@router.put("/display")
+def put_display_settings(body: dict, admin=Depends(require_admin)):
+    value = _nested_object(body, "display")
+    before = get_app_setting("display_config", {}) or {}
+    set_app_setting("display_config", value)
+    add_settings_audit(admin["username"], "Tampilan dashboard", before, value)
+    return value
+
+
 @router.get("/email/recap")
 def get_email_recap(_admin=Depends(require_admin)):
     value = get_app_setting("email_recap", {"recap_recipients": [], "recap_send_time": "18:00"})

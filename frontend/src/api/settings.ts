@@ -159,3 +159,56 @@ export async function getSettingsAudit(limit = 50): Promise<SettingsAuditEntry[]
   });
   return res.items || [];
 }
+
+// ---------------------------------------------------------------------------
+// Kalibrasi engine realtime (set_tuning) dan tampilan dashboard (overhaul 3 Nov)
+// ---------------------------------------------------------------------------
+
+export type TuningValues = Record<string, Record<string, unknown>>;
+
+export interface EngineTuning {
+  /** Override yang disimpan admin, di atas config file engine. */
+  overrides: TuningValues;
+  status: {
+    state?: 'pending' | 'accepted' | 'rejected' | 'offline';
+    reason?: string | null;
+    /** Nilai yang SEDANG berlaku di engine (dari ack terakhir). */
+    effective?: TuningValues | null;
+    at?: string;
+  };
+  engine_connected: boolean;
+}
+
+const MOCK_TUNING: EngineTuning = {
+  overrides: {},
+  status: { state: 'offline', reason: 'Mode demo: tidak ada engine sungguhan.', effective: null },
+  engine_connected: false,
+};
+
+export async function getEngineTuning(): Promise<EngineTuning> {
+  return request<EngineTuning>({
+    domain: 'engine-tuning',
+    path: '/api/settings/tuning',
+    mock: () => clone(MOCK_TUNING),
+  });
+}
+
+export async function saveEngineTuning(overrides: TuningValues): Promise<EngineTuning> {
+  return request<EngineTuning>({
+    domain: 'engine-tuning',
+    method: 'PUT',
+    path: '/api/settings/tuning',
+    body: { overrides },
+    mock: () => ({ ...clone(MOCK_TUNING), overrides: clone(overrides) }),
+  });
+}
+
+export async function saveDisplaySettings(value: TuningValues): Promise<TuningValues> {
+  return request<TuningValues>({
+    domain: 'display-settings',
+    method: 'PUT',
+    path: '/api/settings/display',
+    body: value,
+    mock: () => clone(value),
+  });
+}

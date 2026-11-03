@@ -30,21 +30,31 @@ from typing import Dict, FrozenSet, Iterable, Set, Tuple
 
 
 class CrossCameraClaims:
-    def __init__(self, overlapping_cameras: Iterable[Iterable[str]] = ()) -> None:
+    def __init__(self, overlapping_cameras: Iterable[Iterable[str]] = (), enabled: bool = True) -> None:
+        self._lock = threading.Lock()
+        self._overlap: FrozenSet[FrozenSet[str]] = frozenset()
+        # person_id -> camera_id -> (track_uuid, similarity)
+        self._holders: Dict[str, Dict[str, Tuple[str, float]]] = {}
+        self._evicted: Set[str] = set()
+        self.configure(enabled, overlapping_cameras)
+        self.corroborated = 0
+        self.evicted_total = 0
+        self.rejected = 0
+
+    def configure(self, enabled: bool, overlapping_cameras: Iterable[Iterable[str]]) -> None:
+        """Pengaturan realtime. Dimatikan = semua klaim diizinkan dan state dikosongkan."""
         overlap: Set[FrozenSet[str]] = set()
         for pair in overlapping_cameras:
             cameras = frozenset(str(c) for c in pair)
             if len(cameras) != 2:
                 raise ValueError(f"pasangan kamera tumpang-tindih harus 2 kamera berbeda: {list(pair)!r}")
             overlap.add(cameras)
-        self._overlap = frozenset(overlap)
-        self._lock = threading.Lock()
-        # person_id -> camera_id -> (track_uuid, similarity)
-        self._holders: Dict[str, Dict[str, Tuple[str, float]]] = {}
-        self._evicted: Set[str] = set()
-        self.corroborated = 0
-        self.evicted_total = 0
-        self.rejected = 0
+        with self._lock:
+            self._overlap = frozenset(overlap)
+            self.enabled = bool(enabled)
+            if not self.enabled:
+                self._holders = {}
+                self._evicted = set()
 
     def overlaps(self, camera_a: str, camera_b: str) -> bool:
         return frozenset((camera_a, camera_b)) in self._overlap
@@ -52,6 +62,8 @@ class CrossCameraClaims:
     def claim(self, camera_id: str, track_uuid: str, person_id: str, similarity: float) -> bool:
         """True = klaim boleh dipasang. Pemegang mustahil yang lebih lemah ditandai untuk dilepas."""
         with self._lock:
+            if not self.enabled:
+                return True
             holders = self._holders.setdefault(person_id, {})
             conflicts = [(camera, held) for camera, held in holders.items()
                          if camera != camera_id and not self.overlaps(camera, camera_id)]
@@ -70,7 +82,7 @@ class CrossCameraClaims:
     def refresh(self, camera_id: str, track_uuid: str, person_id: str, similarity: float) -> None:
         """Perbarui skor klaim yang MASIH dipegang track ini; tidak pernah menghidupkan klaim yang dicabut."""
         with self._lock:
-            holders = self._holders.get(person_id)
+            holders = self._holders.get(person_id) if self.enabled else None
             if holders and holders.get(camera_id, ("",))[0] == track_uuid:
                 holders[camera_id] = (track_uuid, float(similarity))
 

@@ -11,6 +11,7 @@
     { "$ref": "#/$defs/replay_gap" },
     { "$ref": "#/$defs/set_cameras" },
     { "$ref": "#/$defs/set_roster" },
+    { "$ref": "#/$defs/set_tuning" },
     { "$ref": "#/$defs/enroll" },
     { "$ref": "#/$defs/enroll_result" },
     { "$ref": "#/$defs/auth_challenge" },
@@ -290,7 +291,12 @@
         "in_reply_to": { "type": "string", "minLength": 1 },
         "accepted": { "type": "boolean" },
         "reason": { "type": "string" },
-        "through_seq": { "$ref": "#/$defs/seq" }
+        "through_seq": { "$ref": "#/$defs/seq" },
+        "effective_tuning": {
+          "type": "object",
+          "additionalProperties": { "type": "object" },
+          "description": "Hanya pada ack in_reply_to=set_tuning: nilai yang SEDANG berlaku untuk setiap kunci yang bisa diubah saat jalan, {bagian: {kunci: nilai}}. Dikirim juga saat ditolak (pengaturan lama tetap berlaku)."
+        }
       },
       "oneOf": [
         {
@@ -346,6 +352,23 @@
         }
       },
       "description": "Deklaratif: berisi SELURUH himpunan kamera yang diinginkan. Kamera yang tidak ada di daftar ditutup."
+    },
+
+    "set_tuning": {
+      "x-channel": "control",
+      "x-direction": "backend->engine",
+      "allOf": [{ "$ref": "#/$defs/_envelope_control" }],
+      "type": "object",
+      "required": ["type", "v", "ts", "tuning"],
+      "properties": {
+        "type": { "const": "set_tuning" },
+        "tuning": {
+          "type": "object",
+          "additionalProperties": { "type": "object" },
+          "description": "SELURUH override yang diinginkan, {bagian: {kunci: nilai}}, di atas config file engine. {} = kembali ke file. Bagian/kunci yang boleh: lihat engine/runtime/tuning.py TUNABLE (konstanta perseptual saja)."
+        }
+      },
+      "description": "Overhaul 3 Nov. Deklaratif, pola sama dengan set_cameras: backend menyimpan override dan mengirim ulang setiap tersambung. Engine membalas ack in_reply_to=set_tuning dengan accepted + effective_tuning; satu nilai tidak sah = seluruh pesan ditolak, pengaturan lama tetap berlaku. Tanpa restart engine."
     },
 
     "set_roster": {
@@ -764,13 +787,22 @@
               "lag_seconds": { "type": "number", "minimum": 0, "description": "PTS terbaru yang ter-decode dikurangi PTS yang sedang dianalisis." },
               "effective_fps": { "type": "number", "minimum": 0 },
               "frames_dropped_stale": { "type": "integer", "minimum": 0, "description": "Kumulatif sejak kamera dibuka oleh engine (tidak direset saat reconnect)." },
-              "clock_drift_seconds": { "type": "number", "description": "Selisih waktu tiba terhadap offset + pts (minimum jendela). Positif = jam kamera tertinggal." }
+              "clock_drift_seconds": { "type": "number", "description": "Selisih waktu tiba terhadap offset + pts (minimum jendela). Positif = jam kamera tertinggal." },
+              "identified": { "type": "integer", "minimum": 0, "description": "Kumulatif: track.identified kamera ini." },
+              "identity_released": { "type": "integer", "minimum": 0, "description": "Kumulatif: klaim dilepas (ketidaksetujuan, kalah klaim lintas kamera)." },
+              "recognitions_empty": { "type": "integer", "minimum": 0, "description": "Kumulatif: recognizer jalan, wajah tidak ada." },
+              "recognitions_not_attempted": { "type": "integer", "minimum": 0, "description": "Kumulatif: giliran dilepas tanpa wajah dinilai (basi, galat, antrean penuh). Bukan kegagalan wajah." }
             }
           },
           "description": "Fase 1 (P17, P18). Kunci = camera_id. Semua field opsional: engine mengirim yang sudah diukurnya."
         },
         "outbox_depth": { "type": "integer", "minimum": 0, "description": "Fase 1 (E11). Event yang belum di-ack." },
-        "disk_free_mb": { "type": "number", "minimum": 0, "description": "Fase 1 (E10). Ruang kosong di disk tempat outbox." }
+        "disk_free_mb": { "type": "number", "minimum": 0, "description": "Fase 1 (E10). Ruang kosong di disk tempat outbox." },
+        "identity_metrics": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 },
+          "description": "Overhaul 3 Nov. Penghitung kumulatif lintas kamera: reid_tolak_<tahap>_<alasan> (kenapa ReID tidak menggabungkan) dan cross_corroborated/cross_evicted/cross_rejected (klaim wajah lintas kamera). Opsional; kunci baru boleh muncul."
+        }
       }
     },
 

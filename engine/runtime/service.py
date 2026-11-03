@@ -52,6 +52,7 @@ its most expensive form, so the ack says no and says why.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
@@ -64,6 +65,7 @@ from ..api.outbox import Outbox, SqliteOutbox
 from ..config import EngineConfig, load_config
 from ..identity import RecognitionScheduler
 from ..identity.cross_camera import CrossCameraClaims
+from .tuning import TuningError, apply_detector_tuning, effective as tuning_effective, tuned_config
 from .camera import CameraSpec, CameraSupervisor
 
 logger = logging.getLogger("engine.runtime")
@@ -159,6 +161,8 @@ class EngineRuntime:
     ) -> None:
         self.options = options or RuntimeOptions()
         self.config = config or load_config(self.options.config_path)
+        # Config file saat start; `set_tuning` selalu dihitung dari sini + override (deklaratif).
+        self._base_config = self.config
         if self.options.target_fps:
             import dataclasses
             self.config = dataclasses.replace(
@@ -234,10 +238,9 @@ class EngineRuntime:
             RecognitionScheduler(**self.config.recognition.scheduler_kwargs(), clock=time.monotonic)
         )
         # P8: klaim wajah lintas kamera, satu untuk semua kamera.
-        self._cross_camera: Optional[CrossCameraClaims] = (
-            CrossCameraClaims(self.config.recognition.overlapping_cameras)
-            if self.config.recognition.cross_camera_claims else None
-        )
+        # Selalu ada (saklar `enabled` di dalamnya) supaya bisa dinyalakan saat jalan.
+        self._cross_camera = CrossCameraClaims(self.config.recognition.overlapping_cameras,
+                                               enabled=self.config.recognition.cross_camera_claims)
         self._cameras: Dict[str, CameraSupervisor] = {}
         self._close_lock = threading.Lock()
         self._closing = False
@@ -279,6 +282,7 @@ class EngineRuntime:
         self.api.on_control("set_roster", self._on_set_roster)
         self.api.on_control("enroll", self._on_enroll)
         self.api.on_control("forget_person", self._on_forget_person)
+        self.api.on_control("set_tuning", self._on_set_tuning)
 
     # -- emission ---------------------------------------------------------
 
@@ -495,6 +499,38 @@ class EngineRuntime:
         if self._shared_detector is not None:
             self._shared_detector.release(camera_id)
 
+    def _on_set_tuning(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        """Pengaturan realtime (runtime/tuning.py). Ditolak = pengaturan lama tetap berlaku."""
+        ack = {"type": "ack", "v": 1, "ts": events.rfc3339(time.time()), "in_reply_to": "set_tuning"}
+        try:
+            config = tuned_config(self._base_config, message.get("tuning") or {})
+        except TuningError as error:
+            logger.warning("set_tuning ditolak: %s", error)
+            return {**ack, "accepted": False, "reason": str(error),
+                    "effective_tuning": tuning_effective(self.config)}
+        with self._state_lock:
+            self.config = config
+            self._apply_tuning(config)
+            cameras = list(self._cameras.values())
+        for camera in cameras:
+            camera.apply_tuning(_config_for(config, camera.spec))
+        logger.info("set_tuning diterapkan: %s", json.dumps(message.get("tuning") or {}, sort_keys=True))
+        return {**ack, "accepted": True, "effective_tuning": tuning_effective(config)}
+
+    def _apply_tuning(self, config: EngineConfig) -> None:
+        rec = config.recognition
+        if self._matcher is not None and hasattr(self._matcher, "_threshold"):
+            from ..identity.matcher import DEFAULT_MARGIN, DEFAULT_THRESHOLD
+
+            self._matcher._threshold = float(DEFAULT_THRESHOLD if rec.match_threshold is None else rec.match_threshold)
+            self._matcher._margin = float(DEFAULT_MARGIN if rec.match_margin is None else rec.match_margin)
+        self._cross_camera.configure(rec.cross_camera_claims, rec.overlapping_cameras)
+        if self._reid is not None:
+            self._reid.coordinator.update_config(config.reid.merge_config())
+        shared = self._shared_detector
+        if shared is not None:
+            apply_detector_tuning(getattr(shared, "inner", None), config.detector)
+
     def _on_set_roster(self, message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Same pattern as cameras: whole set in, engine matches its state.
 
@@ -696,7 +732,7 @@ class EngineRuntime:
             if reid_core is not None and reid_core.rejections:
                 logger.info("ReID tidak digabung (P6, bahan kalibrasi): %s",
                             ", ".join(f"{k} {v}" for k, v in sorted(dict(reid_core.rejections).items())))
-        if self._cross_camera is not None:
+        if self._cross_camera.enabled:
             m = self._cross_camera.metrics()
             if any(m.values()):
                 logger.info("klaim wajah lintas kamera (P8): penguat %d, dicabut %d, ditolak %d",
@@ -735,8 +771,20 @@ class EngineRuntime:
                     for camera in cameras
                     for m in [camera.metrics()] if m
                 } or None,
+                identity_metrics=self._identity_metrics() or None,
             )
         )
+
+    def _identity_metrics(self) -> Dict[str, int]:
+        """Penghitung lintas kamera untuk engine.health (P6 alasan ReID, P8 klaim wajah)."""
+        out: Dict[str, int] = {}
+        core = self._reid.coordinator.core if self._reid is not None else None
+        if core is not None:
+            out.update({f"reid_tolak_{k}": int(v) for k, v in dict(core.rejections).items()})
+            out.update({f"reid_nilai_ulang_{k}": int(v) for k, v in dict(core.reevaluations).items()})
+        if self._cross_camera.enabled:
+            out.update(self._cross_camera.metrics())
+        return out
 
     def _report_unknown_track_requests(self, cameras: Sequence[CameraSupervisor]) -> int:
         """WARNING bila binding kamera menerima giliran untuk track yang tidak ia kenal

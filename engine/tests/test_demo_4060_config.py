@@ -27,8 +27,13 @@ def test_rekognisi_dan_sisanya_sama_dengan_profil_demo_1060():
     """Beda kedua profil demo hanya di detector dan target_fps, bukan di rekognisi/ingest/tracker."""
     a = yaml.safe_load(Path(PATH).read_text(encoding="utf-8"))
     b = yaml.safe_load(Path("engine/config/demo-1060.yaml").read_text(encoding="utf-8"))
+    # Boleh beda per mesin: NVDEC (1060 memakainya) dan buffer track (disetel di lapangan).
+    per_machine = {"ingest": {"hwaccel"}, "tracker": {"track_buffer_seconds"}}
     for section in ("ingest", "zones", "recognition", "tracker"):
-        assert a.get(section) == b.get(section), section
+        skip = per_machine.get(section, set())
+        got = {k: v for k, v in (a.get(section) or {}).items() if k not in skip}
+        keep = {k: v for k, v in (b.get(section) or {}).items() if k not in skip}
+        assert got == keep, section
     assert {k: v for k, v in a["core"].items() if k != "target_fps"} == \
         {k: v for k, v in b["core"].items() if k != "target_fps"}
     assert "swscale_resize" not in a["detector"]

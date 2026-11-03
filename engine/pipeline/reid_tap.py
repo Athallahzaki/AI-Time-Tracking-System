@@ -99,6 +99,9 @@ class ReidCameraTap:
         self._state: Dict[str, _TrackState] = {}
         self._labels: Dict[str, Tuple[str, str]] = {}
         self.metrics = TapMetrics()
+        # Gerbang perubahan kotak bersama antrean rekognisi kamera ini; None = interval tetap.
+        self.change_gate: Any = None
+        self._pts = 0.0
 
     # -- dibaca camera.py -------------------------------------------------------
 
@@ -110,6 +113,9 @@ class ReidCameraTap:
 
     def step(self, frame: Any, tracks: Sequence[Any], pts: float) -> None:
         at = float(self._clock_for(self.camera_id).offset) + float(pts)
+        self._pts = float(pts)
+        if self.change_gate is not None and self.change_gate.params.enabled:
+            self.change_gate.observe(getattr(getattr(frame, "metadata", None), "frame_id", None), tracks, pts)
         self._drain()
         image = getattr(frame, "image", None)
         active = set()
@@ -142,8 +148,16 @@ class ReidCameraTap:
             # Wajah menang; assembler sudah ditimpa oleh `identified`.
             self._labels.pop(uuid, None)
 
-        due = (state.last_embed_at is None or face != state.face_embedded
-               or at - state.last_embed_at >= self._interval)
+        gate = self.change_gate
+        if gate is not None and not gate.params.enabled:
+            gate = None
+        if gate is None:
+            periodic = state.last_embed_at is not None and at - state.last_embed_at >= self._interval
+        else:
+            periodic = gate.due(track.track_id, "reid")
+        due = state.last_embed_at is None or face != state.face_embedded or periodic
+        if gate is not None and not due:
+            gate.skip("reid")
         if due and at >= state.retry_after and image is not None:
             self._try_embed(track, uuid, state, at, face, image)
 
@@ -172,6 +186,8 @@ class ReidCameraTap:
             self.metrics.submitted += 1
             state.last_embed_at = at
             state.face_embedded = face
+            if self.change_gate is not None and self.change_gate.params.enabled:
+                self.change_gate.mark(track.track_id, "reid", self._pts)
         else:
             self.metrics.rejected_full += 1
             state.retry_after = at + self._retry

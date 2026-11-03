@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { CalendarClock, Clock, Cpu, History, Mail, RefreshCw } from '@lucide/vue';
+import { CalendarClock, Clock, Cpu, History, Mail, RefreshCw, SlidersHorizontal } from '@lucide/vue';
 import DashboardLayout from '@/layouts/DashboardLayout.vue';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -9,6 +9,7 @@ import DataSourceBanner from '@/components/common/DataSourceBanner.vue';
 import AllowanceTab from '@/components/settings/AllowanceTab.vue';
 import BreakHoursTab from '@/components/settings/BreakHoursTab.vue';
 import EngineScheduleTab from '@/components/settings/EngineScheduleTab.vue';
+import CalibrationTab from '@/components/settings/CalibrationTab.vue';
 import EmailTab from '@/components/settings/EmailTab.vue';
 import SettingsAuditLog from '@/components/settings/SettingsAuditLog.vue';
 import { useSettings } from '@/composables/useSettings';
@@ -22,7 +23,7 @@ const {
 
 // Pengaturan dari web (dok. 12 §3.3), dipecah per tab. Tab aktif disimpan di
 // ?tab= supaya bisa ditautkan langsung dan bertahan saat refresh.
-const TABS = ['allowance', 'break-hours', 'engine', 'email', 'history'] as const;
+const TABS = ['allowance', 'break-hours', 'engine', 'calibration', 'email', 'history'] as const;
 
 const route = useRoute();
 const router = useRouter();
@@ -90,7 +91,7 @@ function onChanged() {
         </Button>
       </div>
 
-      <DataSourceBanner :domains="['break-hours', 'engine-schedule', 'email-config', 'settings-audit']" />
+      <DataSourceBanner :domains="['break-hours', 'engine-schedule', 'engine-tuning', 'email-config', 'settings-audit']" />
 
       <div
           class="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white p-4"
@@ -127,6 +128,7 @@ function onChanged() {
             <TabsTrigger value="allowance"><Clock />Jatah</TabsTrigger>
             <TabsTrigger value="break-hours"><CalendarClock />Jam istirahat</TabsTrigger>
             <TabsTrigger value="engine"><Cpu />Jadwal engine</TabsTrigger>
+            <TabsTrigger value="calibration"><SlidersHorizontal />Kalibrasi</TabsTrigger>
             <TabsTrigger value="email"><Mail />Email</TabsTrigger>
             <TabsTrigger value="history"><History />Riwayat</TabsTrigger>
           </TabsList>
@@ -146,6 +148,9 @@ function onChanged() {
         </TabsContent>
         <TabsContent value="engine">
           <EngineScheduleTab :key="`es-${reloadKey}`" @changed="onChanged" />
+        </TabsContent>
+        <TabsContent value="calibration">
+          <CalibrationTab :key="`ca-${reloadKey}`" @changed="onChanged" />
         </TabsContent>
         <TabsContent value="email">
           <EmailTab

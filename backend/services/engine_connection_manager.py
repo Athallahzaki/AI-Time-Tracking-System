@@ -6,7 +6,7 @@ import threading
 from datetime import datetime, timezone
 
 from backend.core.config import settings
-from backend.core.database import get_enrollments
+from backend.core.database import get_app_setting, get_enrollments, set_app_setting
 from backend.services.camera_state import set_cameras_message
 from backend.services.engine_client import (
     EngineClient,
@@ -16,6 +16,28 @@ from backend.services.engine_client import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+TUNING_KEY = "engine_tuning"                 # override yang diinginkan admin
+TUNING_APPLIED_KEY = "engine_tuning_applied"  # override terakhir yang DITERIMA engine
+TUNING_STATUS_KEY = "engine_tuning_status"    # {state, reason, effective, at}
+
+
+def handle_tuning_ack(message: dict) -> None:
+    """Ack `set_tuning`. Ditolak = override dikembalikan ke yang terakhir diterima,
+    supaya dashboard tidak pernah menampilkan nilai yang tidak sedang berlaku."""
+    accepted = bool(message.get("accepted"))
+    if accepted:
+        set_app_setting(TUNING_APPLIED_KEY, get_app_setting(TUNING_KEY, {}) or {})
+    else:
+        set_app_setting(TUNING_KEY, get_app_setting(TUNING_APPLIED_KEY, {}) or {})
+        logger.warning("Engine menolak set_tuning: %s", message.get("reason"))
+    set_app_setting(TUNING_STATUS_KEY, {
+        "state": "accepted" if accepted else "rejected",
+        "reason": message.get("reason"),
+        "effective": message.get("effective_tuning"),
+        "at": _timestamp(),
+    })
 
 
 def _timestamp() -> str:
@@ -52,12 +74,22 @@ class EngineConnectionManager:
         ]
         self.client.send({"type": "set_roster", "v": 1, "ts": _timestamp(), "persons": roster})
 
+    def sync_tuning(self) -> None:
+        """Kirim SELURUH override pengaturan engine (deklaratif). Hasil datang lewat ack."""
+        overrides = get_app_setting(TUNING_KEY, {}) or {}
+        self.client.send({"type": "set_tuning", "v": 1, "ts": _timestamp(), "tuning": overrides})
+        status = dict(get_app_setting(TUNING_STATUS_KEY, {}) or {})
+        status.update(state="pending", reason=None, at=_timestamp())
+        set_app_setting(TUNING_STATUS_KEY, status)
+
     def sync_desired_state(self) -> None:
         # Operator overrides (persisted) + cameras.yaml, one function for both paths.
         message = set_cameras_message()
         self.client.send(message)
         self._last_cameras_payload = json.dumps(message["cameras"], sort_keys=True)
         self.sync_roster()
+        # Engine yang restart mulai dari config file-nya; kalibrasi admin dikirim ulang.
+        self.sync_tuning()
 
     def _run(self) -> None:
         while not self._stop.is_set():

@@ -41,6 +41,7 @@ ENV BACKEND_DB_PATH=/data/backend.db \
     ENGINE_HOST=host.docker.internal \
     ENGINE_PORT=8765 \
     UVICORN_HOST=0.0.0.0 \
+    FORWARDED_ALLOW_IPS=127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10 \
     UVICORN_PORT=8000
 
 EXPOSE 8000
@@ -52,4 +53,4 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=5 \
 # SATU worker saja: koneksi ke engine, view stream, dan state live disimpan
 # in-process. Beberapa worker = beberapa koneksi engine yang saling rebutan
 # checkpoint last_event_seq.
-CMD ["sh", "-c", "exec uvicorn backend.main:app --host \"$UVICORN_HOST\" --port \"$UVICORN_PORT\" --workers 1 --proxy-headers --forwarded-allow-ips='*' --timeout-graceful-shutdown 10"]
+CMD ["sh", "-c", "exec uvicorn backend.main:app --host \"$UVICORN_HOST\" --port \"$UVICORN_PORT\" --workers 1 --proxy-headers --forwarded-allow-ips=\"$FORWARDED_ALLOW_IPS\" --timeout-graceful-shutdown 10"]

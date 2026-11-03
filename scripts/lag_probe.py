@@ -277,7 +277,7 @@ def run(host: str, port: int, cameras: List[Tuple[str, str]], seconds: float,
     last_view: Dict[str, float] = {}
     # identify_s (ea-r10): detik dari track lahir sampai track.identified (pts - track_started_pts).
     fields = ["wall_t", "elapsed_s", "camera_id", "source", "frame_age_s", "lag_s", "fps", "dropped",
-              "drift_s", "note", "identify_s"]
+              "drift_s", "note", "identify_s", "identified", "released", "rec_empty", "rec_not_attempted"]
     # track.identified tidak membawa camera_id; diambil dari track.started (ea-r10).
     camera_of_track: Dict[str, str] = {}
 
@@ -285,7 +285,8 @@ def run(host: str, port: int, cameras: List[Tuple[str, str]], seconds: float,
         now = time.time()
         entry = {"wall_t": round(now, 3), "elapsed_s": round(now - started, 3), "camera_id": camera_id,
                  "source": source, "frame_age_s": "", "lag_s": "", "fps": "", "dropped": "", "drift_s": "",
-                 "note": "", "identify_s": ""}
+                 "note": "", "identify_s": "", "identified": "", "released": "", "rec_empty": "",
+                 "rec_not_attempted": ""}
         entry.update(values)
         rows.append(entry)
 
@@ -325,7 +326,12 @@ def run(host: str, port: int, cameras: List[Tuple[str, str]], seconds: float,
                         lag_s=m.get("lag_seconds", ""), fps=m.get("effective_fps", ""),
                         dropped=m.get("frames_dropped_stale", ""),
                         drift_s=m.get("clock_drift_seconds", ""),
-                        note=(message.get("cameras") or {}).get(camera, ""))
+                        note=(message.get("cameras") or {}).get(camera, ""),
+                        identified=m.get("identified", ""), released=m.get("identity_released", ""),
+                        rec_empty=m.get("recognitions_empty", ""),
+                        rec_not_attempted=m.get("recognitions_not_attempted", ""))
+                if message.get("identity_metrics"):
+                    row("", "identity", note=json.dumps(message["identity_metrics"], sort_keys=True))
             elif kind == "track.started":
                 camera_of_track[str(message.get("track_uuid", ""))] = str(message.get("camera_id", ""))
             elif kind == "track.identified":

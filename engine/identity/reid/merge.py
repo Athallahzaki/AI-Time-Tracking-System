@@ -49,6 +49,11 @@ class ReidConfig:
     overlap_tolerance_seconds: float = DEFAULT_OVERLAP_TOLERANCE_SECONDS
     gallery_capacity: int = DEFAULT_CAPACITY
     prototype_merge_similarity: float = DEFAULT_MERGE_SIMILARITY
+    # Overhaul 3 Nov: kelompok ANON dinilai ulang pada SETIAP embedding baru, bukan
+    # hanya yang pertama (biasanya yang terburuk: orang baru masuk frame). Cocok ke
+    # galeri -> diselesaikan (group_merged); cocok ke ANON lain -> digabung. False =
+    # perilaku lama. Pakai ambang/margin yang sama: nyalakan SETELAH dikalibrasi.
+    reevaluate: bool = False
 
     def __post_init__(self) -> None:
         if not -1.0 <= self.match_threshold <= 1.0:

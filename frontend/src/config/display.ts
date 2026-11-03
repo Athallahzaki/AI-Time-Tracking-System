@@ -101,19 +101,50 @@ export function mergeDisplayConfig(raw: unknown): { config: DisplayConfig; warni
   return { config, warnings };
 }
 
-/** Ambil /display-config.json. File tidak ada / rusak = default, aplikasi tetap jalan. */
-export async function loadDisplayConfig(url = '/display-config.json'): Promise<void> {
-  let raw: unknown;
+async function fetchJson(url: string): Promise<unknown> {
   try {
-    const response = await fetch(url, { cache: 'no-store' });
-    if (response.ok) raw = await response.json();
-    else if (response.status !== 404) console.warn(`[display-config] HTTP ${response.status}; memakai default`);
+    const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin' });
+    if (response.ok) return await response.json();
+    if (response.status !== 404) console.warn(`[display-config] ${url}: HTTP ${response.status}`);
   } catch (error) {
-    console.warn('[display-config] gagal dibaca; memakai default', error);
+    // File tidak ada -> fallback SPA mengembalikan HTML -> JSON gagal: pakai default.
+    console.warn(`[display-config] ${url} gagal dibaca; diabaikan`, error);
   }
+  return undefined;
+}
+
+/** File di server (operator) sebagai dasar, lalu pengaturan admin dari dashboard di atasnya. */
+export function layerDisplayConfig(...layers: unknown[]): Record<string, Record<string, unknown>> {
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const layer of layers) {
+    if (!layer || typeof layer !== 'object' || Array.isArray(layer)) continue;
+    for (const [section, values] of Object.entries(layer as Record<string, unknown>)) {
+      if (values && typeof values === 'object' && !Array.isArray(values)) {
+        out[section] = { ...(out[section] ?? {}), ...(values as Record<string, unknown>) };
+      } else {
+        out[section] = values as Record<string, unknown>; // bentuk salah: biar mergeDisplayConfig memperingatkan
+      }
+    }
+  }
+  return out;
+}
+
+/** Terapkan ke objek yang dipakai aplikasi, per bagian (referensi seperti INTERP_CONFIG tetap sah). */
+export function applyDisplayConfig(raw: unknown): string[] {
   const { config, warnings } = mergeDisplayConfig(raw);
-  for (const warning of warnings) console.warn(`[display-config] ${warning}`);
   for (const section of Object.keys(config) as (keyof DisplayConfig)[]) {
     Object.assign(displayConfig[section], config[section]);
+  }
+  return warnings;
+}
+
+/** /display-config.json (file, di-mount) + /api/settings/display (admin). Gagal = default. */
+export async function loadDisplayConfig(
+  fileUrl = '/display-config.json',
+  apiUrl: string | null = '/api/settings/display',
+): Promise<void> {
+  const [file, admin] = await Promise.all([fetchJson(fileUrl), apiUrl ? fetchJson(apiUrl) : undefined]);
+  for (const warning of applyDisplayConfig(layerDisplayConfig(file, admin))) {
+    console.warn(`[display-config] ${warning}`);
   }
 }

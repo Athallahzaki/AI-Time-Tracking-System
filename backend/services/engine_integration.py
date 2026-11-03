@@ -102,6 +102,11 @@ class EngineIntegration:
                 # A new reference exists: tell the engine the roster changed.
                 engine_connection_manager.sync_roster()
             return
+        if message_type == "ack" and message.get("in_reply_to") == "set_tuning":
+            from backend.services.engine_connection_manager import handle_tuning_ack
+
+            handle_tuning_ack(message)
+            return
         if message_type == "ack" and message.get("in_reply_to") == "enroll":
             enrollment_service.handle_rejection_ack(message)
             return

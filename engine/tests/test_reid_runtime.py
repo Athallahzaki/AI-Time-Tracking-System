@@ -617,3 +617,45 @@ def test_handler_forget_person_runtime_ikut_menghapus_reid():
         assert not SchemaValidator().validate_message(reply, expected_channel="control")
     finally:
         runtime.close()
+
+
+def test_penilaian_ulang_ujung_ke_ujung_dua_anon_jadi_satu_lalu_wajah_menyelesaikan_keduanya():
+    """Overhaul 3 Nov: orang pindah ruangan, crop pertama di ruangan kedua buruk -> ANON baru;
+    crop berikutnya jelas -> digabung ke ANON pertama; wajah -> kedua ANON terselesaikan dan
+    backend menerima event untuk interval berlabel ANON lama juga."""
+    runtime, messages, emit = _runtime(reevaluate=True)
+    r1, r2 = _Kamera("r1", runtime, emit), _Kamera("r2", runtime, emit)
+
+    r1.masuk("tr_r1-a", 1, 3, 0.0)
+    _jalan([r1], 0.0, 10.0, runtime)
+    r1.codes["tr_r1-a"] = 9                        # kemudian terlihat lebih jelas (embedding dtk 15)
+    _jalan([r1], 10.5, 20.0, runtime)
+    pertama = r1.tap.label_of("tr_r1-a")[0]
+    r1.keluar("tr_r1-a", 20.0)
+    _jalan([r1], 20.5, 21.0, runtime)
+
+    r2.masuk("tr_r2-b", 1, 11, 40.0)               # crop pertama di ruangan baru: buruk
+    _jalan([r2], 40.0, 50.0, runtime)
+    kedua = r2.tap.label_of("tr_r2-b")[0]
+    assert kedua.startswith("ANON-") and kedua != pertama
+    r2.codes["tr_r2-b"] = 9
+    _jalan([r2], 50.5, 60.0, runtime)
+    assert r2.tap.label_of("tr_r2-b")[0] == pertama, "digabung ke kelompok tertua"
+    assert runtime.coordinator.metrics.anon_merged == 1
+
+    r2.wajah("tr_r2-b", "4471", 61.0)
+    _jalan([r2], 61.0, 63.0, runtime)
+    r2.keluar("tr_r2-b", 63.0)
+
+    resolved = {m["anon_id"]: m for m in messages if m["type"] == "identity.resolved"}
+    assert set(resolved) == {pertama, kedua}
+    assert {m["person_id"] for m in resolved.values()} == {"4471"}
+    for anon, event in resolved.items():
+        labelled = {m["interval_id"] for m in messages
+                    if m["type"] == "presence.interval" and m["person_id"] == anon}
+        assert labelled == set(event["moved_intervals"]), anon
+    validator = SchemaValidator()
+    for message in messages:
+        assert not validator.validate_message(message, expected_channel="events"), message
+    report = ConformanceChecker().check(messages)
+    assert report.ok, report.errors

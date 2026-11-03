@@ -24,7 +24,7 @@ def _config(tmp_path, enabled=True, cuda_graph=True):
 def test_profil_demo_termuat():
     check, config = pf.check_config("engine/config/demo-1060.yaml")
     assert check.status == "OK" and config is not None
-    assert "LibreDFINEs.pt" in check.detail
+    assert "LibreDFINEm.pt" in check.detail
 
 
 def test_config_rusak_gagal(tmp_path):

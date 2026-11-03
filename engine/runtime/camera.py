@@ -55,6 +55,7 @@ from ..identity import IdentityArbiter, Priority, RecognitionScheduler
 from ..presence.assembler import PresenceAssembler
 from ..presence.binding import EngineBinding
 from ..presence.zones import ZONE_INTERIOR
+from ..pipeline.change_gate import ChangeGate
 from ..pipeline.zoning import TrackZoner, ZonePriorityQueue
 from ..perception.gpu_fatal import describe, is_fatal_gpu_error
 from ..ports.frame import Frame
@@ -197,6 +198,7 @@ class CameraSupervisor:
         self._source: Any = None
         self._zoner: Optional[TrackZoner] = None
         self._queue: Optional[ZonePriorityQueue] = None
+        self._change_gate: Optional[ChangeGate] = None
         self._binding: Optional[EngineBinding] = None
         self._assembler: Optional[PresenceAssembler] = None
 
@@ -449,11 +451,17 @@ class CameraSupervisor:
             executor=self._recognition_executor,
         )
 
+        # Gerbang perubahan kotak, satu per kamera, dibagi antrean wajah dan tap ReID.
+        # Selalu ada; aktif bila params.enabled (bisa diubah saat jalan, set_tuning).
+        self._change_gate = ChangeGate(config.analysis_trigger)
+        if self._reid_tap is not None:
+            self._reid_tap.change_gate = self._change_gate
         if self._scheduler is not None:
             self._queue = ZonePriorityQueue(
                 scheduler=self._scheduler,
                 zoner=self._zoner,
                 max_requests_per_frame=config.recognition.max_requests_per_frame,
+                change_gate=self._change_gate,
             )
             # Consumer and key together, from the same object — see UUIDS in
             # pipeline/zoning.py for what happens when they come apart.
@@ -956,7 +964,40 @@ class CameraSupervisor:
         if isinstance(bias, (int, float)):
             # Sisa bias yang belum terkoreksi. Negatif = `at` mendahului kenyataan.
             out["clock_drift_seconds"] = round(float(bias), 3)
+        if self._binding is not None:
+            # Kumulatif sejak kamera dibuka (overhaul: diukur di health, bukan grep log).
+            m = self._binding.metrics
+            out["identified"] = int(m.identified)
+            out["identity_released"] = int(m.released)
+            out["recognitions_empty"] = int(m.recognitions_empty)
+            out["recognitions_not_attempted"] = int(m.recognitions_not_attempted)
+        if self._change_gate is not None and self._change_gate.params.enabled:
+            out.update(self._change_gate.metrics())
         return out
+
+    def apply_tuning(self, config: EngineConfig) -> None:
+        """Pengaturan realtime (runtime/tuning.py) untuk kamera ini; dipanggil dari thread kontrol.
+
+        Hanya penggantian atribut utuh (atomik di bawah GIL); thread kamera membacanya
+        di frame berikutnya. Pembukaan ulang kamera memakai `self._config` baru.
+        """
+        from .idle_gate import IdleDetectionGate
+        from .tuning import apply_detector_tuning
+
+        self._config = config
+        if self._change_gate is not None:
+            self._change_gate.params = config.analysis_trigger
+        apply_detector_tuning(self._detector, config.detector)
+        engine = self._engine
+        if config.idle_fps is None:
+            self._idle_gate = None
+            if engine is not None:
+                engine.detection_gate = None
+        else:
+            gate = IdleDetectionGate(config.idle_fps, config.idle_after_seconds)
+            self._idle_gate = gate
+            if engine is not None:
+                engine.detection_gate = gate.should_detect
 
     def health(self) -> Dict[str, Any]:
         binding = self._binding.health() if self._binding is not None else {}

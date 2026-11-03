@@ -297,15 +297,16 @@ def jadwal() -> list:
 def test_event_lama_tidak_mendapat_field_wajib_baru():
     """Aturan evolusi: skema lama tetap valid. Menambah field WAJIB ke event
     yang sudah ada memutus engine/backend yang belum diperbarui. Daftar di
-    `required_baseline.json` adalah keadaan sebelum ReID/jadwal; satu-satunya
-    tipe yang boleh tidak ada di sana adalah `identity.resolved`."""
+    `required_baseline.json` adalah keadaan sebelum ReID/jadwal; tipe yang boleh
+    tidak ada di sana: `identity.resolved` dan `set_tuning` (overhaul 3 Nov, disetujui
+    sebagai perubahan kontrak; pesan kontrol baru, tidak mengubah pesan lama)."""
     baseline = json.loads((Path(__file__).parent / "required_baseline.json").read_text(encoding="utf-8"))
     from contracts.validator.schema_validator import _SCHEMA, _TYPE_TO_DEF
 
     for mtype, required in baseline.items():
         sekarang = set(_SCHEMA["$defs"][_TYPE_TO_DEF[mtype]].get("required", []))
         assert sekarang <= set(required), f"{mtype} mendapat field wajib baru: {sorted(sekarang - set(required))}"
-    assert set(_TYPE_TO_DEF) - set(baseline) == {"identity.resolved"}
+    assert set(_TYPE_TO_DEF) - set(baseline) == {"identity.resolved", "set_tuning"}
 
 
 def test_nilai_lama_enum_tetap_sah(validator, berbalik_lama):

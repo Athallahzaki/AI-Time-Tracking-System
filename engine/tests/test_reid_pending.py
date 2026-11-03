@@ -171,3 +171,58 @@ def test_alasan_tidak_digabung_tercatat_untuk_kalibrasi():
     assert core.rejections["anon_travel_time"] == 1
     core.observe(_obs("cam2", 3, 40, _vec(5), zone="lobby"))          # tidak mirip siapa pun
     assert core.rejections["anon_ambang"] == 1
+
+
+# --------------------------------------------------------------------------
+# Penilaian ulang (overhaul 3 Nov): "orang yang sama jadi ANON baru tiap pindah ruangan"
+# --------------------------------------------------------------------------
+
+CFG_ULANG = ReidConfig.from_mapping({
+    "min_travel_seconds": {"lobby": {"biliar": 20, "smoking": 10, "luar": 8}},
+    "reevaluate": True,
+})
+BURUK_LOBBY = _vec(0, 5, 3.0)     # embedding pertama: orang baru masuk frame, setengah terpotong
+BURUK_BILIAR = _vec(0, 7, 3.0)
+
+
+def _pindah_ruangan(core):
+    a1 = core.observe(_obs("cam1", 1, 0, BURUK_LOBBY, zone="lobby"))
+    core.observe(_obs("cam1", 1, 5, _vec(0), zone="lobby"))            # lalu terlihat jelas
+    core.close(TrackClosed("cam1", "tr_cam1_1", T0 + 10))
+    b1 = core.observe(_obs("cam5", 2, 40, BURUK_BILIAR, zone="biliar"))  # 30 dtk kemudian di biliar
+    b2 = core.observe(_obs("cam5", 2, 45, _vec(0), zone="biliar"))
+    return a1, b1, b2
+
+
+def test_tanpa_penilaian_ulang_pindah_ruangan_jadi_anon_baru():
+    a1, b1, b2 = _pindah_ruangan(_core())
+    assert b1.person_id != a1.person_id and b2.person_id == b1.person_id, "perilaku lama (keluhan klien)"
+
+
+def test_penilaian_ulang_menggabung_anon_yang_sama_ke_kelompok_tertua():
+    core = PendingIdentities(DAY, CFG_ULANG)
+    a1, b1, b2 = _pindah_ruangan(core)
+    assert b1.person_id != a1.person_id, "embedding pertama tetap ragu: tidak digabung"
+    assert b2.person_id == a1.person_id
+    assert b2.merged == ((b1.anon_id, a1.anon_id, ("tr_cam5_2",)),)
+    assert core.group_members(a1.anon_id) == ("tr_cam1_1", "tr_cam5_2")
+    assert core.reevaluations == {"anon_gabung": 1}
+
+
+def test_penilaian_ulang_tidak_menggabung_dua_orang_yang_hidup_bersamaan():
+    core = PendingIdentities(DAY, CFG_ULANG)
+    a = core.observe(_obs("cam1", 1, 0, BURUK_LOBBY, zone="lobby"))
+    b = core.observe(_obs("cam5", 2, 1, BURUK_BILIAR, zone="biliar"))
+    core.observe(_obs("cam1", 1, 30, _vec(0), zone="lobby"))
+    later = core.observe(_obs("cam5", 2, 31, _vec(0), zone="biliar"))   # mirip, tapi di dua tempat sekaligus
+    assert later.person_id == b.person_id != a.person_id and later.merged == ()
+
+
+def test_penilaian_ulang_menyelesaikan_ke_karyawan_galeri():
+    core = PendingIdentities(DAY, CFG_ULANG)
+    core.observe(_obs("cam1", 9, 0, _vec(0), face="4471", zone="lobby"))  # wajah: galeri 4471
+    core.close(TrackClosed("cam1", "tr_cam1_9", T0 + 2))
+    first = core.observe(_obs("cam5", 3, 40, BURUK_BILIAR, zone="biliar"))
+    assert first.person_id.startswith("ANON-")
+    again = core.observe(_obs("cam5", 3, 45, _vec(0), zone="biliar"))
+    assert again.person_id == "4471" and [r.reason for r in again.resolutions] == ["group_merged"]

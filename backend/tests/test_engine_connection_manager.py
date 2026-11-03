@@ -13,7 +13,11 @@ class FakeClient:
         self.connected = False
 
 
-def test_sync_sends_cameras_before_roster(monkeypatch):
+def test_sync_sends_cameras_before_roster(monkeypatch, tmp_path):
+    from backend.core import database
+
+    # sync_tuning membaca/menulis app_settings: jangan sentuh backend/data/backend.db pengembang.
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "backend.db")
     client = FakeClient()
     manager = EngineConnectionManager(client)
     monkeypatch.setattr(
@@ -21,7 +25,8 @@ def test_sync_sends_cameras_before_roster(monkeypatch):
         lambda: [{"person_id": "4471", "enrollment_version": 3}],
     )
     manager.sync_desired_state()
-    assert [message["type"] for message in client.messages] == ["set_cameras", "set_roster"]
+    # Overhaul 3 Nov: kalibrasi engine (set_tuning) ikut dikirim ulang setiap tersambung.
+    assert [message["type"] for message in client.messages] == ["set_cameras", "set_roster", "set_tuning"]
     assert client.messages[1]["persons"] == [
         {"person_id": "4471", "enrollment_version": 3}
     ]

@@ -232,8 +232,10 @@ def test_config_bucket_default_dan_model_ain():
     assert settings.model_path.endswith("osnet_ain_reid.onnx")
     for path in sorted((ROOT / "engine" / "config").glob("demo-*.yaml")):
         reid = load_config(str(path)).reid
-        assert reid.model_path.endswith("osnet_ain_reid.onnx"), path.name
         assert reid.batch_buckets == (1, 2, 4, 8), path.name
+        # Model lain (mis. demo-4060: osnet_ain_colab_tanpa_in.onnx) sah asal dikunci hash-nya:
+        # bobot yang tertukar diam-diam menggeser semua ambang yang dikalibrasi.
+        assert reid.model_path.endswith("osnet_ain_reid.onnx") or reid.model_sha256, path.name
 
 
 @pytest.mark.parametrize("buruk", [(), (0, 1), (2, 1), (1, 1, 2)])
