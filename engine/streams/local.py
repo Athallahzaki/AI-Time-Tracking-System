@@ -40,8 +40,10 @@ class LocalTrackStream:
         max_frames: Optional[int] = None,
         recorder: Optional[Recorder] = None,
         wrap_source: Optional[SourceWrapper] = None,
+        detector: Any = None,
     ) -> None:
         self._config = config
+        self._detector = detector
         self._camera_id = camera_id
         self._max_frames = max_frames
         self._recorder = recorder
@@ -64,6 +66,7 @@ class LocalTrackStream:
             recorder=self._recorder,
             source_id=self._camera_id,
             wrap_source=self._wrap_source,
+            detector=self._detector,
         )
         self._engine = engine
         self._source = source

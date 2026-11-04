@@ -57,6 +57,8 @@ class BenchOptions:
     max_camera_offset_seconds: float = 10.0
     recording_is_phone: bool = True
     label: str = ""
+    # "section.field" (or "field") -> value, applied on top of the config file.
+    overrides: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.mode not in MODES:
@@ -76,6 +78,7 @@ class CameraRun:
     error: Optional[BaseException] = None
     offset_frames: int = 0
     queue_metrics: Optional[Dict[str, Any]] = None
+    detector: Any = None  # handle to the shared detector, or None = build its own
 
 
 def _build_config(options: BenchOptions) -> EngineConfig:
@@ -87,7 +90,51 @@ def _build_config(options: BenchOptions) -> EngineConfig:
         changes["source_uri"] = options.source
         if not options.mock:
             changes["source_type"] = "video_file"
-    return dataclasses.replace(config, **changes) if changes else config
+    config = dataclasses.replace(config, **changes) if changes else config
+    return apply_overrides(config, options.overrides)
+
+
+def apply_overrides(config: EngineConfig, overrides: Dict[str, Any]) -> EngineConfig:
+    """`detector.nms_iou_threshold=0.7` style changes, validated like the file.
+
+    dataclasses.replace re-runs each section's __post_init__, so a value the
+    YAML loader would refuse is refused here too.
+    """
+    for key, value in overrides.items():
+        section, _, name = key.rpartition(".")
+        try:
+            if section:
+                if "." in section or not dataclasses.is_dataclass(getattr(config, section, None)):
+                    raise ValueError(f"unknown config section {section!r}")
+                inner = dataclasses.replace(getattr(config, section), **{name: value})
+                config = dataclasses.replace(config, **{section: inner})
+            else:
+                config = dataclasses.replace(config, **{name: value})
+        except TypeError as exc:  # unknown field name
+            raise ValueError(f"--set {key}: {exc}") from exc
+    return config
+
+
+def _shared_detector(config: EngineConfig, cameras: int) -> Any:
+    """One model behind a dispatcher for N cameras, as runtime/service.py does.
+
+    Without this every camera loads its own D-FINE and N threads call the GPU
+    uncoordinated: the bench then measures a design production does not run.
+    """
+    if cameras < 2 or config.source_type == "mock" or not config.detector.share_across_cameras:
+        return None
+    from .. import factory
+    from ..perception.shared_detector import SharedDetector, supports_sharing
+
+    inner = factory.build_detector(config)
+    if not supports_sharing(inner):
+        return None
+    # wait_for_all=False: the bench has no tick scheduler (core.scheduler: free).
+    shared = SharedDetector(inner, max_batch=config.detector.max_batch,
+                            batch_wait_ms=config.detector.batch_wait_ms)
+    if config.auto_warmup:
+        shared.warmup()
+    return shared.start()
 
 
 def _run_one_camera(
@@ -112,6 +159,7 @@ def _run_one_camera(
         max_frames=options.frames,
         recorder=run.recorder,
         wrap_source=wrap,
+        detector=run.detector,
     )
     writer: Optional[TrackLogWriter] = None
     try:
@@ -284,6 +332,11 @@ def run_bench(options: BenchOptions) -> Dict[str, Any]:
             )
         runs.append(run)
 
+    shared = _shared_detector(config, options.cameras)
+    if shared is not None:
+        for run in runs:
+            run.detector = shared.handle(run.camera_id)
+
     barrier = threading.Barrier(options.cameras + 1)
     threads = [
         threading.Thread(
@@ -305,6 +358,8 @@ def run_bench(options: BenchOptions) -> Dict[str, Any]:
     for thread in threads:
         thread.join()
     wall_seconds = time.perf_counter() - wall_start
+    if shared is not None:
+        shared.stop()
 
     failures = [run for run in runs if run.error is not None]
     if failures:
@@ -326,6 +381,10 @@ def run_bench(options: BenchOptions) -> Dict[str, Any]:
     results: Dict[str, Any] = {
         "throughput": M.throughput(recorders, options.mode),
         "latency": M.latency_by_stage(recorders, mode=options.mode),
+        "shared_detector": (
+            shared.metrics.as_dict() if shared is not None
+            else M.withheld("one detector per camera (cameras = 1, mock, or share_across_cameras: false)")
+        ),
     }
 
     # --- which metrics this run is entitled to report (§13.2) --------------

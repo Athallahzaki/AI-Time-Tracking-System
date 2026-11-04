@@ -42,6 +42,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", default=None, help="path to a YAML engine config")
     parser.add_argument("--source", default=None, help="recording to play")
     parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="override one config field, e.g. --set detector.nms_iou_threshold=0.7 "
+        "(repeatable; value parsed as YAML: 0.7, true, null). Lands in the "
+        "report's effective config, so the run stays reproducible",
+    )
+    parser.add_argument(
         "--mock",
         action="store_true",
         help="synthetic source, detector and tracker — no GPU, no weights",
@@ -98,6 +108,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="dump the full JSON to stdout as well as writing it",
     )
     return parser
+
+
+def parse_overrides(items: list) -> Dict[str, Any]:
+    import yaml
+
+    out: Dict[str, Any] = {}
+    for item in items:
+        key, sep, raw = item.partition("=")
+        if not sep or not key.strip():
+            raise SystemExit(f"--set expects KEY=VALUE, got {item!r}")
+        out[key.strip()] = yaml.safe_load(raw)
+    return out
 
 
 def summarize(report: Dict[str, Any]) -> str:
@@ -268,6 +290,7 @@ def main(argv: Optional[list] = None) -> int:
         track_gap_seconds=args.track_gap_seconds,
         recording_is_phone=not args.recording_is_cctv,
         label=args.label,
+        overrides=parse_overrides(args.overrides),
     )
 
     from .report import write_report
