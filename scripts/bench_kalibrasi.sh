@@ -34,4 +34,18 @@ run k5-swscale      --mode throughput --set detector.swscale_resize=true
 # Bila crash di CUDA graph, ulangi: ONLY=r3-bersama EXTRA="--set detector.cuda_graph=false"
 run r3-bersama      --mode realtime --cameras 3 --frames 3000 ${EXTRA:-}
 
-python -m engine.bench.compare "$OUT"/*/
+shopt -s nullglob; bench_dirs=("$OUT"/[kr]*/); shopt -u nullglob
+(( ${#bench_dirs[@]} )) && python -m engine.bench.compare "${bench_dirs[@]}"
+
+# Engine ASLI (wajah + ReID + detector bersama), rekaman diputar mengikuti jam dinding.
+# u1: ANON per orang (1 kamera, angka identitas sah). u3: fps/ms 3 kamera (ANON tidak sah:
+# orang yang sama ada di 3 kamera sekaligus). RT_SECONDS default 600 = 10 menit tiap run.
+rt() {
+  local name="$1"; shift
+  if [[ -n "$ONLY" && " $ONLY " != *" $name "* ]]; then return; fi
+  echo "=== $name"
+  python scripts/runtime_uji.py --config "$CONFIG" --source "$SRC" --seconds "${RT_SECONDS:-600}" \
+    --out "$OUT/$name" "$@" > "$OUT/$name.txt" && tail -n +2 "$OUT/$name.txt" | head -60
+}
+rt u1-runtime-1cam  --cameras 1
+rt u3-runtime-3cam  --cameras 3
