@@ -73,3 +73,14 @@ def test_compare_membaca_laporan(tmp_path):
     (tmp_path / "baseline.json").write_text(json.dumps(report))
     assert compare.main([str(tmp_path)]) == 0
     assert compare.row(report)["raw/2s"] == 1.5
+
+
+def test_caveat_reid_dan_rekognisi_tidak_dijalankan():
+    from engine.bench.runner import _not_run_caveats
+
+    base = load_config(None)
+    off = dataclasses.replace(base, recognition=dataclasses.replace(base.recognition, enabled=False),
+                              reid=dataclasses.replace(base.reid, enabled=False))
+    assert _not_run_caveats(off) == []
+    on = load_config("engine/config/demo-4060.yaml")  # rekognisi + ReID menyala
+    assert "recognition and reid are enabled" in _not_run_caveats(on)[0]

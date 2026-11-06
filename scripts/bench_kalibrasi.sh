@@ -26,13 +26,12 @@ run k0-dasar        --mode throughput
 run k1-nms07        --mode throughput --set detector.nms_iou_threshold=0.7
 run k2-nms07-buf2   --mode throughput --set detector.nms_iou_threshold=0.7 --set tracker.track_buffer_seconds=2
 run k3-nms07-buf3   --mode throughput --set detector.nms_iou_threshold=0.7 --set tracker.track_buffer_seconds=3
-# ByteTrack dua tahap: detector 0,3 supaya kotak 0,3-0,5 sampai ke asosiasi skor-rendah;
-# track baru tetap butuh >= 0,5. Ini juga menurunkan ambang kotak yang dilihat tahap lain.
-run k4-dua-tahap    --mode throughput --set detector.nms_iou_threshold=0.7 --set tracker.track_buffer_seconds=2 \
-                    --set detector.confidence_threshold=0.3 --set tracker.track_threshold=0.5
+# Resize di decoder (swscale YUV -> RGB 640 sekali jalan), bukan BGR 1080p + cv2.resize.
+# Cek fps NAIK dan tracks / raw/2s TIDAK berubah banyak dibanding k0 (interpolasi beda).
+run k5-swscale      --mode throughput --set detector.swscale_resize=true
 
-# 5 kamera, realtime, satu D-FINE bersama (seperti runtime). cuda_graph tetap dari profil;
-# bila crash, ulangi dengan: ONLY=r5 EXTRA="--set detector.cuda_graph=false"
-run r5-bersama      --mode realtime --cameras 5 --frames 3000 ${EXTRA:-}
+# 3 kamera, realtime, satu D-FINE bersama (seperti runtime), cuda_graph dari profil (on).
+# Bila crash di CUDA graph, ulangi: ONLY=r3-bersama EXTRA="--set detector.cuda_graph=false"
+run r3-bersama      --mode realtime --cameras 3 --frames 3000 ${EXTRA:-}
 
 python -m engine.bench.compare "$OUT"/*/

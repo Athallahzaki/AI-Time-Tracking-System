@@ -115,6 +115,18 @@ def apply_overrides(config: EngineConfig, overrides: Dict[str, Any]) -> EngineCo
     return config
 
 
+def _not_run_caveats(config: EngineConfig) -> List[str]:
+    """The bench wires VisionEngine only; ReID and the face worker live in runtime/."""
+    on = [name for name, enabled in (("recognition", config.recognition.enabled),
+                                     ("reid", config.reid.enabled)) if enabled]
+    if not on:
+        return []
+    return [f"{' and '.join(on)} {'is' if len(on) == 1 else 'are'} enabled in the config but NOT "
+            "run by the bench: it builds detector + tracker only (ReID and the face worker "
+            "live in runtime/camera.py). Every timing here excludes their GPU and CPU cost, "
+            "and no number here says anything about ANON groups or recognition."]
+
+
 def _shared_detector(config: EngineConfig, cameras: int) -> Any:
     """One model behind a dispatcher for N cameras, as runtime/service.py does.
 
@@ -535,6 +547,6 @@ def run_bench(options: BenchOptions) -> Dict[str, Any]:
             and config.source_type == "video_file",
             annotation_present=annotation is not None,
             face_probe_is_lower_bound=face_is_lower_bound,
-        ),
+        ) + _not_run_caveats(config),
     )
     return report
