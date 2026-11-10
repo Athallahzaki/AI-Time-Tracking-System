@@ -27,7 +27,6 @@ const props = defineProps({
   presetDate: { type: String, default: '' },
   presetSessionId: { type: String, default: '' },
   presetGapId: { type: String, default: '' },
-  presetCorrectedBy: { type: String, default: '' },
 });
 
 const emit = defineEmits(['submitted', 'cancel']);
@@ -60,7 +59,6 @@ const form = ref({
   date: props.presetDate || todayLocal(),
   session_id: props.presetSessionId,
   gap_id: props.presetGapId,
-  corrected_by: props.presetCorrectedBy,
   reason: '',
   new_classification: '',
   adjustment_minutes: '',
@@ -92,7 +90,6 @@ async function handleSubmit() {
       date: form.value.date || null,
       session_id: form.value.session_id || null,
       gap_id: form.value.gap_id || null,
-      corrected_by: form.value.corrected_by,
       reason: form.value.reason,
       new_classification: form.value.new_classification || null,
       adjustment_minutes:
@@ -173,18 +170,6 @@ async function handleSubmit() {
           </div>
         </div>
 
-        <div class="space-y-1.5">
-          <Label :for="fid('by')" class="text-xs text-slate-600"
-            >Dikoreksi oleh *</Label
-          >
-          <Input
-            :id="fid('by')"
-            v-model="form.corrected_by"
-            required
-            type="text"
-            placeholder="Nama HR/supervisor"
-          />
-        </div>
 
         <div class="space-y-1.5">
           <Label :for="fid('reason')" class="text-xs text-slate-600"

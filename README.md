@@ -117,7 +117,8 @@ Endpoint utama: `/api/system/status`, `/api/cameras`,
 `/api/detections/stream`.
 
 Proyek belum siap produksi penuh: benchmark rekaman representatif, kebijakan HRD,
-autentikasi, TLS, dan hardening deployment masih perlu diselesaikan. Setup MediaMTX
+TLS, enkripsi referensi wajah, dan hardening deployment masih perlu diselesaikan
+(login, peran admin/viewer, dan penyaringan per karyawan sudah ada). Setup MediaMTX
 lokal/lapangan dasar tersedia di `deploy/`.
 Status terkini: `docs/CHANGELOG.md` dan dokumen kesepakatan tim (dokumen 12).
 

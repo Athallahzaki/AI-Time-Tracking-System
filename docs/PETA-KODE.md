@@ -60,7 +60,7 @@ frontend (Vue + Vite): dashboard, overlay kotak, enrollment, pengaturan
 | App, daftar router, startup | `main.py` |
 | Config env, database (WAL), keamanan, state | `core/config.py`, `core/database.py`, `core/security.py`, `core/state.py` |
 | Aturan ID ANON- (dicadangkan, bukan karyawan): `is_anon_id`, dipakai ledger/pelanggaran/state/skema employee | `core/identity.py` (tes `test_anon_identity_resolved.py`) |
-| Router (`/api/...`); rate limit login `login_limiter` di `auth.py` (be-r2); kalibrasi `/api/settings/tuning` + `/display` di `settings.py` (be-r5) | `routers/attendance.py`, `auth.py`, `cameras.py`, `enrollments.py`, `notifications.py`, `settings.py`, `stats.py`, `streams.py` (`/api/detections/*`), `system.py`, `violations.py` |
+| Router (`/api/...`); rate limit login `login_limiter` di `auth.py` (be-r2); kalibrasi `/api/settings/tuning` + `/display` di `settings.py` (be-r5) | `routers/attendance.py`, `auth.py`, `cameras.py`, `employees.py`, `enrollments.py`, `hr_review.py`, `me.py`, `notifications.py`, `reports.py` (rekap harian + `.xlsx`), `reviews.py`, `settings.py`, `stats.py`, `streams.py` (`/api/detections/*`), `system.py`, `violations.py` |
 | Skema Pydantic | `schemas/*.py` (`protocol.py` = pesan engine) |
 | Koneksi ke engine, adaptasi protokol, ingest event (termasuk `identity.resolved` -> atribusi `reid_retro`, `_resolve_identity`) | `services/engine_client.py`, `engine_connection_manager.py`, `engine_integration.py`, `protocol_adapter.py`, `event_ingestion.py` |
 | Jatah free time (ledger kunjungan) | `services/free_time.py`, `break_policy.py`, `policy_service.py` (`configs/policy.yaml`) |
@@ -71,15 +71,16 @@ frontend (Vue + Vite): dashboard, overlay kotak, enrollment, pengaturan
 | Konfigurasi kamera per mode | `configs/cameras*.yaml` (`remote-hls`, `remote-webrtc` untuk deploy Portainer) |
 | Tes | `backend/tests/test_*.py` |
 
-Belum ada (dokumen 12 §3): data master karyawan, manajemen pengguna, pengaturan
-dari web (jam istirahat, jadwal engine, penerima/jadwal rekap), rekap harian,
-generator `.xlsx`, halaman report, penyaringan per peran di semua endpoint.
+Sudah ada sejak peta 18 Okt (dulu tercatat "belum ada"): data master karyawan
+(`routers/employees.py`), manajemen pengguna (`routers/auth.py`), pengaturan dari web
+(`routers/settings.py`), rekap harian + `.xlsx` (`services/report_service.py`), penyaringan
+per peran (`core/security.py::scoped_person_id`). CI: `.github/workflows/backend.yml`, `frontend.yml`.
 
 ## Frontend (`frontend/src/`)
 
 | Hal | File |
 |---|---|
-| Halaman | `views/DashboardView.vue`, `EnrollmentView.vue`, `SettingsView.vue`, `LoginView.vue` |
+| Halaman | `views/DashboardView.vue`, `EnrollmentView.vue`, `SettingsView.vue`, `LoginView.vue`, `EmployeesView.vue`, `UsersView.vue`, `ReportsView.vue`, `ReviewQueueView.vue`, `ViewerHomeView.vue`, `ChangePasswordView.vue` |
 | Layout, sidebar, notifikasi | `layouts/DashboardLayout.vue`, `components/layout/*` |
 | Video + overlay kotak | `components/dashboard/LiveFeedSection.vue`, `CameraFeedCard.vue`, `DetectionBox.vue`, `composables/useDetectionStream.ts` (`?boxage=`, fe-r1) |
 | Tab Kalibrasi (engine realtime + tampilan, fe-r3) | `components/settings/CalibrationTab.vue` |

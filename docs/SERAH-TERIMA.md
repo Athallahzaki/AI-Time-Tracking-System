@@ -1,10 +1,12 @@
 # Serah Terima
 
-Terakhir: 10 November 2026, sesi audit robustness + perbaikan temuan 1–4 (paket be-r6 + ea-r24), tanpa GPU.
+Terakhir: 10 November 2026, sesi analisis repo (paket be-r7 + ea-r25 + fe-r4) sesudah be-r6 + ea-r24, tanpa GPU.
 Pilot tetap di `c990bc4`. **Paket 2–10 Nov belum diuji di 4060/5090.** Rincian: CHANGELOG 2–10 Nov.
 
 ## Selesai (kode + tes CPU; backend 138, engine 847 / 8 dilewati, kontrak 151, semua lulus)
 
+- 10 Nov (be-r7/ea-r25/fe-r4): `corrected_by` dari sesi admin, CI `backend.yml` + `frontend.yml`, peringatan
+  `reid.travel_time_seconds` kosong, README + PETA-KODE disesuaikan.
 - 10 Nov: atribusi satu transaksi dengan event + galat DB sesaat diputar ulang (1), handshake HMAC backend +
   ACK dipotong ke kursor (2), resolve lewat indeks `person_id` (3), kuota login per (username, IP) (4).
 - 2–3 Nov: P1–P8 overhaul, pemicu perubahan kotak, penilaian ulang + gabung ANON, kalibrasi realtime (`set_tuning`).
@@ -16,7 +18,12 @@ Pilot tetap di `c990bc4`. **Paket 2–10 Nov belum diuji di 4060/5090.** Rincian
 
 ## Belum, dan alasannya
 
-- **[data]** kalibrasi `reid.match_threshold` sebelum `reevaluate`; tabel waktu tempuh; `overlapping_cameras`.
+- **[data, PERTAMA]** tabel waktu tempuh: kosong + default 30 dtk = pindah ruangan < 30 dtk SELALU ANON baru, juga
+  dengan `reevaluate` (terbukti di logika murni). Ukur jalan tercepat tiap pasangan lokasi, isi lewat Kalibrasi.
+- **[data]** sesudah itu: `reid.match_threshold`, `reevaluate`, `overlapping_cameras`. Catatan (penalaran, belum
+  diukur): `score_set` = maksimum atas semua pasangan prototipe (sampai 12x12), jadi ambang hasil kalibrasi satu
+  embedding makin longgar saat kelompok membesar; kalibrasikan pada skor himpunan sebelum `reevaluate` menyala.
+- **[keputusan]** enkripsi at-rest `engine/data/references.sqlite3` (data biometrik); `database.py` 1.978 baris.
 - **[kontrak]** pesan ANON->ANON. **[desain]** fusi wajah+tubuh+ruang-waktu. **[GPU]** P9 ONNX.
 - **[audit, tidak dibaca dalam]** logika ReID (`identity/reid/pending.py`, `merge.py`, klaim lintas kamera).
 - **[deploy]** IP klien di belakang Cloudflare: uvicorn mengambil IP paling kanan yang tidak dipercaya di
@@ -44,4 +51,6 @@ Pilot tetap di `c990bc4`. **Paket 2–10 Nov belum diuji di 4060/5090.** Rincian
 3. Kunci DB 15 dtk saat engine mengirim: `docker exec <backend> python -c "import sqlite3,time;
    c=sqlite3.connect('/data/backend.db');c.execute('BEGIN EXCLUSIVE');time.sleep(15)"` -> log "menyambung
    ulang", tidak ada dead letter baru, event setelahnya tetap masuk.
-4. Lanjutan dari 3 Nov: baseline `c990bc4` vs paket, Kalibrasi, `reid.reevaluate`, NMS/klaim/boxAge (CHANGELOG).
+4. Waktu tempuh: catat `reid_tolak_galeri_travel_time` di log engine, isi tabel di Kalibrasi, angka itu harus turun.
+5. Koreksi manual dari dashboard: kolom "Dikoreksi oleh" hilang, log audit menampilkan username admin yang login.
+6. Lanjutan dari 3 Nov: baseline `c990bc4` vs paket, Kalibrasi, `reid.reevaluate`, NMS/klaim/boxAge (CHANGELOG).

@@ -85,8 +85,8 @@ def get_active_sessions(user=Depends(require_user)):
     return {"status": "success", "count": len(sessions), "sessions": sessions}
 
 
-@router.post("/corrections", dependencies=[Depends(require_admin)])
-def create_manual_correction(req: CorrectionCreate):
+@router.post("/corrections")
+def create_manual_correction(req: CorrectionCreate, admin=Depends(require_admin)):
     """Append-only. Recorded AND applied to the allowance calculation."""
     if req.new_classification is not None and req.new_classification not in EXCLUDING_CLASSIFICATIONS:
         raise HTTPException(status_code=400, detail="Invalid classification")
@@ -105,7 +105,8 @@ def create_manual_correction(req: CorrectionCreate):
         "date": target_date,
         "session_id": req.session_id,
         "gap_id": req.gap_id,
-        "corrected_by": req.corrected_by,
+        # Jejak audit: dari sesi admin, bukan dari body yang bisa diisi atas nama siapa saja.
+        "corrected_by": admin["username"],
         "corrected_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "reason": req.reason,
         "new_classification": req.new_classification,

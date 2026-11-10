@@ -57,7 +57,7 @@ def test_tidak_ada_rute_ganda():
 def test_post_koreksi_benar_benar_menyimpan(db):
     client = TestClient(app)          # tanpa `with`: lifespan (koneksi engine) tidak jalan
     body = {"person_id": "4471", "date": "2026-10-06", "adjustment_minutes": -5,
-            "corrected_by": "admin", "reason": "uji"}
+            "corrected_by": "orang-lain", "reason": "uji"}
     assert client.post("/api/attendance/corrections", json=body).status_code == 401
 
     token = _admin_token(client)
@@ -67,6 +67,7 @@ def test_post_koreksi_benar_benar_menyimpan(db):
     assert response.json()["correction"]["person_id"] == "4471"
     saved = database.get_corrections()
     assert len(saved) == 1 and saved[0]["reason"] == "uji"
+    assert saved[0]["corrected_by"] == "admin"   # dari sesi, bukan dari body
 
 
 def test_tidak_ada_rute_koreksi_di_enrollment():

@@ -348,6 +348,13 @@ def build_reid_runtime(settings: Any, emit_event: Emit,
             "Isi dari MODEL-CARD (eval_reid.py pada crop berlabel) sebelum uji akurasi.",
             merge_config.match_threshold,
         )
+    if not merge_config.min_travel_seconds:
+        logger.warning(
+            "reid.travel_time_seconds kosong: orang yang muncul di lokasi lain kurang dari %.0f dtk "
+            "sejak terakhir terlihat SELALU jadi ANON baru (tolak 'travel_time'), semirip apa pun. "
+            "Ukur di lokasi lalu isi di config atau Pengaturan -> Kalibrasi.",
+            merge_config.default_min_travel_seconds,
+        )
     coordinator = ReidCoordinator(merge_config, emit_event,
                                   purge_offset_seconds=settings.purge_offset_seconds())
     worker = ReidWorker(embed, coordinator.deliver, max_queue=settings.worker_queue,

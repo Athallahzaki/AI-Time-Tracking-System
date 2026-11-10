@@ -1,0 +1,28 @@
+name: frontend
+
+on:
+  push:
+    paths: ["frontend/**", ".github/workflows/frontend.yml"]
+  pull_request:
+    paths: ["frontend/**", ".github/workflows/frontend.yml"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      # Node 22: `check:display` memakai --experimental-strip-types.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+      - name: display-config.json sah
+        run: npm run check:display
+      - name: Type check + build
+        run: npm run build

@@ -7,6 +7,28 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-11-10 · paket be-r7 + ea-r25 + fe-r4 — Analisis repo: jejak audit koreksi, CI backend/frontend, peringatan waktu tempuh
+
+Tanpa perubahan kontrak engine, tanpa saklar baru. Perilaku ReID TIDAK diubah (butuh data lokasi, lihat SERAH-TERIMA).
+
+- **`corrected_by` dari sesi admin.** `POST /api/attendance/corrections` dulu menyimpan `corrected_by` dari body, jadi
+  koreksi bisa dicatat atas nama siapa saja. Kini `admin["username"]` dari sesi; field di body masih diterima (klien
+  lama) tetapi diabaikan. Form koreksi: kolom "Dikoreksi oleh" dan prop `presetCorrectedBy` dihapus.
+- **CI backend dan frontend.** `engine.yml`/`contracts.yml` tidak terpicu oleh `backend/**` maupun `frontend/**`, jadi
+  138 tes backend (termasuk `test_boundary.py`) tidak pernah jalan di CI. Baru: `backend.yml` (pytest backend/tests;
+  ikut numpy + opencv karena `test_engine_channel.py` menyambung ke engine sungguhan) dan `frontend.yml` (Node 22,
+  `npm ci`, `check:display`, `build`).
+- **Peringatan `reid.travel_time_seconds` kosong** saat engine start. Dibuktikan pada `PendingIdentities` dengan
+  embedding nyaris identik: pindah lokasi 5/20/29 dtk = ANON baru (`galeri_travel_time`), 31 dtk = dikenali;
+  `reid.reevaluate` tidak menolong (gerbang yang sama). Semua profil di `engine/config/` masih `{}` + default 30.
+- Dokumen: README (autentikasi sudah ada), PETA-KODE (router, halaman, daftar "belum ada" yang sudah ada).
+
+File: `backend/routers/attendance.py`, `backend/schemas/corrections.py`, `backend/tests/test_{demo_backend_fixes,
+cameras_and_routes}.py`, `engine/pipeline/reid_coordinator.py`, `frontend/src/components/dashboard/
+ManualCorrectionForm.vue`, `.github/workflows/{backend,frontend}.yml`, `README.md`, `docs/PETA-KODE.md`.
+
+Uji: backend 138, engine 847 (8 dilewati), kontrak 151, `npm run check:display`, `npm run build`; semua lulus tanpa GPU.
+
 ## 2026-11-10 · paket be-r6 + ea-r24 — Perbaikan audit robustness (temuan 1–4)
 
 Hasil audit 10 Nov. Tanpa perubahan skema kontrak; tanpa saklar baru kecuali `ENGINE_SHARED_KEY` (kosong = lama).

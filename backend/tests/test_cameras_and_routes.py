@@ -104,8 +104,8 @@ def test_correction_is_applied_and_listed(env):
     _interval("4471", day.replace(hour=9), day.replace(hour=9, minute=10), "iv_1", 1)
     attendance.create_manual_correction(CorrectionCreate(
         person_id="4471", date="2026-09-22", gap_id="visit_iv_1",
-        new_classification="not_free_time", corrected_by="hr", reason="rapat",
-    ))
+        new_classification="not_free_time", reason="rapat",
+    ), admin={"username": "hr"})
     usage = attendance.get_break_usage("4471", "2026-09-22")
     assert usage["used_minutes"] == 0
     assert usage["breaks"][0]["corrected"] is True

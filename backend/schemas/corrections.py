@@ -17,7 +17,7 @@ class CorrectionCreate(BaseModel):
     date: Optional[str] = None  # YYYY-MM-DD, local policy timezone
     session_id: Optional[str] = None
     gap_id: Optional[str] = None  # visit_id from /api/attendance/breaks
-    corrected_by: str
+    corrected_by: Optional[str] = None  # diabaikan (klien lama); server mengisi dari sesi admin
     reason: str
     new_classification: Optional[str] = None
     adjustment_minutes: Optional[float] = None
