@@ -7,6 +7,36 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-11-10 · paket be-r6 + ea-r24 — Perbaikan audit robustness (temuan 1–4)
+
+Hasil audit 10 Nov. Tanpa perubahan skema kontrak; tanpa saklar baru kecuali `ENGINE_SHARED_KEY` (kosong = lama).
+
+- **1 · `identity.resolved` tidak lagi hilang saat galat DB sesaat.** Dulu event + checkpoint seq tersimpan, lalu
+  atribusi di transaksi terpisah; bila atribusi gagal ("database is locked"), event di-dead-letter dan di-ACK, dan
+  replay melewatinya (`inserted=False`), jadi waktu ANON tidak pernah pindah ke karyawan. Kini atribusi dihitung
+  lebih dulu dan disimpan **satu transaksi** dengan event (`save_protocol_event(attribution=...)`), dan disisipkan
+  juga saat event sudah ada (replay memulihkan atribusi yang dulu hilang). `engine_client`: `sqlite3.
+  OperationalError` = galat sementara, bukan pesan beracun: tidak di-dead-letter, tidak di-ACK, koneksi diputus
+  supaya engine memutar ulang. `track.identity_changed` ikut pola yang sama; riwayat track tetap memuat event itu
+  sendiri seperti dulu (dulu terbaca dari DB setelah disimpan).
+- **2 · Handshake HMAC dari backend.** `EngineClient(shared_key=...)` dari env `ENGINE_SHARED_KEY` memakai
+  `contracts/handshake_auth.py` (sama dengan engine dan `lag_probe`). Kunci terisi = engine wajib menantang dan
+  membuktikan `hello_ack`; galat menyebut sebabnya (kunci tidak ada di salah satu sisi, kunci beda). Engine:
+  ACK di atas kursor kirim dipotong ke kursor (tidak memangkas event yang belum terkirim). Compose, `.env.example`,
+  `portainer.env.example`, `start-engine.ps1`, `DEMO-REMOTE.md` diperbarui.
+- **3 · `_resolve_identity` tidak memindai semua interval sepanjang sejarah.** Disaring `person_id = anon_id`
+  lewat indeks `(type, person_id, end_ts)` (setara dengan saringan payload lama). Ukur sebelum: 150 ribu interval
+  = 0,55 dtk per resolve di thread penerima event.
+- **4 · Kuota login per username diikat ke IP.** Dulu 5 password salah dari mana saja mengunci akun untuk semua
+  orang (penguncian admin dari luar). Kini kunci `(username, IP)`; batas per IP tetap. **Mengubah keputusan P1.**
+
+File: `backend/core/{config,database}.py`, `backend/services/{engine_client,event_ingestion}.py`,
+`backend/routers/auth.py`, `engine/api/server.py`, `deploy/{docker-compose.yml,.env.example,portainer.env.example}`,
+`deploy/laptop/start-engine.ps1`, `docs/DEMO-REMOTE.md`, tes di `backend/tests/test_{anon_identity_resolved,
+engine_channel,login_rate_limit}.py` (+10; 9 di antaranya gagal di kode lama).
+
+Uji: `python -m pytest backend/tests -q` (138), `engine/tests` (847, 8 dilewati tanpa GPU), `contracts/tests` (151).
+
 ## 2026-11-03 · paket ea-r23 + be-r5 + fe-r3 — Kalibrasi realtime tanpa restart (`set_tuning`)
 
 Lintas jalur; **perubahan kontrak disetujui Zena 3 Nov, perlu dicatat EA**. Admin mengubah pengaturan dari

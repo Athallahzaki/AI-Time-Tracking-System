@@ -4,10 +4,12 @@ import time
 import json
 import logging
 import socket
+import sqlite3
 from threading import Lock, Thread
 from typing import Any, Callable, Dict, Optional
 
 from backend.core.config import settings
+from contracts import handshake_auth
 from backend.core.database import (
     get_integration_state,
     last_seq_key,
@@ -37,10 +39,15 @@ class OutboxChangedError(EngineConnectionError):
 
 
 class EngineClient:
-    def __init__(self, host: str = "127.0.0.1", port: int = 8765, timeout: float = 5.0) -> None:
+    def __init__(self, host: str = "127.0.0.1", port: int = 8765, timeout: float = 5.0,
+                 shared_key: Optional[str] = None) -> None:
         self.host = host
         self.port = port
         self.timeout = timeout
+        # Kunci terlalu pendek ditolak saat start, bukan saat handshake pertama.
+        if shared_key is not None:
+            handshake_auth._key_bytes(shared_key)
+        self._shared_key = shared_key
 
         self._socket: Optional[socket.socket] = None
         self._reader = None
@@ -101,12 +108,43 @@ class EngineClient:
         self._socket = sock
         try:
             self._reader = sock.makefile("r", encoding="utf-8", newline="\n")
-            hello = HelloMessage(type="hello", v=1, last_event_seq=self.last_event_seq)
-            self.send(hello.model_dump(exclude_none=True))
+            hello = HelloMessage(type="hello", v=1, last_event_seq=self.last_event_seq).model_dump(
+                exclude_none=True
+            )
+            nonces = None
+            if self._shared_key is not None:
+                # Dengan kunci, engine WAJIB menantang lebih dulu. Engine yang
+                # langsung diam menunggu hello = engine tanpa kunci (atau palsu): putus.
+                try:
+                    challenge = self.receive()
+                except EngineConnectionError as exc:
+                    raise EngineConnectionError(
+                        f"ENGINE_SHARED_KEY terisi tetapi engine tidak menantang ({exc})"
+                    ) from exc
+                if challenge.get("type") != "auth_challenge":
+                    raise EngineConnectionError(
+                        f"ENGINE_SHARED_KEY terisi tetapi engine tidak menantang (dapat {challenge.get('type')!r})"
+                    )
+                nonces = (str(challenge.get("nonce")), handshake_auth.new_nonce())
+                hello["auth"] = {
+                    "client_nonce": nonces[1],
+                    "mac": handshake_auth.hello_mac(
+                        self._shared_key, nonces[0], nonces[1], hello["client"], hello["last_event_seq"]
+                    ),
+                }
+            self.send(hello)
 
             response = self.receive()
+            if response.get("type") == "auth_challenge":
+                raise EngineConnectionError("engine meminta autentikasi; isi ENGINE_SHARED_KEY di backend")
+            if response.get("type") == "ack" and response.get("accepted") is False:
+                raise EngineConnectionError(f"engine menolak handshake: {response.get('reason')}")
             if response.get("type") != "hello_ack":
                 raise EngineConnectionError("Engine did not return hello_ack")
+            if nonces is not None:
+                expected = handshake_auth.hello_ack_mac(self._shared_key, *nonces)
+                if not handshake_auth.verify(expected, (response.get("auth") or {}).get("mac")):
+                    raise EngineConnectionError("bukti hello_ack salah: engine tidak memegang kunci yang sama")
             protocol_adapter.validate(response)
 
             engine_outbox = str(response.get("outbox_id") or "")
@@ -262,6 +300,12 @@ class EngineClient:
             validated = protocol_adapter.validate(message, expected_channel="events")
             if self._event_handler is not None:
                 self._event_handler(validated)
+        except sqlite3.OperationalError as exc:
+            # Galat DB sementara (mis. "database is locked"), bukan pesan beracun.
+            # Jangan dead-letter dan jangan ACK: putus, engine memutar ulang seq ini.
+            raise EngineConnectionError(
+                f"gagal menyimpan seq {seq} ({message.get('type')}): {exc}; menyambung ulang"
+            ) from exc
         except Exception as exc:  # noqa: BLE001
             # Poison message: park it, move on. Disconnecting would replay the
             # same message forever and stall every event behind it.
@@ -382,4 +426,6 @@ class EngineClient:
                     pass
 
 
-engine_client = EngineClient(host=settings.engine_host, port=settings.engine_port)
+engine_client = EngineClient(
+    host=settings.engine_host, port=settings.engine_port, shared_key=settings.engine_shared_key
+)

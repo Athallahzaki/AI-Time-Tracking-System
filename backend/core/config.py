@@ -127,6 +127,11 @@ class Settings:
     device: Optional[str] = None
     engine_host: str = field(default_factory=lambda: os.getenv("ENGINE_HOST", "127.0.0.1"))
     engine_port: int = field(default_factory=lambda: int(os.getenv("ENGINE_PORT", "8765")))
+    # Kunci handshake HMAC (P3), sama dengan ENGINE_SHARED_KEY di mesin engine.
+    # Kosong = tanpa autentikasi (perilaku lama). Terisi = engine WAJIB menantang.
+    engine_shared_key: Optional[str] = field(
+        default_factory=lambda: os.getenv("ENGINE_SHARED_KEY") or None
+    )
     engine_read_timeout_seconds: float = field(
         default_factory=lambda: float(
             os.getenv(

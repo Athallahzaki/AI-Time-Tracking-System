@@ -215,3 +215,64 @@ def test_runtime_uses_durable_outbox_when_path_given(tmp_path):
     runtime = EngineRuntime(options=RuntimeOptions(tcp=None, outbox_path=str(tmp_path / "o.db")))
     assert isinstance(runtime.api._outbox, SqliteOutbox)
     runtime.api._outbox.close()
+
+
+# ---------------------------------------------------------------------------
+# handshake HMAC backend -> engine (audit 10 Nov, temuan 2)
+# ---------------------------------------------------------------------------
+
+KUNCI = "k" * 32
+
+
+def _engine_berkunci(outbox, kunci=KUNCI) -> tuple[EngineApi, int]:
+    port = free_port()
+    api = EngineApi(outbox=outbox, engine_version="t", auth_key=kunci,
+                    models={"detector": "d", "embedder": "unset", "embedding_version": "unset"})
+    api.listen(tcp=("127.0.0.1", port))
+    threading.Thread(target=api.serve_forever, daemon=True).start()
+    return api, port
+
+
+def test_backend_berkunci_bisa_handshake_dan_menerima_event(db):
+    api, port = _engine_berkunci(Outbox())
+    for i in range(3):
+        api.emit_event(camera_online(i))
+    received: list = []
+    client = EngineClient(port=port, shared_key=KUNCI)
+    client.set_event_handler(lambda m: received.append(m["seq"]))
+    client.connect()
+    client.start_receiver()
+    assert wait_for(lambda: received == [1, 2, 3]), received
+    client.close()
+    api.close()
+
+
+@pytest.mark.parametrize("kunci_engine, kunci_backend, pesan", [
+    (KUNCI, None, "ENGINE_SHARED_KEY"),          # engine menantang, backend tanpa kunci
+    (None, KUNCI, "tidak menantang"),            # engine tanpa kunci / palsu
+    (KUNCI, "x" * 32, "auth_failed"),            # kunci beda
+])
+def test_handshake_gagal_dengan_alasan_jelas(db, kunci_engine, kunci_backend, pesan):
+    if kunci_engine is None:
+        api, port = start_engine(Outbox())
+    else:
+        api, port = _engine_berkunci(Outbox(), kunci_engine)
+    client = EngineClient(port=port, timeout=1.0, shared_key=kunci_backend)
+    with pytest.raises(client_module.EngineConnectionError, match=pesan):
+        client.connect()
+    assert client.connected is False
+    api.close()
+
+
+def test_kunci_backend_terlalu_pendek_ditolak_saat_start(db):
+    with pytest.raises(ValueError, match="terlalu pendek"):
+        EngineClient(shared_key="pendek")
+
+
+def test_ack_melebihi_yang_dikirim_tidak_memangkas_outbox(db):
+    outbox = Outbox()
+    api = EngineApi(outbox=outbox, engine_version="t")
+    for i in range(5):
+        api.emit_event(camera_online(i))
+    api._dispatch(None, {"type": "ack", "v": 1, "through_seq": 10**9})
+    assert [e["seq"] for e in outbox.since(0)] == [1, 2, 3, 4, 5]

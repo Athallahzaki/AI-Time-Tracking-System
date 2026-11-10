@@ -406,6 +406,9 @@ class EngineApi:
             # membuang event yang belum pernah sampai.
             through = message.get("through_seq")
             if isinstance(through, int) and hasattr(self._outbox, "ack"):
+                # ACK melebihi yang pernah dikirim tidak sah: jangan buang yang belum sampai.
+                with self._connection_lock:
+                    through = min(through, self._cursor)
                 removed = self._outbox.ack(through)
                 logger.debug("outbox dipangkas sampai seq %s (%s baris)", through, removed)
             return

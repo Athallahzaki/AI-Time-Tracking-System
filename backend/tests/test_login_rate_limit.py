@@ -58,3 +58,14 @@ def test_jendela_lewat_kuota_kembali():
     limiter.failed("1.1.1.1", "u", now=1.0)
     assert limiter.retry_after("1.1.1.1", "u", now=5.0) == 6
     assert limiter.retry_after("1.1.1.1", "u", now=11.5) == 0
+
+
+def test_penyerang_dari_ip_lain_tidak_bisa_mengunci_akun():
+    """Audit 10 Nov: 5 password salah dari satu IP tidak mengunci admin di IP lain."""
+    from backend.routers.auth import _LoginLimiter
+
+    limiter = _LoginLimiter(window_seconds=300, max_per_ip=20, max_per_user=5)
+    for i in range(5):
+        limiter.failed("6.6.6.6", "admin", now=float(i))
+    assert limiter.retry_after("6.6.6.6", "admin", now=5.0) > 0
+    assert limiter.retry_after("10.0.0.7", "admin", now=5.0) == 0

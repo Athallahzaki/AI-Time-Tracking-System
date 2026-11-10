@@ -383,3 +383,107 @@ def test_enrollment_menolak_person_id_anon():
     with pytest.raises(ValidationError):
         EnrollmentRequest(person_id="ANON-20261103-1", images=[])
     assert EnrollmentRequest(person_id="4471", images=[]).person_id == "4471"
+
+
+# ---------------------------------------------------------------------------
+# galat DB sesaat tidak boleh menghilangkan atribusi (audit 10 Nov, temuan 1)
+# ---------------------------------------------------------------------------
+
+def _klien_luring(service):
+    """EngineClient tanpa socket; ACK dicatat, event langsung ke ingestion."""
+    from backend.services.engine_client import EngineClient
+
+    client = EngineClient()
+    client.connected = True
+    client.ack = []
+    client.acknowledge = client.ack.append
+    client.set_event_handler(lambda m: service.ingest(m, outbox_id=client.outbox_id))
+    return client
+
+
+def test_galat_db_sesaat_saat_identity_resolved_diputar_ulang_bukan_hilang(db, surat, monkeypatch):
+    import sqlite3
+
+    from backend.services.engine_client import EngineConnectionError
+
+    buat_karyawan("4471")
+    baris = [json.loads(x) for x in FIXTURE.read_text(encoding="utf-8").splitlines() if x.strip()]
+    resolved = next(e["seq"] for e in baris if e["type"] == "identity.resolved")
+    client = _klien_luring(EventIngestionService())
+
+    asli, sisa_gagal = database._insert_attribution, [1]
+
+    def terkunci_sekali(conn, record):
+        if sisa_gagal:
+            sisa_gagal.pop()
+            raise sqlite3.OperationalError("database is locked")
+        return asli(conn, record)
+
+    monkeypatch.setattr(database, "_insert_attribution", terkunci_sekali)
+
+    for event in baris:
+        if event["seq"] == resolved:
+            with pytest.raises(EngineConnectionError):
+                client._handle_durable(event)
+            break
+        client._handle_durable(event)
+
+    # Tidak di-dead-letter, tidak di-ACK, dan event tidak tersimpan setengah.
+    assert database.get_dead_letters() == []
+    assert resolved not in client.ack and client.last_event_seq == resolved - 1
+    assert hitung("identity_attributions") == 0
+    assert not [r for r in database.get_protocol_events(event_type="identity.resolved")]
+
+    # Sambung ulang: engine memutar ulang dari seq yang belum di-ACK.
+    for event in baris:
+        if event["seq"] >= resolved:
+            client._handle_durable(event)
+
+    akhir = datetime.fromisoformat("2025-09-19T00:20:00+00:00").timestamp()
+    milik = {i["interval_id"] for i in database.get_presence_intervals(0, akhir, "4471")}
+    assert "iv_r1-0001" in milik
+    assert database.get_presence_intervals(0, akhir, "ANON-0001") == []
+
+
+def test_replay_memulihkan_atribusi_yang_dulu_tidak_tersimpan(db):
+    """DB lama (sebelum perbaikan) bisa berisi event tanpa atribusinya: replay mengisinya."""
+    buat_karyawan("4471")
+    aliran = Aliran()
+    mulai = jkt(19, 9, 0)
+    aliran.interval("iv_a", "ANON-0007", "r1", mulai, mulai.replace(minute=5), track="tr_a")
+    event = {"v": 1, "seq": 2, "type": "identity.resolved", "anon_id": "ANON-0007",
+             "person_id": "4471", "at": iso(mulai.replace(minute=6)),
+             "ts": iso(mulai.replace(minute=6)), "reason": "face_confirmed",
+             "track_uuids": ["tr_a"], "moved_intervals": ["iv_a"]}
+    database.save_protocol_event(0.0, event["type"], event, 2, OUTBOX)  # tanpa atribusi
+    assert hitung("identity_attributions") == 0
+
+    assert aliran.service.ingest(event, outbox_id=OUTBOX) is False  # duplikat
+    assert hitung("identity_attributions") == 1
+    akhir = mulai.replace(hour=10).timestamp()
+    assert {i["interval_id"] for i in database.get_presence_intervals(0, akhir, "4471")} == {"iv_a"}
+
+
+def test_identity_changed_atribusi_memakai_riwayat_track_dan_dirinya_sendiri(db):
+    buat_karyawan("4471")
+    aliran = Aliran()
+    t0 = jkt(19, 9, 0)
+    aliran.kirim({"type": "track.started", "track_uuid": "tr_c", "camera_id": "r1",
+                  "stream_epoch": 0, "pts": 0.0, "at": iso(t0), "zone": "door"})
+    berubah = {"type": "track.identity_changed", "track_uuid": "tr_c",
+               "from_person_id": None, "to_person_id": "4471",
+               "reason": "sustained_disagreement", "disagreement_count": 3,
+               "pts": 30.0, "at": iso(t0.replace(second=30))}
+    assert aliran.kirim(berubah) is True
+    assert aliran.kirim(berubah, seq=aliran.seq) is False  # replay: tetap satu atribusi
+
+    with database.connect() as conn:
+        rows = conn.execute(
+            "SELECT attribution_source, needs_hr_review, review_reason, camera_id, "
+            "window_start, evidence FROM identity_attributions").fetchall()
+    assert len(rows) == 1
+    sumber, review, alasan, kamera, mulai, bukti = rows[0]
+    assert (sumber, review, alasan, kamera) == ("identity_changed", 0, None, "r1")
+    assert mulai == pytest.approx(t0.timestamp())
+    assert [b["type"] for b in json.loads(bukti)] == [
+        "track.started", "track.identity_changed", "track.identity_changed"]

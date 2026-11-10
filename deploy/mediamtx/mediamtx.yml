@@ -34,13 +34,13 @@ pathDefaults:
   sourceOnDemand: false
 
 paths:
-  cam01:
-     source: publisher
-#    source: rtsp://admin:admin123@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0
-#    rtspTransport: tcp
-#  cam01b:
-#    source: rtsp://admin:admin123@192.168.1.108:554/cam/realmonitor?channel=1&subtype=1
-#    rtspTransport: tcp
+  cam01a:
+#    source: publisher
+    source: rtsp://admin:admin123@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0
+    rtspTransport: tcp
+  cam01b:
+    source: rtsp://admin:admin123@192.168.1.108:554/cam/realmonitor?channel=1&subtype=1
+    rtspTransport: tcp
   cam02:
     source: publisher
   cam03:

@@ -118,8 +118,9 @@ conda activate vision-engine
 ```
 
 Engine mendengarkan **hanya di IP NetBird**, jadi tidak terbuka di Wi-Fi tempat
-laptop berada. Peringatan "TANPA autentikasi handshake" memang akan muncul: backend
-belum mendukung `ENGINE_SHARED_KEY`. Pengamannya ACL NetBird dan firewall.
+laptop berada. Isi `ENGINE_SHARED_KEY` yang sama di laptop (`$env:ENGINE_SHARED_KEY`)
+dan di stack backend; tanpa itu muncul peringatan "TANPA autentikasi handshake" dan
+pengamannya tinggal ACL NetBird dan firewall.
 
 Engine butuh ±1 menit untuk warmup, lalu menunggu `set_cameras` dari backend.
 

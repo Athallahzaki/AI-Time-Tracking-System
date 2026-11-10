@@ -1052,14 +1052,21 @@ def save_protocol_event(
     payload: Dict[str, Any],
     seq: int,
     outbox_id: str = "",
+    attribution: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """Persist event and advance the per-outbox checkpoint in one transaction.
+
+    `attribution` (bila ada) ikut transaksi yang sama: event tidak pernah
+    tersimpan tanpa atribusinya. Atribusi disisipkan juga saat event sudah
+    ada (replay), jadi atribusi yang dulu gagal tersimpan ikut terpulihkan.
 
     Returns False when `(outbox_id, seq)` was already stored.
     """
     init_database()
     with connect() as conn:
         inserted = _insert_protocol_event(conn, outbox_id, seq, timestamp, event_type, payload)
+        if attribution is not None:
+            _insert_attribution(conn, attribution)
         conn.execute(
             """
             INSERT INTO integration_state (key, value) VALUES (?, ?)
@@ -1111,6 +1118,7 @@ def get_protocol_events(
     limit: Optional[int] = None,
     since_timestamp: Optional[float] = None,
     newest_first: bool = False,
+    person_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     init_database()
     query = "SELECT outbox_id, seq, timestamp, type, payload FROM protocol_events"
@@ -1119,6 +1127,9 @@ def get_protocol_events(
     if event_type is not None:
         clauses.append("type = ?")
         params.append(event_type)
+    if person_id is not None:
+        clauses.append("person_id = ?")
+        params.append(person_id)
     if since_timestamp is not None:
         clauses.append("timestamp >= ?")
         params.append(float(since_timestamp))
@@ -1702,23 +1713,27 @@ def clear_report_dirty(run_id: int) -> None:
 def save_attribution(record: Dict[str, Any]) -> bool:
     init_database()
     with connect() as conn:
-        cursor = conn.execute("""
-            INSERT OR IGNORE INTO identity_attributions(
-                event_outbox_id, event_seq, original_person_id, employee_internal_id,
-                attribution_source, attribution_confidence, attributed_at,
-                needs_hr_review, review_reason, track_uuid, camera_id,
-                window_start, window_end, evidence
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            record.get("event_outbox_id", ""), int(record["event_seq"]),
-            record.get("original_person_id"), record.get("employee_internal_id"),
-            record.get("attribution_source", "manual"), record.get("attribution_confidence"),
-            time.time(), 1 if record.get("needs_hr_review") else 0,
-            record.get("review_reason"),
-            record.get("track_uuid"), record.get("camera_id"),
-            record.get("window_start"), record.get("window_end"),
-            json.dumps(record.get("evidence", [])),
-        ))
+        return _insert_attribution(conn, record)
+
+
+def _insert_attribution(conn: sqlite3.Connection, record: Dict[str, Any]) -> bool:
+    cursor = conn.execute("""
+        INSERT OR IGNORE INTO identity_attributions(
+            event_outbox_id, event_seq, original_person_id, employee_internal_id,
+            attribution_source, attribution_confidence, attributed_at,
+            needs_hr_review, review_reason, track_uuid, camera_id,
+            window_start, window_end, evidence
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        record.get("event_outbox_id", ""), int(record["event_seq"]),
+        record.get("original_person_id"), record.get("employee_internal_id"),
+        record.get("attribution_source", "manual"), record.get("attribution_confidence"),
+        time.time(), 1 if record.get("needs_hr_review") else 0,
+        record.get("review_reason"),
+        record.get("track_uuid"), record.get("camera_id"),
+        record.get("window_start"), record.get("window_end"),
+        json.dumps(record.get("evidence", [])),
+    ))
     return cursor.rowcount > 0
 
 

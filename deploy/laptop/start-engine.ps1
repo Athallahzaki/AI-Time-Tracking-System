@@ -6,9 +6,10 @@
   Engine mendengarkan HANYA di IP NetBird laptop, jadi tidak terbuka di Wi-Fi
   tempat laptop berada. Backend di server yang menyambung ke sini.
 
-  Backend belum mendukung kunci handshake engine (ENGINE_SHARED_KEY), jadi
-  engine jalan tanpa kunci dan akan mencetak peringatan. Pengamannya: bind ke
-  IP NetBird + ACL NetBird + firewall Windows (firewall.ps1).
+  Kunci handshake: set $env:ENGINE_SHARED_KEY sebelum menjalankan skrip ini,
+  dengan nilai yang SAMA dengan ENGINE_SHARED_KEY di stack backend. Tanpa kunci
+  engine mencetak peringatan; pengamannya tinggal bind ke IP NetBird + ACL
+  NetBird + firewall Windows (firewall.ps1).
 
   -AffinityMask opsional, mis. 0xFFFF untuk mengunci engine ke 16 thread P-core
   di laptop Intel hybrid (uji 8 Okt). Hanya berlaku bila python.exe yang

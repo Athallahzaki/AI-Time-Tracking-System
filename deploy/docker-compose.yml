@@ -45,6 +45,8 @@ services:
       ENGINE_HOST: ${ENGINE_HOST:-host.docker.internal}
       ENGINE_PORT: ${ENGINE_PORT:-8765}
       ENGINE_RECONNECT_SECONDS: ${ENGINE_RECONNECT_SECONDS:-2}
+      # Kunci handshake HMAC, sama persis dengan ENGINE_SHARED_KEY engine. Kosong = tanpa auth.
+      ENGINE_SHARED_KEY: ${ENGINE_SHARED_KEY:-}
       # Path DI DALAM container. Folder backend/configs di-mount read-only,
       # jadi ganti file/isi kamera cukup edit lalu restart, tanpa rebuild.
       CAMERAS_CONFIG: /app/backend/configs/${CAMERAS_CONFIG_FILE:-cameras.yaml}
@@ -156,6 +158,7 @@ services:
       FAKE_SCENARIO: ${FAKE_SCENARIO:-happy-path}
       FAKE_SPEED: ${FAKE_SPEED:-1}
       FAKE_LISTEN: 0.0.0.0:8765
+      ENGINE_SHARED_KEY: ${ENGINE_SHARED_KEY:-}
     networks: [app]
     logging: *default-logging
 
