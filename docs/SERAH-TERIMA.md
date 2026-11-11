@@ -1,46 +1,51 @@
 # Serah Terima
 
-Terakhir: 11 November 2026, Paket D + E (ea-r27, deploy-r1), di atas `2bda2d9`, tanpa GPU.
-Pilot tetap di `c990bc4`; paket 2–11 Nov belum diuji di 4060/5090. Temuan dan urutan kerja lengkap:
-**`docs/ANALISIS-KETAHANAN.md`** (urutan: §7; uji penerimaan: §7a).
+Terakhir: 11 November 2026, Paket F + G + H, di atas `da5b134`, tanpa GPU. Urutan A–H di
+`docs/ANALISIS-KETAHANAN.md` §7 selesai dibangun. Pilot tetap di `c990bc4`; **paket 2–11 Nov belum pernah diuji
+di 4060/5090**, dan itu sekarang pekerjaan berikutnya, bukan kode baru.
 
-## Selesai (engine 851 dgn 8 dilewati, backend 159, kontrak 151; tanpa perubahan kontrak)
+## Selesai (engine 869 dgn 8 dilewati, backend 172, kontrak 166, build frontend lulus)
 
-- 11 Nov Paket D: biaya sapuan ReID per wajah 101 ms → 1 ms pada 3.200 track; keputusan identik.
-- 11 Nov Paket E: `deploy/engine/run-with-watchdog.sh` (engine macet dimatikan supaya Docker menyalakan ulang).
-- 11 Nov Paket A/B/C (`2bda2d9`): batas baris kanal; sesi dan akses; matriks akses semua rute.
-- 11 Nov (`d8d796c`): uji penerimaan JAT-02/05/07/12/14. 10 Nov (`6751ae2`): audit koreksi, CI.
+- Paket F: panel debug Fase 1 (menu Debug: kesehatan sebagai laju, log backend + browser, rekaman CSV).
+- Paket G: pemantau kondisi gambar (IR/gelap menahan ReID; buram/beku dilaporkan).
+- Paket H: debug Fase 2 (kontrak `debug.*` terpisah, log engine, crop tubuh dengan sesi debug + audit).
+- Sebelumnya hari ini: A–E (`da5b134`), uji penerimaan JAT (`d8d796c`).
 
-## Belum
+## Saklar baru (semua default mati = perilaku lama)
 
-- **[pasang Paket E]** watchdog belum dipakai: compose engine server 5090 tidak ada di repo. Ganti `command`
-  engine menjadi `["sh", "deploy/engine/run-with-watchdog.sh", <argumen engine>]` + `restart: unless-stopped`.
-- **[insiden]** `cam01b` 404 sejak ±04:00 11 Nov: hop yang putus belum dikonfirmasi (ANALISIS §1).
-- **[data, PERTAMA]** tabel waktu tempuh kosong + default 30 dtk = pindah ruangan < 30 dtk selalu ANON baru.
-- **[uji penerimaan, bukan kode]** MON-04 config, MON-07 kacamata/IR, JAT-04 tafsir, JAT-10 risiko `visit_id`.
-- Paket F (debug Fase 1), G (kondisi gambar), H (debug Fase 2, kontrak).
-- Temuan 3 (token di `localStorage`), 4 (kunci kanal), 8 (timing login); autentikasi MediaMTX; `pip-audit`/`npm audit`.
+| Saklar | Di mana | Menyalakan |
+|---|---|---|
+| `DEBUG_PANEL_ENABLED=1` | env backend | menu Debug + rute `/api/debug/*` |
+| `debug.enabled: true` | config engine | cache crop di memori + log engine ke panel |
+| `image_condition.enabled: true` | config engine | pemantau kondisi gambar |
+| izin "mode debug" per akun admin | Manajemen Pengguna | boleh membuka crop |
 
-## Perubahan perilaku saat deploy (dari Paket B)
+## Keputusan
 
-`BACKEND_API_KEY` yang sudah terisi kini benar-benar diperiksa di `/api/*`; ganti/reset password mencabut sesi
-lain; akun berpassword sementara mendapat 403 sampai password diganti.
-
-## Keputusan yang perlu disetujui
-
-- Engine menolak start tanpa `ENGINE_SHARED_KEY` di alamat non-loopback; autentikasi MediaMTX; kontrak `debug.*`.
-- Tafsir JAT-04; ekspektasi MON-07 kacamata; klien diberi tahu waktu ANON tidak ditagih.
+- **Disetujui Zena 11 Nov:** kontrak debug sementara `debug.*` (Paket H). **Kedaluwarsa 28 Feb 2027**: tes kontrak
+  akan gagal sesudahnya; hapus atau angkat jadi kontrak resmi.
+- **Perlu disetujui:** siapa yang diberi izin mode debug dan apakah klien tahu fitur crop ada; engine menolak start
+  tanpa `ENGINE_SHARED_KEY` di alamat non-loopback; autentikasi MediaMTX; tafsir JAT-04; ekspektasi MON-07 kacamata.
 - Dari 3–10 Nov: kontrak `set_tuning`; ea-r17/ea-r21; kuota login per (username, IP).
 - Batas dari Zena: Traefik, Cloudflare, ACL NetBird tidak diubah.
 
+## Belum
+
+- **[UJI DI GPU, PERTAMA]** semua paket 2–11 Nov di 4060 atas rekaman lokasi, banding `c990bc4`, baru ke pilot.
+- **[kalibrasi]** ambang `image_condition` dari rekaman siang/redup/IR (baca angkanya di menu Debug); tabel waktu
+  tempuh; `reid.match_threshold`.
+- **[pasang]** watchdog Docker (Paket E) di compose engine server 5090.
+- **[insiden]** `cam01b` 404 sejak 11 Nov ±04:00: hop yang putus belum dikonfirmasi (ANALISIS §1).
+- Temuan 3, 4, 8 (ANALISIS §2.2); MediaMTX tanpa auth; `pip-audit`/`npm audit`; uji penerimaan non-kode (§7a).
+
 ## Uji manual (urut)
 
-1. **ReID di GPU (Paket D):** jalankan rekaman yang sama sebelum dan sesudah; jumlah ANON, `cocok galeri`, dan
-   `selesai` di log engine harus sama. Keputusan tidak boleh berubah, hanya lebih cepat.
-2. **Watchdog di Docker (Paket E):** pasang di compose, lalu `docker pause` TIDAK menguji ini (seluruh container
-   beku); uji dengan `docker exec <engine> kill -STOP <pid python>` → container restart dalam ±65 dtk.
-3. nginx setelah redeploy frontend: video WHEP/HLS tampil; `/docs` menampilkan dashboard, bukan Swagger.
-4. Akun baru: login → dipaksa ganti password → dashboard terbuka tanpa login ulang; ganti password di satu
-   browser melempar browser lain ke halaman login.
-5. Uji penerimaan JAT, insiden, MediaMTX: CHANGELOG 11 Nov dan ANALISIS §1, §2.1, §7a.
+1. Panel: `DEBUG_PANEL_ENABLED=1`, restart backend → menu Debug tampil; matikan satu kamera → status dan alasan
+   muncul dalam ±30 dtk; tombol Rekam → CSV terbaca `scripts/summarize_gladi.py`.
+2. Kondisi gambar: nyalakan di config engine, tutup lensa / matikan lampu / paksa IR → kolom "Gambar" berubah
+   setelah ±3 dtk; saat IR, `gate_kondisi_gambar` naik dan ANON baru tidak bertambah karena embedding IR.
+3. Debug Fase 2: `debug.enabled: true` di engine + beri izin mode debug ke satu admin → buka mode dengan password,
+   isi alasan, lihat crop ANON; cek `settings_audit` (Pengaturan → riwayat) mencatatnya; setelah 30 menit tertutup.
+4. Versi campuran: backend baru + engine pilot lama → panel menulis "Engine tidak melayani debug: tidak dikenal".
+5. Dari paket sebelumnya: ReID di GPU (Paket D), watchdog (E), nginx + sesi (B), uji penerimaan JAT, insiden.
 6. Redeploy: backend dulu, lalu frontend; `ENGINE_SHARED_KEY` kosong sampai engine ikut; GitOps Portainer mati.

@@ -44,6 +44,8 @@ class UserUpdateRequest(BaseModel):
     role: Optional[Literal["admin", "viewer"]] = None
     enabled: Optional[bool] = None
     employee_internal_id: Optional[int] = Field(default=None, ge=1)
+    # Izin mode debug (melihat crop orang). Per orang, bukan per peran.
+    can_debug: Optional[bool] = None
 
 
 class ChangePasswordRequest(BaseModel):

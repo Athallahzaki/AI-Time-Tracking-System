@@ -64,6 +64,7 @@ class EngineClient:
         self._view_handler: Optional[Callable[[Dict[str, Any]], Any]] = None
         self._replay_gap_handler: Optional[Callable[[Dict[str, Any]], Any]] = None
         self._control_handler: Optional[Callable[[Dict[str, Any]], Any]] = None
+        self._debug_handler: Optional[Callable[[Dict[str, Any]], Any]] = None
         self._outbox_changed_handler: Optional[Callable[[str, str], Any]] = None
         self.connected = False
 
@@ -86,6 +87,9 @@ class EngineClient:
     # ------------------------------------------------------------------
     def set_control_handler(self, handler: Callable[[Dict[str, Any]], Any]) -> None:
         self._control_handler = handler
+
+    def set_debug_handler(self, handler: Callable[[Dict[str, Any]], Any]) -> None:
+        self._debug_handler = handler
 
     def set_event_handler(self, handler: Callable[[Dict[str, Any]], Any]) -> None:
         self._event_handler = handler
@@ -239,6 +243,18 @@ class EngineClient:
     def handle_message(self, message: Dict[str, Any]) -> None:
         message_type = message.get("type")
         channel = message.get("channel")
+
+        # Kontrak debug sementara: bukan bagian skema produksi, jadi ditangani sebelum
+        # validasi. Tanpa penangan (panel mati), pesan debug dibuang diam-diam.
+        is_debug = (isinstance(message_type, str) and message_type.startswith("debug.")) or (
+            message_type == "ack" and str(message.get("in_reply_to", "")).startswith("debug."))
+        if is_debug:
+            if self._debug_handler is not None:
+                try:
+                    self._debug_handler(message)
+                except Exception:  # noqa: BLE001 — debug tidak boleh memutus aliran event
+                    logger.exception("Debug message handling failed")
+            return
 
         if message_type == "replay_gap":
             validated = protocol_adapter.validate(message)

@@ -492,6 +492,26 @@ class ReidSettings:
 
 
 @dataclass(frozen=True)
+class DebugConfig:
+    """Kontrak debug sementara (runtime/debug_bridge.py). Default mati.
+
+    Menyala: engine menyimpan crop tubuh terakhir per track DI MEMORI dan mau
+    mengirimnya (serta log WARNING) ke backend yang memintanya lewat `debug.subscribe`.
+    Crop adalah data biometrik: nyalakan hanya selama pemecahan masalah.
+    """
+
+    enabled: bool = False
+    crop_cache_tracks: int = 200
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.enabled, bool):
+            raise ValueError("debug.enabled harus true/false")
+        size = self.crop_cache_tracks
+        if not isinstance(size, int) or isinstance(size, bool) or not 1 <= size <= 2000:
+            raise ValueError(f"debug.crop_cache_tracks={size!r} harus bilangan bulat 1..2000")
+
+
+@dataclass(frozen=True)
 class ImageConditionConfig:
     """Pemantau kondisi gambar (runtime/image_condition.py). Default mati = perilaku lama.
 
@@ -700,6 +720,7 @@ class EngineConfig:
     reid: ReidSettings = field(default_factory=ReidSettings)
     analysis_trigger: AnalysisTriggerConfig = field(default_factory=AnalysisTriggerConfig)
     image_condition: ImageConditionConfig = field(default_factory=ImageConditionConfig)
+    debug: DebugConfig = field(default_factory=DebugConfig)
 
     def effective_fps(self, source_fps: float) -> float:
         """

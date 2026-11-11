@@ -53,6 +53,59 @@ export async function downloadHealthCsv(from: number, to: number): Promise<Blob>
   return res.blob();
 }
 
+// ---- Fase 2: mode debug (crop tubuh = data biometrik) ----
+
+export interface DebugSession {
+  can_debug: boolean;
+  active_until: number | null;
+  engine_supported: boolean | null;
+  engine_reason: string | null;
+}
+
+export interface DebugCropEntry {
+  track_uuid: string;
+  camera_id: string;
+  at: number;
+  person_id: string | null;
+  identity_source: string | null;
+}
+
+export interface DebugCrop {
+  found: boolean;
+  track_uuid: string;
+  camera_id?: string;
+  at?: number;
+  width?: number;
+  height?: number;
+  jpeg_b64?: string;
+}
+
+export function getDebugSession(): Promise<DebugSession> {
+  return request<DebugSession>({ domain: DOMAIN, path: '/api/debug/session' });
+}
+
+export function openDebugSession(password: string): Promise<{ active_until: number }> {
+  return request({ domain: DOMAIN, method: 'POST', path: '/api/debug/session', body: { password } });
+}
+
+export async function closeDebugSession(): Promise<void> {
+  await request({ domain: DOMAIN, method: 'DELETE', path: '/api/debug/session' });
+}
+
+export async function listDebugCrops(): Promise<DebugCropEntry[]> {
+  const res = await request<{ crops: DebugCropEntry[] }>({ domain: DOMAIN, path: '/api/debug/crops' });
+  return res.crops || [];
+}
+
+export function viewDebugCrop(trackUuid: string, reason: string): Promise<DebugCrop> {
+  return request<DebugCrop>({
+    domain: DOMAIN,
+    method: 'POST',
+    path: '/api/debug/crop',
+    body: { track_uuid: trackUuid, reason },
+  });
+}
+
 let reported = 0;
 const MAX_REPORTS_PER_PAGE = 20; // galat berulang tidak boleh membanjiri backend
 

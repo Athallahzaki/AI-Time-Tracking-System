@@ -118,6 +118,10 @@ const confirmText = computed(() => {
     return u.role === 'admin'
       ? { title: `Turunkan ${u.username} menjadi viewer?`, description: 'Viewer hanya melihat notifikasi dan pemakaian miliknya sendiri.', label: 'Jadikan viewer' }
       : { title: `Jadikan ${u.username} admin?`, description: 'Admin (HR) punya akses penuh: monitoring, report, data karyawan, pengguna, dan pengaturan.', label: 'Jadikan admin' };
+  if (action === 'debug')
+    return u.can_debug
+      ? { title: `Cabut izin mode debug ${u.username}?`, description: 'Ia tidak lagi bisa membuka mode debug dan melihat crop orang.', label: 'Cabut izin' }
+      : { title: `Beri izin mode debug ke ${u.username}?`, description: 'Mode debug memperlihatkan potongan gambar orang yang dinilai sistem (data biometrik). Setiap pembukaan dan setiap gambar yang dilihat tercatat atas namanya.', label: 'Beri izin' };
   return {
     title: `Reset password ${u.username}?`,
     description: 'Password lama langsung tidak berlaku. Password sementara baru wajib diganti saat login.',
@@ -140,7 +144,12 @@ async function runConfirm() {
       credentials.value = { open: true, username: u.username, password: res.temporary_password };
       return;
     }
-    const patch = action === 'toggle' ? { enabled: !u.enabled } : { role: u.role === 'admin' ? 'viewer' : 'admin' };
+    const patch =
+      action === 'toggle'
+        ? { enabled: !u.enabled }
+        : action === 'debug'
+          ? { can_debug: !u.can_debug }
+          : { role: u.role === 'admin' ? 'viewer' : 'admin' };
     const updated = await updateUser(u.id, patch);
     const idx = users.value.findIndex((x) => x.id === u.id);
     if (idx >= 0) users.value[idx] = { ...users.value[idx], ...updated };
@@ -248,6 +257,10 @@ async function runConfirm() {
                       <DropdownMenuItem @select="ask(u, 'reset')">
                         <KeyRound />
                         Reset password
+                      </DropdownMenuItem>
+                      <DropdownMenuItem v-if="u.role === 'admin'" @select="ask(u, 'debug')">
+                        <UserCog />
+                        {{ u.can_debug ? 'Cabut izin mode debug' : 'Beri izin mode debug' }}
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem

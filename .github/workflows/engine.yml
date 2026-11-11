@@ -20,7 +20,7 @@ jobs:
       # the benchmark has to be runnable without a GPU or model weights
       # (ARCHITECTURE.md §13.9), or it stops being run at all.
       - name: Install (mock path only)
-        run: pip install numpy "opencv-python-headless>=4.8" "PyYAML>=6.0" pytest
+        run: pip install numpy "opencv-python-headless>=4.8" "PyYAML>=6.0" "jsonschema>=4.18" pytest
 
       - name: No company policy in engine/
         run: python contracts/tools/policy_grep.py engine/
@@ -125,7 +125,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install (ingest path)
-        run: pip install numpy "opencv-python-headless>=4.8" "PyYAML>=6.0" pytest av
+        run: pip install numpy "opencv-python-headless>=4.8" "PyYAML>=6.0" "jsonschema>=4.18" pytest av
 
       # The clip is generated, not committed: `*.mp4` is gitignored because
       # recordings in this project are biometric data about colleagues (§7.4),

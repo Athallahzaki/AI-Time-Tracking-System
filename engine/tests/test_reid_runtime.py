@@ -678,3 +678,15 @@ def test_penilaian_ulang_ujung_ke_ujung_dua_anon_jadi_satu_lalu_wajah_menyelesai
         assert not validator.validate_message(message, expected_channel="events"), message
     report = ConformanceChecker().check(messages)
     assert report.ok, report.errors
+
+
+def test_crop_yang_di_embed_sampai_ke_penerima_debug_bila_dipasang():
+    """Paket H: `ReidRuntime.debug_sink` (diisi hanya bila debug.enabled) menerima crop persis yang di-embed."""
+    runtime, _, emit = _runtime()
+    assert runtime.debug_sink is None                       # default: tidak ada yang disimpan
+    seen = []
+    runtime.debug_sink = lambda camera_id, uuid, at, crop: seen.append((camera_id, uuid, crop.shape))
+    r1 = _Kamera("r1", runtime, emit)
+    r1.masuk("tr_r1-a", 1, 3, 0.0)
+    _jalan([r1], 0.0, 1.0, runtime)
+    assert seen == [("r1", "tr_r1-a", (200, 60, 3))]

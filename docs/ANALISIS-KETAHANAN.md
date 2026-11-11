@@ -256,6 +256,12 @@ menyalakan engine sendiri), `face_bench.py` dan `detector_profile.py` (merebut G
 
 ### Fase 2 — kontrak debug (perubahan kontrak, perlu persetujuan)
 
+> Dibangun 11 Nov (Paket H) dengan dua penyederhanaan dari rancangan di bawah, keduanya tetap memenuhi tujuannya:
+> (1) tidak ada kanal `debug` tersendiri: `debug.log` menumpang antrean view (best-effort), permintaan/jawaban crop
+> menumpang jalur kontrol; tidak satu pun pernah masuk kanal `events`/outbox. (2) negosiasi tidak lewat `hello`:
+> backend mengirim `debug.subscribe` tiap tersambung; engine lama menjawab ack ditolak ("tidak dikenal"), engine baru
+> tanpa `debug.enabled` menolak dengan alasannya, dan engine tidak mengirim apa pun sebelum dilanggan.
+
 Isi: log WARNING engine diteruskan; penampil crop ANON (fondasi: cache crop `enroll_from_track`).
 
 Bentuk kontrak debug yang diusulkan:
@@ -282,9 +288,9 @@ kode debug bersama (tidak bisa diatribusikan, tidak bisa dicabut per orang).
 | C | QA | **Selesai 11 Nov** (be-r11): matriks akses semua rute + fuzz kanal sebagai tes CI permanen | tidak |
 | D | EA | **Selesai 11 Nov** (ea-r27): biaya `_sweep_groups` + tes biaya tidak tumbuh | tidak |
 | E | EA/deploy | **Skrip selesai 11 Nov** (`deploy/engine/run-with-watchdog.sh`); BELUM dipasang: compose engine server 5090 tidak ada di repo | tidak |
-| F | BE+FE | Fase 1 dashboard debug | tidak |
-| G | EA | Pemantau kondisi gambar | tidak |
-| H | EA+BE+FE | Fase 2 dashboard debug | **ya** |
+| F | BE+FE | **Selesai 11 Nov** (be-r12 + fe-r6): Fase 1 dashboard debug | tidak |
+| G | EA | **Selesai 11 Nov** (ea-r28 + fe-r7): pemantau kondisi gambar; ambang belum dikalibrasi | tidak |
+| H | EA+BE+FE | **Selesai 11 Nov** (ea-r29 + be-r13 + fe-r8): Fase 2 dashboard debug, kontrak `debug.*` terpisah (disetujui Zena 11 Nov; kedaluwarsa 28 Feb 2027) | **ya** |
 
 Akurasi berjalan paralel dan dibuka oleh satu langkah: **set crop berlabel**. Ditunda: P9,
 NVDEC, TensorRT, P7 (tunggu jenis disk), enkripsi referensi wajah, token keluar dari

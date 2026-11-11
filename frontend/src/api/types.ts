@@ -57,6 +57,8 @@ export interface AppUser {
   employee_uid?: string | null;
   employee_id?: string | null;
   must_change_password?: boolean;
+  /** Izin membuka mode debug (melihat crop orang). Per orang, bukan per peran. */
+  can_debug?: boolean;
 }
 
 export type DayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';

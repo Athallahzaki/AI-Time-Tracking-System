@@ -65,7 +65,7 @@ export async function createUser(input: CreateUserInput): Promise<AppUser> {
 
 export async function updateUser(
   id: number,
-  patch: { role?: 'admin' | 'viewer'; enabled?: boolean },
+  patch: { role?: 'admin' | 'viewer'; enabled?: boolean; can_debug?: boolean },
 ): Promise<AppUser> {
   const res = await request<{ user: AppUser }>({
     domain: DOMAIN,
@@ -84,6 +84,7 @@ export async function updateUser(
       }
       if (patch.role) user.role = patch.role;
       if (patch.enabled !== undefined) user.enabled = patch.enabled;
+      if (patch.can_debug !== undefined) user.can_debug = patch.can_debug;
       save();
       return { user: clone(user) };
     },

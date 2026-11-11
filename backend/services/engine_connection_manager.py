@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from backend.core.config import settings
 from backend.core.database import get_app_setting, get_enrollments, set_app_setting
 from backend.services.camera_state import set_cameras_message
+from backend.services.debug_service import debug_panel_enabled, engine_debug
 from backend.services.engine_client import (
     EngineClient,
     EngineConnectionError,
@@ -90,6 +91,9 @@ class EngineConnectionManager:
         self.sync_roster()
         # Engine yang restart mulai dari config file-nya; kalibrasi admin dikirim ulang.
         self.sync_tuning()
+        if debug_panel_enabled():
+            # Langganan debug berlaku per koneksi; engine lama menjawab ack ditolak dan itu aman.
+            engine_debug.subscribe(self.client)
 
     def _run(self) -> None:
         while not self._stop.is_set():

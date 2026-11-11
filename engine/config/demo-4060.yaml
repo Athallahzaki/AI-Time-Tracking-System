@@ -202,3 +202,10 @@ tracker:
 #   dark_max_brightness: 30
 #   blur_max_sharpness: 8
 #   frozen_max_change: 0
+
+# Kontrak debug sementara (runtime/debug_bridge.py). Default mati. Menyala: crop tubuh terakhir
+# per track disimpan DI MEMORI engine (data biometrik) dan bisa diminta backend yang panel
+# debug-nya menyala; log WARNING engine ikut diteruskan. Matikan setelah selesai.
+# debug:
+#   enabled: true
+#   crop_cache_tracks: 200

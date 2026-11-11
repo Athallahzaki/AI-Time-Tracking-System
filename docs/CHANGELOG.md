@@ -7,6 +7,47 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-11-11 · paket ea-r29 + be-r13 + fe-r8 (Paket H) — Debug Fase 2: kontrak debug sementara, log engine, crop tubuh
+
+**Perubahan kontrak, disetujui Zena 11 Nov ("lanjutkan sampai H").** Kontrak produksi
+(`engine_protocol.schema.json`) dan fixture TIDAK berubah; yang baru adalah skema terpisah
+`contracts/schema/debug.schema.json`. Dua saklar, keduanya default mati: `DEBUG_PANEL_ENABLED` (backend) dan
+`debug.enabled` (config engine). Salah satu mati = tidak ada pesan debug yang mengalir.
+
+- **Kontrak `debug.*`** (6 pesan): `debug.subscribe`, `debug.log`, `debug.crop_list`/`debug.crops`,
+  `debug.crop_request`/`debug.crop`. Tidak pernah durabel (jalur kontrol dan antrean view saja). Tes menjaga:
+  tidak ada `debug.*` di kontrak produksi maupun fixture, dan **tanggal kedaluwarsa 28 Feb 2027**
+  (`test_kontrak_debug_belum_kedaluwarsa`): setelah itu hapus atau angkat menjadi kontrak resmi.
+- **Engine** (`runtime/debug_bridge.py`): cache LRU crop tubuh terakhir yang di-embed per track, di memori saja
+  (`crop_cache_tracks`, default 200); daftar dan JPEG atas permintaan; log WARNING ke atas diteruskan. Langganan
+  berlaku per koneksi (`EngineApi.generation`), jadi backend lain yang tersambung tidak mewarisinya. Engine mencetak
+  peringatan saat start bila `debug.enabled`.
+- **Backend**: pesan `debug.*` ditangani sebelum validasi kontrak produksi dan dibuang bila panel mati.
+  `GET/POST/DELETE /api/debug/session`: mode debug dibuka dengan password SENDIRI (bukan kode bersama), butuh izin
+  per orang `users.can_debug`, mati sendiri 30 menit, melekat pada sesi login itu, 5 password salah = terkunci
+  5 menit. `GET /api/debug/crops` dan `POST /api/debug/crop` (alasan wajib ≥ 5 huruf) butuh mode debug terbuka.
+  Audit di `settings_audit`: buka/tutup/password salah, perubahan `can_debug`, dan setiap crop yang diminta
+  (dicatat SEBELUM diminta). Crop tidak disimpan di backend; jawaban `Cache-Control: no-store`.
+- **Frontend**: bagian "Crop tubuh yang dinilai ReID" di halaman Debug; filter log "Engine"; menu "Beri/Cabut izin
+  mode debug" di Manajemen Pengguna (akun admin).
+- `engine.yml` memasang `jsonschema` (tes engine memvalidasi pesan debug terhadap skemanya).
+- Menyimpang dari rancangan awal (ANALISIS §6): tanpa kanal `debug` tersendiri dan tanpa negosiasi di `hello`;
+  lihat catatan di sana.
+
+File: `contracts/schema/debug.schema.json`, `contracts/tests/test_debug_contract.py`,
+`engine/runtime/{debug_bridge,service}.py`, `engine/api/server.py`, `engine/config/{schema,loader}.py`,
+`engine/config/demo-4060.yaml`, `engine/pipeline/{reid_tap,reid_coordinator}.py`,
+`engine/tests/{test_debug_bridge,test_reid_runtime}.py`, `backend/services/{debug_service,engine_client,
+engine_connection_manager}.py`, `backend/routers/{debug,auth}.py`, `backend/core/database.py`,
+`backend/schemas/auth.py`, `backend/main.py`, `backend/tests/test_debug_panel.py`,
+`frontend/src/{api/debug.ts,api/users.ts,api/types.ts,views/DebugView.vue,views/UsersView.vue}`,
+`.github/workflows/engine.yml`.
+
+Uji: engine 869 (8 dilewati), backend 172, kontrak 166, `npm run build`. Kontrak debug dijalankan terhadap proses
+engine sungguhan (mock): langganan, daftar, crop tidak ada, dan `debug.log` semuanya sah terhadap skema; engine
+tanpa `debug.enabled` menolak dengan alasan. Alur UI (password salah, buka, alasan wajib, lihat, tutup, audit)
+diuji di browser dengan engine tiruan. **Belum diuji:** crop dari ReID sungguhan di GPU.
+
 ## 2026-11-11 · paket ea-r28 + fe-r7 (Paket G) — Pemantau kondisi gambar (IR, gelap, buram, beku)
 
 Tanpa model dan tanpa perubahan kontrak. **Default mati** (`image_condition.enabled: false`): perilaku lama.

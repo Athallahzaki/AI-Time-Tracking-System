@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ai-time-tracking/debug.schema.json",
+  "title": "Kontrak debug SEMENTARA (Paket H, 11 Nov 2026)",
+  "description": "Pesan `debug.*` antara backend dan engine. TERPISAH dari engine_protocol.schema.json dan bukan bagian kontrak produksi: tidak pernah durabel, tidak pernah masuk outbox, tidak pernah ada di fixture. Engine tidak mengirim satu pun pesan ini sebelum backend mengirim `debug.subscribe` DAN engine dijalankan dengan `debug.enabled: true`; engine lama menjawab `debug.subscribe` dengan ack ditolak ('tidak dikenal'), dan itulah negosiasinya. Berlaku sampai tanggal di contracts/tests/test_debug_contract.py; setelah itu harus dihapus atau diangkat menjadi kontrak resmi.",
+  "oneOf": [
+    {"$ref": "#/$defs/debug_subscribe"},
+    {"$ref": "#/$defs/debug_log"},
+    {"$ref": "#/$defs/debug_crop_list"},
+    {"$ref": "#/$defs/debug_crops"},
+    {"$ref": "#/$defs/debug_crop_request"},
+    {"$ref": "#/$defs/debug_crop"}
+  ],
+  "$defs": {
+    "_envelope": {
+      "type": "object",
+      "required": ["type", "v", "ts"],
+      "properties": {
+        "v": {"const": 1},
+        "ts": {"type": "string", "minLength": 20}
+      }
+    },
+    "request_id": {"type": "string", "minLength": 1, "maxLength": 64},
+    "track_uuid": {"type": "string", "pattern": "^tr_[A-Za-z0-9_-]{1,64}$"},
+    "debug_subscribe": {
+      "x-channel": "control",
+      "x-direction": "backend->engine",
+      "description": "Nyalakan/matikan pengiriman debug untuk KONEKSI ini. Dijawab `ack` biasa. Koneksi baru selalu mulai dari mati.",
+      "allOf": [{"$ref": "#/$defs/_envelope"}],
+      "required": ["enabled"],
+      "properties": {
+        "type": {"const": "debug.subscribe"},
+        "enabled": {"type": "boolean"}
+      }
+    },
+    "debug_log": {
+      "x-channel": "view",
+      "x-direction": "engine->backend",
+      "description": "Satu baris log engine tingkat WARNING ke atas. Best-effort lewat antrean view: boleh hilang.",
+      "allOf": [{"$ref": "#/$defs/_envelope"}],
+      "required": ["level", "logger", "message"],
+      "properties": {
+        "type": {"const": "debug.log"},
+        "channel": {"const": "view"},
+        "level": {"enum": ["WARNING", "ERROR", "CRITICAL"]},
+        "logger": {"type": "string", "maxLength": 200},
+        "message": {"type": "string", "maxLength": 2000}
+      }
+    },
+    "debug_crop_list": {
+      "x-channel": "control",
+      "x-direction": "backend->engine",
+      "description": "Minta daftar crop tubuh yang masih ada di cache memori engine (tanpa gambar).",
+      "allOf": [{"$ref": "#/$defs/_envelope"}],
+      "required": ["request_id"],
+      "properties": {
+        "type": {"const": "debug.crop_list"},
+        "request_id": {"$ref": "#/$defs/request_id"}
+      }
+    },
+    "debug_crops": {
+      "x-channel": "control",
+      "x-direction": "engine->backend",
+      "allOf": [{"$ref": "#/$defs/_envelope"}],
+      "required": ["request_id", "crops"],
+      "properties": {
+        "type": {"const": "debug.crops"},
+        "request_id": {"$ref": "#/$defs/request_id"},
+        "crops": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "type": "object",
+            "required": ["track_uuid", "camera_id", "at"],
+            "properties": {
+              "track_uuid": {"$ref": "#/$defs/track_uuid"},
+              "camera_id": {"type": "string", "minLength": 1},
+              "at": {"type": "number", "description": "epoch detik saat crop diambil"},
+              "person_id": {"type": ["string", "null"], "description": "label ReID/wajah saat ini; ANON-xxxx atau ID karyawan"},
+              "identity_source": {"type": ["string", "null"]}
+            }
+          }
+        }
+      }
+    },
+    "debug_crop_request": {
+      "x-channel": "control",
+      "x-direction": "backend->engine",
+      "description": "Minta gambar crop terakhir yang di-embed untuk satu track. Data biometrik: backend mewajibkan sesi debug + alasan + audit sebelum mengirim ini.",
+      "allOf": [{"$ref": "#/$defs/_envelope"}],
+      "required": ["request_id", "track_uuid"],
+      "properties": {
+        "type": {"const": "debug.crop_request"},
+        "request_id": {"$ref": "#/$defs/request_id"},
+        "track_uuid": {"$ref": "#/$defs/track_uuid"}
+      }
+    },
+    "debug_crop": {
+      "x-channel": "control",
+      "x-direction": "engine->backend",
+      "allOf": [{"$ref": "#/$defs/_envelope"}],
+      "required": ["request_id", "track_uuid", "found"],
+      "properties": {
+        "type": {"const": "debug.crop"},
+        "request_id": {"$ref": "#/$defs/request_id"},
+        "track_uuid": {"$ref": "#/$defs/track_uuid"},
+        "found": {"type": "boolean"},
+        "camera_id": {"type": "string"},
+        "at": {"type": "number"},
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1},
+        "jpeg_b64": {"type": "string", "maxLength": 2000000}
+      },
+      "if": {"properties": {"found": {"const": true}}},
+      "then": {"required": ["camera_id", "at", "width", "height", "jpeg_b64"]}
+    }
+  }
+}

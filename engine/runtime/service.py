@@ -284,6 +284,25 @@ class EngineRuntime:
         self.api.on_control("forget_person", self._on_forget_person)
         self.api.on_control("set_tuning", self._on_set_tuning)
 
+        # Kontrak debug sementara (contracts/schema/debug.schema.json). Selalu terdaftar
+        # supaya backend mendapat alasan penolakan yang jelas; mati kecuali debug.enabled.
+        from .debug_bridge import DebugBridge
+
+        def _label_of(track_uuid: str):
+            core = self._reid.coordinator.core if self._reid is not None else None
+            return core.identity_of(track_uuid) if core is not None else None
+
+        self._debug = DebugBridge(self.api, self.config.debug.enabled,
+                                  self.config.debug.crop_cache_tracks, label_of=_label_of)
+        if self.config.debug.enabled:
+            logger.warning("debug.enabled: crop tubuh (data biometrik) disimpan di memori dan bisa "
+                           "diminta backend. Matikan setelah pemecahan masalah selesai.")
+            if self._reid is not None:
+                self._reid.debug_sink = self._debug.remember
+        self.api.on_control("debug.subscribe", self._debug.on_subscribe)
+        self.api.on_control("debug.crop_list", self._debug.on_crop_list)
+        self.api.on_control("debug.crop_request", self._debug.on_crop_request)
+
     # -- emission ---------------------------------------------------------
 
     def emit_event(self, message: Dict[str, Any]) -> Dict[str, Any]:

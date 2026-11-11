@@ -167,6 +167,11 @@ class EngineApi:
             "latest_seq": float(self._outbox.latest_seq),
         }
 
+    @property
+    def generation(self) -> int:
+        """Bertambah tiap koneksi backend baru; untuk status yang hanya berlaku per koneksi."""
+        return self._generation
+
     # ---------------- control ----------------
 
     def on_control(self, message_type: str, handler: ControlHandler) -> "EngineApi":

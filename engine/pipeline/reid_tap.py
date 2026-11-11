@@ -104,6 +104,8 @@ class ReidCameraTap:
         self.change_gate: Any = None
         # False saat gambar tidak layak di-embed (mode IR / terlalu gelap; runtime/image_condition.py).
         self.embed_allowed = True
+        # Kontrak debug sementara: penerima crop yang di-embed (runtime/debug_bridge.py); None = mati.
+        self.debug_sink: Any = None
         self._pts = 0.0
 
     # -- dibaca camera.py -------------------------------------------------------
@@ -188,6 +190,8 @@ class ReidCameraTap:
             return
         x1, y1, x2, y2 = quality.box
         crop = image[y1:y2, x1:x2].copy()
+        if self.debug_sink is not None:
+            self.debug_sink(self.camera_id, uuid, at, crop)
         if self._submit(self.camera_id, state.track_id, uuid, at, crop,
                         face_person_id=face, zone=None):
             self.metrics.submitted += 1

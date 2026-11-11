@@ -133,6 +133,7 @@ app.include_router(me.router)
 # Panel debug admin: default mati. Mati = rutenya tidak terdaftar sama sekali.
 if debug.debug_panel_enabled():
     debug.install_log_capture()
+    engine_client.set_debug_handler(debug.engine_debug.handle)
     app.include_router(debug.router)
 
 @app.get("/")

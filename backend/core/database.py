@@ -124,6 +124,9 @@ def _migrate_users_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN updated_at REAL")
     if "must_change_password" not in columns:
         conn.execute("ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0")
+    # Paket H: izin mode debug per orang (melihat crop = data biometrik). Bukan per peran.
+    if "can_debug" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN can_debug INTEGER NOT NULL DEFAULT 0")
     conn.execute("UPDATE users SET updated_at = created_at WHERE updated_at IS NULL")
 
 def init_database() -> None:
@@ -1311,7 +1314,8 @@ def get_users() -> List[Dict[str, Any]]:
     with connect() as conn:
         rows = conn.execute(
             """
-            SELECT id, username, role, enabled, employee_internal_id, must_change_password, created_at, updated_at
+            SELECT id, username, role, enabled, employee_internal_id, must_change_password, created_at, updated_at,
+                   can_debug
             FROM users
             ORDER BY username
             """
@@ -1327,6 +1331,7 @@ def get_users() -> List[Dict[str, Any]]:
             "must_change_password": bool(row[5]),
             "created_at": row[6],
             "updated_at": row[7],
+            "can_debug": bool(row[8]),
         }
         for row in rows
     ]
@@ -1405,7 +1410,8 @@ def get_user_by_session(
 
 def get_user_by_id(user_id: int, include_password: bool = False) -> Optional[Dict[str, Any]]:
     init_database()
-    fields = "id, username, role, enabled, employee_internal_id, must_change_password, created_at, updated_at"
+    fields = ("id, username, role, enabled, employee_internal_id, must_change_password, created_at, updated_at,"
+              " can_debug")
     if include_password:
         fields += ", password_hash"
     with connect() as conn:
@@ -1416,9 +1422,10 @@ def get_user_by_id(user_id: int, include_password: bool = False) -> Optional[Dic
         "id": row[0], "username": row[1], "role": row[2],
         "enabled": bool(row[3]), "employee_internal_id": row[4],
         "must_change_password": bool(row[5]), "created_at": row[6], "updated_at": row[7],
+        "can_debug": bool(row[8]),
     }
     if include_password:
-        result["password_hash"] = row[8]
+        result["password_hash"] = row[9]
     return result
 
 
@@ -1443,6 +1450,7 @@ def update_user(
     employee_internal_id: Any = ...,
     must_change_password: Optional[bool] = None,
     keep_session_hash: Optional[str] = None,
+    can_debug: Optional[bool] = None,
 ) -> Optional[Dict[str, Any]]:
     """`password_hash` baru mencabut semua sesi pengguna itu, kecuali `keep_session_hash`."""
     init_database()
@@ -1462,6 +1470,9 @@ def update_user(
     if must_change_password is not None:
         sets.append("must_change_password = ?")
         params.append(1 if must_change_password else 0)
+    if can_debug is not None:
+        sets.append("can_debug = ?")
+        params.append(1 if can_debug else 0)
     if not sets:
         return get_user_by_id(user_id)
     sets.append("updated_at = ?")

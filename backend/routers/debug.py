@@ -1,54 +1,44 @@
-"""Panel debug admin, Fase 1 (docs/ANALISIS-KETAHANAN.md §6).
+"""Panel debug admin (docs/ANALISIS-KETAHANAN.md §6).
 
 Terdaftar HANYA bila `DEBUG_PANEL_ENABLED` diisi (lihat `main.py`); tanpa itu
-rutenya tidak ada. Tanpa perubahan kontrak: semua data engine di sini sudah
-dikirim lewat `engine.health` dan `camera.*`, dan tersimpan di `protocol_events`.
+rutenya tidak ada.
 
-Isinya angka dan pesan galat, bukan wajah: cukup `require_admin`.
+Fase 1 (kesehatan, log, rekaman CSV): tanpa perubahan kontrak; isinya angka dan
+pesan galat, jadi cukup `require_admin`.
+
+Fase 2 (log engine, crop tubuh): memakai kontrak debug sementara
+(`contracts/schema/debug.schema.json`). Crop adalah data biometrik, jadi butuh
+izin per orang (`can_debug`), konfirmasi ulang password sendiri, sesi debug 30
+menit yang mati sendiri, alasan wajib, dan audit per crop.
 """
 from __future__ import annotations
 
 import csv
 import io
 import logging
-import os
+import threading
 import time
-from collections import deque
-from typing import Any, Deque, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, Depends, Query
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from backend.core.database import get_protocol_events
-from backend.core.security import require_admin, require_user
+from backend.core.database import add_settings_audit, get_protocol_events, get_user_by_id
+from backend.core.security import require_admin, require_user, session_token
+from backend.services.auth_service import auth_service
+from backend.services.debug_service import (  # noqa: F401 — diekspor ulang untuk main.py dan tes
+    LOG_CAPACITY,
+    LOGS as _LOGS,
+    _RingHandler,
+    debug_panel_enabled,
+    debug_sessions,
+    engine_debug,
+    install_log_capture,
+)
 from backend.services.engine_client import engine_client
 
 router = APIRouter(prefix="/api/debug", tags=["Debug"])
-
-LOG_CAPACITY = 1000
-_LOGS: Deque[Dict[str, Any]] = deque(maxlen=LOG_CAPACITY)   # hilang saat restart: memang sementara
-
-
-def debug_panel_enabled() -> bool:
-    return os.getenv("DEBUG_PANEL_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
-
-
-class _RingHandler(logging.Handler):
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            _LOGS.append({
-                "ts": record.created, "source": "backend", "level": record.levelname,
-                "logger": record.name, "message": record.getMessage()[:2000],
-            })
-        except Exception:   # log tidak boleh menjatuhkan pemanggilnya
-            pass
-
-
-def install_log_capture() -> None:
-    root = logging.getLogger()
-    if not any(isinstance(handler, _RingHandler) for handler in root.handlers):
-        root.addHandler(_RingHandler(level=logging.INFO))
 
 
 def _health_events(limit: int, since: Optional[float] = None) -> List[Dict[str, Any]]:
@@ -147,12 +137,12 @@ def health_csv(
 
 @router.get("/logs")
 def logs(
-    source: Optional[Literal["backend", "frontend"]] = None,
+    source: Optional[Literal["backend", "frontend", "engine"]] = None,
     min_level: Literal["INFO", "WARNING", "ERROR"] = "INFO",
     limit: int = Query(200, ge=1, le=LOG_CAPACITY),
     _admin=Depends(require_admin),
 ):
-    """Log backend dan galat frontend dalam satu daftar, terbaru dulu."""
+    """Log backend, galat browser, dan (Fase 2) log WARNING engine dalam satu daftar, terbaru dulu."""
     floor = logging.getLevelName(min_level)
     picked = [
         entry for entry in reversed(_LOGS)
@@ -177,3 +167,107 @@ def client_log(entry: ClientLog, user=Depends(require_user)):
         "logger": str(user.get("username", "?")), "message": entry.message, "url": entry.url,
     })
     return None
+
+
+# ---------------------------------------------------------------- Fase 2
+
+PASSWORD_ATTEMPTS = 5
+PASSWORD_LOCK_SECONDS = 300
+_failures: Dict[int, List[float]] = {}
+_failures_lock = threading.Lock()
+
+
+def _too_many_failures(user_id: int, now: float) -> bool:
+    with _failures_lock:
+        recent = [at for at in _failures.get(user_id, []) if now - at < PASSWORD_LOCK_SECONDS]
+        _failures[user_id] = recent
+        return len(recent) >= PASSWORD_ATTEMPTS
+
+
+def require_debug_session(admin=Depends(require_admin), token: str = Depends(session_token)):
+    """Admin + mode debug yang masih terbuka pada sesi login INI."""
+    if debug_sessions.expires_at(auth_service.hash_token(token)) is None:
+        raise HTTPException(status_code=403, detail="Mode debug belum dibuka atau sudah berakhir")
+    return admin
+
+
+class DebugSessionRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=256)
+
+
+@router.get("/session")
+def debug_session_status(admin=Depends(require_admin), token: str = Depends(session_token)):
+    account = get_user_by_id(admin["id"]) or {}
+    return {
+        "status": "success",
+        "can_debug": bool(account.get("can_debug")),
+        "active_until": debug_sessions.expires_at(auth_service.hash_token(token)),
+        "engine_supported": engine_debug.engine_supported,
+        "engine_reason": engine_debug.engine_reason,
+    }
+
+
+@router.post("/session")
+def open_debug_session(req: DebugSessionRequest, admin=Depends(require_admin),
+                       token: str = Depends(session_token)):
+    """Buka mode debug dengan password SENDIRI (bukan kode bersama): tercatat atas nama
+    orangnya, bisa dicabut per orang, dan mati sendiri setelah 30 menit."""
+    now = time.time()
+    account = get_user_by_id(admin["id"], include_password=True)
+    if account is None or not account.get("can_debug"):
+        raise HTTPException(status_code=403, detail="Akun ini tidak punya izin mode debug")
+    if _too_many_failures(admin["id"], now):
+        raise HTTPException(status_code=429, detail="Terlalu banyak percobaan. Coba lagi beberapa menit lagi.")
+    if not auth_service.verify_password(req.password, account["password_hash"]):
+        with _failures_lock:
+            _failures.setdefault(admin["id"], []).append(now)
+        add_settings_audit(admin["username"], "debug.session", None, "password salah")
+        # 400, bukan 401/403: frontend mengartikan 401 sebagai sesi habis dan 403 sebagai salah peran.
+        raise HTTPException(status_code=400, detail="Password salah")
+    active_until = debug_sessions.open(auth_service.hash_token(token), now)
+    add_settings_audit(admin["username"], "debug.session", None, "dibuka")
+    return {"status": "success", "active_until": active_until}
+
+
+@router.delete("/session", status_code=204)
+def close_debug_session(admin=Depends(require_admin), token: str = Depends(session_token)):
+    debug_sessions.close(auth_service.hash_token(token))
+    add_settings_audit(admin["username"], "debug.session", None, "ditutup")
+    return None
+
+
+def _ask_engine(message_type: str, **fields: Any) -> Dict[str, Any]:
+    if not engine_client.connected:
+        raise HTTPException(status_code=503, detail="Engine tidak tersambung")
+    try:
+        return engine_debug.request(engine_client, message_type, **fields)
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except Exception as error:  # noqa: BLE001 — koneksi putus saat mengirim
+        raise HTTPException(status_code=503, detail="Engine tidak dapat dihubungi") from error
+
+
+@router.get("/crops")
+def list_crops(_admin=Depends(require_debug_session)):
+    """Track yang crop tubuhnya masih ada di memori engine (tanpa gambar)."""
+    crops = _ask_engine("debug.crop_list").get("crops")
+    return {"status": "success", "crops": crops if isinstance(crops, list) else []}
+
+
+class CropRequest(BaseModel):
+    track_uuid: str = Field(pattern=r"^tr_[A-Za-z0-9_-]{1,64}$")
+    reason: str = Field(min_length=5, max_length=300)
+
+
+@router.post("/crop")
+def view_crop(req: CropRequest, admin=Depends(require_debug_session)):
+    """Gambar crop terakhir yang dinilai ReID untuk satu track. Dicatat SEBELUM diminta;
+    tidak disimpan di backend dan tidak boleh di-cache browser."""
+    add_settings_audit(admin["username"], "debug.crop", None,
+                       {"track_uuid": req.track_uuid, "reason": req.reason})
+    reply = _ask_engine("debug.crop_request", track_uuid=req.track_uuid)
+    found = reply.get("found") is True and isinstance(reply.get("jpeg_b64"), str)
+    body = {"status": "success", "found": found, "track_uuid": req.track_uuid}
+    if found:
+        body.update({key: reply.get(key) for key in ("camera_id", "at", "width", "height", "jpeg_b64")})
+    return JSONResponse(body, headers={"Cache-Control": "no-store"})

@@ -18,6 +18,7 @@ from fastapi import (
 import os
 
 from backend.core.database import (
+    add_settings_audit,
     count_active_admins,
     delete_user,
     get_employee_by_id,
@@ -254,7 +255,7 @@ def _validate_link(role: str, employee_internal_id):
 
 
 @router.patch("/users/{user_id}")
-def patch_user(user_id: int, req: UserUpdateRequest, _admin=Depends(require_admin)):
+def patch_user(user_id: int, req: UserUpdateRequest, admin=Depends(require_admin)):
     current = get_user_by_id(user_id)
     if current is None:
         raise HTTPException(status_code=404, detail="User not found")
@@ -280,9 +281,13 @@ def patch_user(user_id: int, req: UserUpdateRequest, _admin=Depends(require_admi
             role=req.role,
             enabled=req.enabled,
             employee_internal_id=(employee_link if "employee_internal_id" in req.model_fields_set else ...),
+            can_debug=req.can_debug,
         )
     except sqlite3.IntegrityError as exc:
         raise HTTPException(status_code=409, detail="username already exists") from exc
+    if req.can_debug is not None and req.can_debug != current["can_debug"]:
+        add_settings_audit(admin["username"], f"users.{current['username']}.can_debug",
+                           current["can_debug"], req.can_debug)
     return {"status": "success", "user": _public_user(updated)}
 
 

@@ -310,14 +310,17 @@ class ReidRuntime:
         self.coordinator = coordinator
         self.worker = worker
         self.crop_rules = settings.crop_rules()
+        self.debug_sink: Any = None   # diisi EngineRuntime bila debug.enabled
 
     def tap_for(self, camera_id: str, assembler: Any) -> Any:
         from .reid_tap import ReidCameraTap
 
-        return ReidCameraTap(
+        tap = ReidCameraTap(
             camera_id, self.coordinator, self.worker.submit, assembler.clock_for,
             assembler, self.crop_rules, self.settings.embed_interval_seconds,
         )
+        tap.debug_sink = self.debug_sink
+        return tap
 
     def stop(self) -> None:
         self.worker.stop()
