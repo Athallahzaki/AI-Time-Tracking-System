@@ -96,6 +96,7 @@ per peran (`core/security.py::scoped_person_id`). CI: `.github/workflows/backend
 | Pemeriksa kebijakan di engine | `contracts/tools/policy_grep.py` |
 | Compose lokal / Portainer | `deploy/docker-compose.yml`, `deploy/docker-compose.portainer.yml`, `deploy/portainer.env.example` |
 | nginx frontend (proxy API, HLS, WHEP) | `deploy/frontend/nginx/` |
+| Engine di Docker/Linux: pembungkus yang mematikan engine macet (detak basi) supaya Docker menyalakannya ulang; kode keluar 70 | `deploy/engine/run-with-watchdog.sh` |
 | Laptop engine (Windows); watchdog + tugas auto-start (Task Scheduler). Kode keluar engine: 0 berhenti, 1 galat (dinyalakan ulang), 2 config salah (tunggu config diubah), 3 GPU fatal (dinyalakan ulang) | `deploy/laptop/start-engine.ps1`, `start-mediamtx.ps1`, `firewall.ps1`, `engine-watchdog.ps1`, `install-engine-task.ps1` (log di `logs/engine/`, di-ignore) |
 | VPS WebRTC | `deploy/vps/nginx-stream-webrtc.conf` |
 | Uji lag/gladi, ringkasan (`lag_probe.py --events-out` = rekam event NDJSON untuk validator; kolom `identify_s` = waktu sampai dikenali) | `scripts/lag_probe.py`, `scripts/summarize_gladi.py` |

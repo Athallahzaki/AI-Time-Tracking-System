@@ -136,10 +136,17 @@ durabel dengan replay. Insiden 11 Nov membuktikan engine bertahan tanpa sumber >
 | 800 | 38 ms |
 | 3.200 | 101 ms (puncak 151 ms) |
 
-Pengamatan tanpa wajah tetap < 0,2 ms. Penyebab: `_sweep_groups` (`identity/reid/pending.py`)
-memindai semua track hari itu untuk setiap kelompok ANON; track tidak dibuang sampai purge
-harian; berjalan di bawah kunci koordinator yang juga dipakai thread kamera (`reid_tap.py`).
-Perbaikan: hitung rentang orang sekali di luar loop + indeks track per orang.
+Pengamatan tanpa wajah tetap < 0,2 ms. Berjalan di bawah kunci koordinator yang juga dipakai
+thread kamera (`reid_tap.py`).
+
+> Koreksi (Paket D, 11 Nov): dugaan awal "memindai semua track untuk setiap kelompok" keliru.
+> Profil menunjukkan penyebabnya `_sweep_groups` menilai SETIAP kelompok ANON terhadap SETIAP
+> orang di galeri tiap wajah terlihat, dan ±80% waktunya habis di `np.stack` dalam
+> `PrototypeSet.matrix()`. Perbaikan: matriks disimpan, dan kelompok di bawah ambang terhadap
+> orang itu dilewati. Sesudah perbaikan [terukur, simulasi yang sama]: 3.200 track → 1,0 ms;
+> 6.000 track → 2,2 ms. Keputusan identik dengan sebelumnya (sidik jari 3.600 pengamatan sama,
+> dengan dan tanpa `reevaluate`). Usul "hitung rentang sekali di luar loop" DITOLAK: ternyata
+> mengubah keputusan (kelompok yang selesai di sapuan yang sama harus ikut diperiksa).
 
 **P9 (D-FINE ke ONNX) ditunda.** Log pilot: detector 10 ms/gambar, sibuk 0% (1 kamera, 5090).
 Kerangka pipeline 0,1 ms/frame [terukur, mock]. Putuskan P9/NVDEC/TensorRT dari angka `sibuk %`
@@ -273,8 +280,8 @@ kode debug bersama (tidak bisa diatribusikan, tidak bisa dicabut per orang).
 | A | EA | **Selesai 11 Nov** (ea-r26 + be-r9): batas baris kedua sisi; pesan bukan objek → ack ditolak. Belum: (keputusan) engine menolak start tanpa kunci di alamat non-loopback | tidak |
 | B | BE | **Selesai 11 Nov** (be-r10): temuan 1, 2, 5, 6, 7 | tidak |
 | C | QA | **Selesai 11 Nov** (be-r11): matriks akses semua rute + fuzz kanal sebagai tes CI permanen | tidak |
-| D | EA | Perbaikan biaya `_sweep_groups` + tes biaya tidak tumbuh | tidak |
-| E | EA/deploy | Watchdog detak untuk engine di Docker (padanan `engine-watchdog.ps1`) | tidak |
+| D | EA | **Selesai 11 Nov** (ea-r27): biaya `_sweep_groups` + tes biaya tidak tumbuh | tidak |
+| E | EA/deploy | **Skrip selesai 11 Nov** (`deploy/engine/run-with-watchdog.sh`); BELUM dipasang: compose engine server 5090 tidak ada di repo | tidak |
 | F | BE+FE | Fase 1 dashboard debug | tidak |
 | G | EA | Pemantau kondisi gambar | tidak |
 | H | EA+BE+FE | Fase 2 dashboard debug | **ya** |

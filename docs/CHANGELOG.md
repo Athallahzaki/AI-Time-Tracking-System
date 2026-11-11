@@ -7,6 +7,35 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-11-11 · paket deploy-r1 (Paket E) — Watchdog engine untuk Docker/Linux
+
+- **`deploy/engine/run-with-watchdog.sh`** (baru, POSIX sh): menjalankan `python -m engine.runtime "$@"`, memantau
+  berkas detak; bila basi lebih dari `ENGINE_WATCHDOG_STALE_SECONDS` (default 60; sebelum detak pertama
+  `ENGINE_WATCHDOG_STARTUP_SECONDS`, default 240) engine dimatikan (TERM, lalu KILL) dan skrip keluar kode 70 supaya
+  `restart: unless-stopped` menyalakan ulang container. `docker stop` diteruskan sebagai TERM (engine menutup rapi).
+  Padanan `deploy/laptop/engine-watchdog.ps1`; jeda bertingkat dan log diserahkan ke Docker.
+- **Belum dipasang di mana pun:** compose engine server 5090 tidak ada di repo. Cara pasang ada di kepala skrip.
+
+Uji (engine mock, di cloud): sehat 14 dtk tetap hidup; engine dibekukan (SIGSTOP) → dimatikan, keluar 70 dalam
+14 dtk (batas 12); TERM → keluar 0 dalam 1 dtk, engine ikut berhenti. Belum diuji di Docker maupun dengan GPU.
+
+## 2026-11-11 · paket ea-r27 (Paket D) — Biaya sapuan ReID tidak lagi tumbuh sepanjang hari
+
+Tanpa perubahan perilaku: sidik jari seluruh keputusan (3.600 pengamatan, 40 orang, 5 kamera, dengan dan tanpa
+`reevaluate`) identik sebelum dan sesudah.
+
+- **`PrototypeSet.matrix()` disimpan** antar panggilan dan dibuang tiap `add` (dulu `np.stack` tiap panggilan,
+  ±80% biaya sapuan).
+- **`_sweep_groups` melewati kelompok yang mustahil cocok:** skor kelompok terhadap orang yang wajahnya baru terlihat
+  di bawah `match_threshold` → tidak dinilai terhadap semua orang (setara persis dengan `pick_best != person`).
+- Terukur (simulasi 60 orang): satu pengamatan berwajah pada 3.200 track 101 ms → 1,0 ms; simulasi 1.200 track
+  7,8 dtk → 0,7 dtk. Pekerjaan ini memegang kunci yang juga dipakai thread kamera.
+- Diagnosis di ANALISIS-KETAHANAN §4 dikoreksi (penyebabnya bukan pemindaian track).
+
+File: `engine/identity/reid/{gallery,pending}.py`, `engine/tests/{test_reid_pending,test_reid_messages_gallery}.py`.
+
+Uji: engine 851 (8 dilewati).
+
 ## 2026-11-11 · paket be-r11 (Paket C) — Matriks akses atas semua rute sebagai tes permanen
 
 - **`backend/tests/test_matriks_akses.py`**: daftar rute diambil dari skema OpenAPI, jadi rute baru otomatis ikut.
