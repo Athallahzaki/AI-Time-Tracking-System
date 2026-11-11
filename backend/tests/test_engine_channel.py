@@ -276,3 +276,27 @@ def test_ack_melebihi_yang_dikirim_tidak_memangkas_outbox(db):
         api.emit_event(camera_online(i))
     api._dispatch(None, {"type": "ack", "v": 1, "through_seq": 10**9})
     assert [e["seq"] for e in outbox.since(0)] == [1, 2, 3, 4, 5]
+
+
+# ---- Paket A (11 Nov 2026): baris raksasa dari engine ----------------------
+
+def test_baris_raksasa_dari_engine_memutus_bukan_menimbun(monkeypatch):
+    """Engine rusak/palsu yang mengirim satu baris tanpa akhir tidak boleh
+    menghabiskan memori backend: baca berbatas, lalu putus (sambung ulang + replay)."""
+    monkeypatch.setattr(client_module, "MAX_LINE_CHARS", 4096)
+    server, peer = socket.socketpair()
+    try:
+        client = EngineClient()
+        client._reader = server.makefile("r", encoding="utf-8", newline="\n")
+        peer.sendall(b'{"type": "camera.online"}\n' + b"A" * 20_000)
+        assert client.receive_message() == {"type": "camera.online"}      # baris sah tetap terbaca
+        with pytest.raises(client_module.EngineConnectionError, match="exceeds"):
+            client.receive_message()
+        peer.sendall(b"\n" + b"[" * 100_000 + b"\n")
+        client._reader = server.makefile("r", encoding="utf-8", newline="\n")
+        with pytest.raises(client_module.EngineConnectionError):           # bersarang dalam: bukan RecursionError liar
+            while True:
+                client.receive_message()
+    finally:
+        server.close()
+        peer.close()

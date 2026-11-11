@@ -26,6 +26,12 @@ logger = logging.getLogger(__name__)
 MAX_GAP_RETRIES = 3
 
 
+# Batas satu baris dari engine. Pesan engine kecil (event, view.frame, hasil
+# enrollment); tanpa batas, engine yang rusak atau palsu bisa menghabiskan
+# memori backend dengan satu baris tanpa newline.
+MAX_LINE_CHARS = 16 * 1024 * 1024
+
+
 class EngineConnectionError(Exception):
     """Connection or transport error with AI Vision Engine."""
 
@@ -204,15 +210,18 @@ class EngineClient:
         if reader is None:
             raise EngineConnectionError("Engine reader is not connected")
         try:
-            line = reader.readline()
+            line = reader.readline(MAX_LINE_CHARS)
         except (OSError, ValueError) as exc:
             raise EngineConnectionError(f"Failed to receive message from engine: {exc}") from exc
         if not line:
             raise EngineConnectionError("Engine connection closed")
+        if len(line) >= MAX_LINE_CHARS and not line.endswith("\n"):
+            # Tidak bisa disinkronkan ulang di tengah baris: putus, lalu sambung ulang + replay.
+            raise EngineConnectionError(f"Engine line exceeds {MAX_LINE_CHARS} characters")
         self._last_receive_monotonic = time.monotonic()
         try:
             message = json.loads(line)
-        except json.JSONDecodeError as exc:
+        except (json.JSONDecodeError, RecursionError) as exc:
             raise EngineConnectionError("Engine returned invalid JSON") from exc
         if not isinstance(message, dict):
             raise EngineConnectionError("Engine message must be a JSON object")

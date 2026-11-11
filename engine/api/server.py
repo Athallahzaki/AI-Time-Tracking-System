@@ -58,6 +58,10 @@ KEEPALIVE_INTERVAL_SECONDS = 10
 KEEPALIVE_COUNT = 3
 # `hello` itu kecil. Baris pertama yang lebih panjang dari ini bukan backend.
 MAX_HELLO_CHARS = 64 * 1024
+# Batas satu baris SETELAH handshake. Pesan sah terbesar adalah `enroll` dengan
+# gambar base64 (nginx membatasi unggahan 25 MB ≈ 34 MB base64); tanpa batas,
+# satu baris tanpa newline menghabiskan memori engine (terukur: 300 MB -> +300 MB RSS).
+MAX_LINE_CHARS = 64 * 1024 * 1024
 ACCEPT_POLL_SECONDS = 0.5   # seberapa cepat Ctrl+C / close() terasa saat menunggu klien
 
 
@@ -266,7 +270,9 @@ class EngineApi:
                 "type": "auth_challenge", "v": 1, "ts": _now(), "channel": "control",
                 "nonce": server_nonce, "algorithm": handshake_auth.ALGORITHM,
             })
-        reader = connection.makefile("r", encoding="utf-8")
+        # errors="replace": byte bukan UTF-8 menjadi baris JSON tidak sah (dilewati),
+        # bukan UnicodeDecodeError yang mematikan thread pembaca.
+        reader = connection.makefile("r", encoding="utf-8", errors="replace")
         first = reader.readline(MAX_HELLO_CHARS)
         if not first or not first.endswith("\n"):
             # Kosong = klien menutup; tanpa newline = baris terlalu panjang.
@@ -380,13 +386,29 @@ class EngineApi:
 
     def _read_loop(self, connection: socket.socket, reader) -> None:
         try:
-            for line in reader:
+            while True:
+                line = reader.readline(MAX_LINE_CHARS)
+                if not line:
+                    break
+                if not line.endswith("\n"):
+                    # Tanpa newline = melebihi batas (atau peer menutup di tengah baris).
+                    # Tidak bisa disinkronkan ulang di tengah baris: putuskan.
+                    if len(line) >= MAX_LINE_CHARS:
+                        logger.warning("baris dari %s melebihi %d karakter; koneksi diputus",
+                                       _peer(connection), MAX_LINE_CHARS)
+                    break
                 line = line.strip()
                 if not line:
                     continue
                 try:
                     message = json.loads(line)
-                except json.JSONDecodeError:
+                except (ValueError, RecursionError):  # bukan JSON, atau bersarang terlalu dalam
+                    continue
+                if not isinstance(message, dict) or not isinstance(message.get("type"), str):
+                    self._send(connection, {
+                        "type": "ack", "v": 1, "ts": _now(), "channel": "control",
+                        "in_reply_to": "?", "accepted": False, "reason": "pesan harus objek bertipe",
+                    })
                     continue
                 self._dispatch(connection, message)
         except OSError:

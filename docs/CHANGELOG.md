@@ -7,6 +7,26 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-11-11 · paket ea-r26 + be-r9 (Paket A) — Kanal pesan tahan baris raksasa dan pesan cacat
+
+Dari uji ketahanan 11 Nov (ANALISIS-KETAHANAN §3). Tanpa perubahan kontrak, tanpa saklar: pesan sah tidak
+terpengaruh.
+
+- **Batas ukuran baris setelah handshake.** Engine: `MAX_LINE_CHARS` 64 MiB (pesan sah terbesar = `enroll` dengan
+  gambar base64, ±34 MB); lewat batas → peringatan + koneksi diputus. Backend: 16 MiB → `EngineConnectionError`
+  (sambung ulang + replay). Sebelumnya tanpa batas: satu baris 300 MB tanpa newline menaikkan RSS engine 37 → 341 MB;
+  kini berhenti di ±100 MB (terukur ulang dengan skrip yang sama).
+- **Pesan cacat tidak lagi mematikan thread pembaca engine.** JSON bukan objek atau `type` bukan string → `ack`
+  ditolak ("pesan harus objek bertipe"), koneksi tetap dipakai. Byte bukan UTF-8 (`errors="replace"`) dan JSON
+  bersarang terlalu dalam (`RecursionError`) → baris dilewati. Dulu keempatnya traceback + koneksi backend putus.
+- Backend: `RecursionError` saat mengurai pesan engine menjadi `EngineConnectionError`, bukan exception liar.
+- **Belum dikerjakan (keputusan Zena):** engine menolak start tanpa `ENGINE_SHARED_KEY` di alamat non-loopback.
+
+File: `engine/api/server.py`, `engine/tests/test_api_connection.py`, `backend/services/engine_client.py`,
+`backend/tests/test_engine_channel.py`.
+
+Uji: engine 849 (8 dilewati), backend 149, kontrak 151; fuzz proses nyata: 0 traceback di thread pembaca.
+
 ## 2026-11-11 · paket be-r8 + fe-r5 — Uji penerimaan klien: JAT-02, JAT-05, JAT-07, JAT-12, JAT-14
 
 Empat fitur kebijakan yang belum ada saat test case klien (Jatah & Pelanggaran) dicocokkan dengan kode. Tanpa

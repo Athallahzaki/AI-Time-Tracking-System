@@ -239,3 +239,54 @@ def test_sendall_yang_tidak_terbangun_seperti_windows_tidak_menahan_backend_baru
                 real_close(connection)
             lama.close()
             api.close()
+
+
+# ---- Paket A (11 Nov 2026): pesan cacat setelah handshake ---------------------
+
+def _engine_masih_melayani(path) -> bool:
+    with _connect(path) as fresh:
+        return _hello(fresh)[1]["type"] == "hello_ack"
+
+
+def test_pesan_cacat_setelah_handshake_ditolak_tanpa_memutus_koneksi():
+    """JSON bukan objek, `type` bukan string, byte bukan UTF-8, JSON bersarang
+    dalam: dulu traceback di thread pembaca (koneksi backend putus). Kini pesan
+    berbentuk salah dijawab ack ditolak dan koneksi yang sama tetap dipakai."""
+    with tempfile.TemporaryDirectory() as tmp:
+        api = EngineApi(outbox=Outbox())
+        path = _start(api, tmp)
+        try:
+            with _connect(path) as connection:
+                reader, _ack = _hello(connection)
+                connection.sendall(b'[1,2,3]\n')
+                assert json.loads(reader.readline())["reason"] == "pesan harus objek bertipe"
+                connection.sendall(b'{"type": {"a": 1}}\n')
+                assert json.loads(reader.readline())["accepted"] is False
+                connection.sendall(b'\xff\xfe\xfd bukan utf-8\n')            # dilewati
+                connection.sendall(("[" * 100_000 + "\n").encode())         # dilewati
+                connection.sendall(b'{"type": "tidak-ada"}\n')              # koneksi masih hidup
+                reply = json.loads(reader.readline())
+                assert (reply["in_reply_to"], reply["reason"]) == ("tidak-ada", "tidak dikenal")
+        finally:
+            api.close()
+
+
+def test_baris_melebihi_batas_memutus_koneksi_tanpa_menimbun(monkeypatch):
+    """Tanpa batas, satu baris tanpa newline menimbun memori engine tanpa henti."""
+    from engine.api import server as server_module
+    monkeypatch.setattr(server_module, "MAX_LINE_CHARS", 4096)
+    with tempfile.TemporaryDirectory() as tmp:
+        api = EngineApi(outbox=Outbox())
+        path = _start(api, tmp)
+        try:
+            with _connect(path) as connection:
+                reader, _ack = _hello(connection)
+                connection.sendall(b"A" * 20_000)                           # tanpa newline
+                connection.settimeout(3.0)
+                try:
+                    assert reader.readline() == ""                          # engine menutup
+                except ConnectionError:
+                    pass                                                    # atau RST: sama-sama putus
+            assert _engine_masih_melayani(path)
+        finally:
+            api.close()
