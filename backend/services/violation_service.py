@@ -39,6 +39,14 @@ class ViolationService:
             now=now,
         )
 
+        if usage["status"] == "warning":
+            # JAT-05: tercatat sekali per karyawan per hari (dedupe_key di DB).
+            notification_service.create_warning_notification({
+                "person_id": str(person_id), "date": local_date, "type": "free_time_warning",
+                "status": "warning", "used_seconds": usage["used_seconds"],
+                "allowance_seconds": usage["allowance_seconds"],
+                "remaining_seconds": usage["remaining_seconds"], "occurred_at": now,
+            })
         if usage["status"] != "exceeded":
             return None
 

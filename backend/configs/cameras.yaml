@@ -1,6 +1,12 @@
 # Camera Configuration for AI Time Tracking System
 # Add, edit, or remove cameras by editing this file — no code changes needed.
 #
+# counts_free_time (default true): isi `false` untuk lokasi yang TIDAK memotong
+# jatah free time (lobby, area luar). Kehadiran di sana tetap tercatat dan
+# tampil, hanya tidak ditagih. Contoh:
+#     - id: "lobby"
+#       counts_free_time: false
+#
 # stream_url formats supported by the frontend player (auto-detected):
 #
 #   WebRTC (WHEP) — lowest latency ~100ms, recommended for live monitoring:

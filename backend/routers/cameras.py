@@ -39,6 +39,7 @@ def _configured_cameras() -> list[dict]:
             "stream_url": config.stream_url,
             "enabled": item["enabled"],
             "door_region": config.door_region,
+            "counts_free_time": config.counts_free_time,
             "is_running": bool(recently_updated),
             "fps": activity.get("fps", config.fps),
             "active_people": activity.get("people_count", 0) if recently_updated else 0,

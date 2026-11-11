@@ -34,6 +34,9 @@ class CameraConfig:
     # Extra sources an operator may switch to through the API. The configured
     # `source_uri` is always allowed; nothing else is.
     allowed_sources: List[str] = field(default_factory=list)
+    # JAT-02: False = kehadiran di kamera ini tercatat tetapi tidak memotong jatah
+    # free time (lobby, area luar). Kebijakan perusahaan: hanya di backend.
+    counts_free_time: bool = True
 
 
 def _door_region(camera_id: str, value: object) -> Optional[List[float]]:
@@ -86,6 +89,7 @@ def load_cameras_from_yaml(yaml_path: Path) -> Dict[str, CameraConfig]:
             fps=float(item.get("fps", 30.0)),
             door_region=_door_region(cam_id, item.get("door_region")),
             allowed_sources=[str(uri) for uri in allowed],
+            counts_free_time=bool(item.get("counts_free_time", True)),
         )
     return result
 

@@ -352,3 +352,39 @@ def test_patch_employee_requires_admin(fresh_db):
         headers=_auth_header(viewer_token),
     )
     assert resp.status_code == 403
+
+
+# ---- JAT-12 dan JAT-07 lewat API -------------------------------------------
+
+def test_jatah_per_karyawan_dan_pengecualian_lewat_api():
+    admin = {"Authorization": f"Bearer {_create_admin_token()}"}
+    created = client.post("/api/employees", headers=admin,
+                          json={"employee_id": "E1", "name": "Satu", "allowance_minutes": 45}).json()["employee"]
+    uid = created["id"]
+    assert created["allowance_minutes"] == 45
+
+    assert client.patch(f"/api/employees/{uid}", headers=admin, json={"name": "Satu A"}).json()[
+        "employee"]["allowance_minutes"] == 45                       # tidak disebut = tidak berubah
+    assert client.patch(f"/api/employees/{uid}", headers=admin, json={"allowance_minutes": None}).json()[
+        "employee"]["allowance_minutes"] is None                     # null = kembali ke jatah global
+    assert client.patch(f"/api/employees/{uid}", headers=admin,
+                        json={"allowance_minutes": 0}).status_code == 422
+
+    from backend.core.config import settings
+    camera_id = next(iter(settings.cameras))
+    url = f"/api/employees/{uid}/exemptions"
+    assert client.post(url, headers=admin, json={"camera_id": "tidak-ada", "reason": "x"}).status_code == 404
+    made = client.post(url, headers=admin, json={"camera_id": camera_id, "reason": "tugas jaga"})
+    assert made.status_code == 201 and made.json()["exemption"]["created_by"] == "testadmin"
+    assert client.post(url, headers=admin, json={"camera_id": camera_id, "reason": "lagi"}).status_code == 409
+
+    exemption_id = made.json()["exemption"]["id"]
+    assert client.delete(f"{url}/{exemption_id}", headers=admin).status_code == 200
+    assert client.delete(f"{url}/{exemption_id}", headers=admin).status_code == 404   # sudah dicabut
+    listed = client.get(url, headers=admin).json()["exemptions"]
+    assert len(listed) == 1 and listed[0]["revoked_by"] == "testadmin"                 # jejak tetap ada
+
+    client.cookies.clear()
+    assert client.get(url).status_code == 401
+    assert client.post(url, json={"camera_id": camera_id, "reason": "x"}).status_code == 401
+

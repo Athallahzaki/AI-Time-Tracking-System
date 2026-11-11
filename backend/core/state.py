@@ -81,6 +81,7 @@ class SystemState:
             usage = self.ledger.usage(sess.identity, now=now)
             used = float(usage["used_seconds"])
             remaining = float(usage["remaining_seconds"])
+            allowance = float(usage["allowance_seconds"])  # jatah orang ini (JAT-12)
             if usage["present"]:
                 qualification_remaining = float(usage["qualification_remaining_seconds"])
             else:

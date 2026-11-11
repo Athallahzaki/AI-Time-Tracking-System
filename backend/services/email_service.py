@@ -227,6 +227,8 @@ class EmailService:
         from backend.services.break_policy import break_policy
 
         person_id = notification.get("person_id") or "unknown"
+        employee = get_employee_by_employee_id(str(person_id))
+        who = f"{employee['name']} ({person_id})" if employee else str(person_id)
         payload = notification.get("payload") or {}
         when = "-"
         event_at = notification.get("event_at")
@@ -238,7 +240,7 @@ class EmailService:
         lines = [
             notification.get("title", "Notifikasi"),
             "",
-            f"Karyawan (ID): {person_id}",
+            f"Karyawan: {who}",
             f"Tanggal: {payload.get('date', '-')}",
             f"Waktu kejadian: {when}",
         ]
@@ -255,7 +257,7 @@ class EmailService:
             "",
             "Pesan ini dikirim otomatis oleh AI Time Tracking System.",
         ]
-        subject = f"[AI Time Tracking] {notification.get('title', 'Notifikasi')}: {person_id}"
+        subject = f"[AI Time Tracking] {notification.get('title', 'Notifikasi')}: {who}"
         return subject, "\n".join(lines)
 
     def send_test_email(self) -> None:

@@ -7,6 +7,35 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-11-11 · paket be-r8 + fe-r5 — Uji penerimaan klien: JAT-02, JAT-05, JAT-07, JAT-12, JAT-14
+
+Empat fitur kebijakan yang belum ada saat test case klien (Jatah & Pelanggaran) dicocokkan dengan kode. Tanpa
+perubahan kontrak engine; kebijakan tetap hanya di backend. Perilaku default tidak berubah: tanpa konfigurasi baru,
+semua kamera ditagih, jatah global, tanpa pengecualian.
+
+- **JAT-02 lokasi tidak memotong jatah.** `counts_free_time: false` per kamera di `cameras.yaml` (default true).
+  Kehadiran di sana tetap menjadi kunjungan (`counts_free_time: false`, tagihan 0) dan tidak pernah menyambung atau
+  memperpanjang kunjungan yang ditagih (dua aliran terpisah di `FreeTimeLedger.usage`).
+- **JAT-12 jatah per karyawan.** Kolom `employees.allowance_minutes` (NULL = jatah global); dipakai di pemakaian,
+  status, pelanggaran, timer live. `status_for(used, allowance)`: jatah pribadi yang tidak lebih besar dari ambang
+  peringatan global memakai ambang separuh jatah (kalau tidak, berstatus peringatan sejak detik nol).
+- **JAT-07 pengecualian karyawan per lokasi.** Tabel `free_time_exemptions` (tidak berlaku mundur: hanya potongan
+  yang MULAI setelah `effective_from`; dicabut lewat `revoked_at`, tidak dihapus; `created_by`/`revoked_by` dari
+  sesi admin). `GET/POST/DELETE /api/employees/{id}/exemptions` (admin).
+- **JAT-05 peringatan dini.** Status `warning` kini menyimpan notifikasi `free_time_warning` sekali per karyawan
+  per hari (`dedupe_key`), tampil di lonceng, tanpa email.
+- **JAT-14 nama di notifikasi dan email.** "Nama (ID)" menggantikan "Person ID" / "Karyawan (ID)".
+- Frontend: form karyawan mendapat "Jatah free time harian (menit)" dan bagian "Pengecualian lokasi".
+- `database.py`: tiga SELECT karyawan yang sama disatukan (`_EMPLOYEE_COLUMNS`, `_employee_dict`).
+
+File: `backend/core/{config,database,state}.py`, `backend/routers/{cameras,employees}.py`, `backend/schemas/employee.py`,
+`backend/services/{break_policy,email_service,free_time,notification_service,violation_service}.py`,
+`backend/configs/cameras.yaml`, `backend/tests/{test_uji_penerimaan_jatah,test_employee_crud}.py`,
+`frontend/src/api/{employees,types}.ts`, `frontend/src/components/employees/EmployeeFormDialog.vue`.
+
+Uji: backend 148 (10 baru), `npm run build`; form diuji di browser terhadap backend lokal (tambah pengecualian,
+ubah jatah, tersimpan di DB). Engine dan kontrak tidak disentuh.
+
 ## 2026-11-10 · paket be-r7 + ea-r25 + fe-r4 — Analisis repo: jejak audit koreksi, CI backend/frontend, peringatan waktu tempuh
 
 Tanpa perubahan kontrak engine, tanpa saklar baru. Perilaku ReID TIDAK diubah (butuh data lokasi, lihat SERAH-TERIMA).

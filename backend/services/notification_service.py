@@ -4,7 +4,7 @@ import asyncio
 import threading
 from typing import Any, Dict, Optional
 
-from backend.core.database import save_notification
+from backend.core.database import get_employee_by_employee_id, save_notification
 from backend.services.email_service import (
     email_service,
 )
@@ -23,35 +23,45 @@ class NotificationService:
         self,
         violation: Dict[str, Any],
     ) -> Optional[Dict[str, Any]]:
-        person_id = str(violation["person_id"])
-        local_date = str(violation["date"])
+        return self._create_usage_notification(
+            violation, "free_time_exceeded", "Batas jatah waktu terlampaui", email=True,
+        )
 
-        used_seconds = float(
-            violation["used_seconds"]
+    def create_warning_notification(
+        self,
+        usage: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Peringatan dini (JAT-05): sekali per karyawan per hari, tanpa email."""
+        return self._create_usage_notification(
+            usage, "free_time_warning", "Jatah waktu hampir habis", email=False,
         )
-        allowance_seconds = float(
-            violation["allowance_seconds"]
-        )
+
+    def _create_usage_notification(
+        self,
+        data: Dict[str, Any],
+        notification_type: str,
+        title: str,
+        email: bool,
+    ) -> Optional[Dict[str, Any]]:
+        person_id = str(data["person_id"])
+        local_date = str(data["date"])
+        employee = get_employee_by_employee_id(person_id)
+        who = f"{employee['name']} ({person_id})" if employee else person_id
 
         notification = save_notification(
-            dedupe_key=(
-                f"free_time_exceeded:"
-                f"{person_id}:"
-                f"{local_date}"
-            ),
+            # Kunci unik di DB: kejadian yang sama tidak pernah tercatat dua kali.
+            dedupe_key=f"{notification_type}:{person_id}:{local_date}",
             person_id=person_id,
-            notification_type="free_time_exceeded",
-            title="Batas jatah waktu terlampaui",
+            notification_type=notification_type,
+            title=title,
             message=(
-                f"Person {person_id} telah menggunakan "
-                f"{used_seconds / 60.0:.2f} menit "
+                f"{who} telah menggunakan "
+                f"{float(data['used_seconds']) / 60.0:.2f} menit "
                 f"dari jatah "
-                f"{allowance_seconds / 60.0:.2f} menit."
+                f"{float(data['allowance_seconds']) / 60.0:.2f} menit."
             ),
-            event_at=float(
-                violation["occurred_at"]
-            ),
-            payload=violation,
+            event_at=float(data["occurred_at"]),
+            payload=data,
         )
 
         # Sudah pernah dibuat -> jangan kirim SSE lagi.
@@ -59,11 +69,8 @@ class NotificationService:
             return None
 
         self.publish(notification)
-
-        email_service.enqueue_notification(
-            notification
-        )
-
+        if email:
+            email_service.enqueue_notification(notification)
         return notification
 
     def subscribe_async(

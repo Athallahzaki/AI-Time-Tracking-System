@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date as date_type, datetime, time as dt_time, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import yaml
@@ -201,12 +201,18 @@ class BreakPolicy:
             cursor = segment_end
         return result
 
-    def status_for(self, used_seconds: float) -> str:
-        """'ok' | 'warning' | 'exceeded' — one rule for every endpoint."""
-        remaining = self.allowance_seconds - used_seconds
-        if used_seconds >= self.allowance_seconds:
+    def status_for(self, used_seconds: float, allowance_seconds: Optional[float] = None) -> str:
+        """'ok' | 'warning' | 'exceeded' — one rule for every endpoint.
+
+        `allowance_seconds`: jatah karyawan itu (JAT-12); None = jatah global.
+        """
+        allowance = self.allowance_seconds if allowance_seconds is None else allowance_seconds
+        if used_seconds >= allowance:
             return "exceeded"
-        if remaining <= self.warning_seconds:
+        # Jatah pribadi yang tidak lebih besar dari ambang peringatan global akan
+        # berstatus peringatan sejak detik nol; untuk itu ambangnya separuh jatah.
+        warning = self.warning_seconds if self.warning_seconds < allowance else allowance / 2.0
+        if allowance - used_seconds <= warning:
             return "warning"
         return "ok"
 

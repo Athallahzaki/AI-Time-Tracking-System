@@ -32,6 +32,7 @@ from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Set
 
 from backend.core import database
+from backend.core.config import settings
 from backend.core.identity import is_anon_id
 from backend.services.break_policy import BreakPolicy, break_policy
 
@@ -182,6 +183,9 @@ class Visit:
     countable_by_date: Dict[str, float] = field(default_factory=dict)
     charged_by_date: Dict[str, float] = field(default_factory=dict)
     excluded: bool = False
+    # False = kunjungan di lokasi yang tidak memotong jatah (JAT-02) atau yang
+    # dikecualikan untuk orang ini (JAT-07): tercatat, tidak ditagih.
+    counts: bool = True
 
 
 class FreeTimeLedger:
@@ -218,6 +222,32 @@ class FreeTimeLedger:
         return count
 
     # ---- computing -------------------------------------------------------
+    def _counts(self, person_id: str) -> Any:
+        """Fungsi (camera_id, start_ts) -> apakah potongan itu memotong jatah."""
+        free_cameras = {
+            camera_id for camera_id, config in settings.cameras.items()
+            if not config.counts_free_time
+        }
+        exemptions = database.get_exemptions(person_id)
+
+        def counts(camera_id: Optional[str], start_ts: float) -> bool:
+            if camera_id in free_cameras:
+                return False
+            # Tidak berlaku mundur: hanya potongan yang MULAI selama pengecualian aktif.
+            return not any(
+                item["camera_id"] == camera_id
+                and item["effective_from"] <= start_ts
+                and (item["revoked_at"] is None or start_ts < item["revoked_at"])
+                for item in exemptions
+            )
+        return counts
+
+    def allowance_seconds(self, person_id: str) -> float:
+        """Jatah harian orang ini: milik karyawan bila diisi (JAT-12), selain itu global."""
+        employee = database.get_employee_by_employee_id(person_id)
+        minutes = employee.get("allowance_minutes") if employee else None
+        return float(minutes) * 60.0 if minutes is not None else self.policy.allowance_seconds
+
     def _segments(self, person_id: str, start_ts: float, end_ts: float, now: float) -> List[Dict[str, Any]]:
         if is_anon_id(person_id):
             return []  # ANON bukan karyawan: tidak pernah dihitung sebelum identity.resolved
@@ -237,6 +267,9 @@ class FreeTimeLedger:
             )
             if seg["end_ts"] >= start_ts and seg["start_ts"] < end_ts
         )
+        counts = self._counts(person_id)
+        for seg in segments:
+            seg["counts"] = counts(seg["camera_id"], seg["start_ts"])
         segments.sort(key=lambda seg: seg["start_ts"])
         return segments
 
@@ -285,10 +318,17 @@ class FreeTimeLedger:
         # Look back one merge window + a day so a visit crossing midnight or
         # starting just before the window is still merged correctly.
         segments = self._segments(person_id, day_start - 86400.0, day_end, now)
-        visits = [
-            v for v in self._visits(segments)
-            if v.countable_by_date.get(local_date) is not None
-        ]
+        # Dua aliran terpisah: potongan yang tidak ditagih tidak pernah menyambung
+        # atau memperpanjang kunjungan yang ditagih.
+        free_visits = self._visits(seg for seg in segments if not seg["counts"])
+        for visit in free_visits:
+            visit.counts = False
+            visit.charged_by_date = {day: 0.0 for day in visit.countable_by_date}
+        visits = sorted(
+            (v for v in [*self._visits(seg for seg in segments if seg["counts"]), *free_visits]
+             if v.countable_by_date.get(local_date) is not None),
+            key=lambda v: v.start_ts,
+        )
 
         corrections = database.get_corrections(person_id=person_id, local_date=local_date)
         excluded_ids = {c.get("gap_id") for c in corrections if c.get("exclude_visit")}
@@ -314,12 +354,14 @@ class FreeTimeLedger:
                 "charged_seconds": round(charged_effective, 3),
                 "original_charged_seconds": round(charged, 3),
                 "excluded": visit.excluded,
+                "counts_free_time": visit.counts,
             })
         used = max(0.0, used + adjustment)
+        allowance = self.allowance_seconds(person_id)
 
         current = next((v for v in reversed(visits) if v.open), None)
         qualification_remaining = 0.0
-        if current is not None:
+        if current is not None and current.counts:
             countable_now = sum(current.countable_by_date.values())
             qualification_remaining = max(0.0, self.policy.qualification_seconds - countable_now)
 
@@ -327,9 +369,9 @@ class FreeTimeLedger:
             "person_id": person_id,
             "date": local_date,
             "used_seconds": round(used, 3),
-            "allowance_seconds": self.policy.allowance_seconds,
-            "remaining_seconds": round(max(0.0, self.policy.allowance_seconds - used), 3),
-            "status": self.policy.status_for(used),
+            "allowance_seconds": allowance,
+            "remaining_seconds": round(max(0.0, allowance - used), 3),
+            "status": self.policy.status_for(used, allowance),
             "adjustment_seconds": round(adjustment, 3),
             "visits": entries,
             "present": current is not None,

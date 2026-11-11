@@ -15,8 +15,12 @@ import secrets
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional
 
+from backend.core.config import settings
 from backend.core.database import (
+    add_exemption,
     create_employee,
+    get_exemptions,
+    revoke_exemption,
     get_employee_by_employee_id,
     get_employee_by_id,
     get_employees,
@@ -29,7 +33,9 @@ from backend.core.security import employee_scope, require_admin, require_user
 from backend.schemas.employee import (
     EmployeeCreateRequest,
     EmployeeUpdateRequest,
+    ExemptionCreateRequest,
 )
+from backend.services.free_time import free_time_ledger
 
 router = APIRouter(
     prefix="/api/employees",
@@ -102,6 +108,7 @@ def create_new_employee(
             division=req.division,
             email=req.email,
             status=req.status,
+            allowance_minutes=req.allowance_minutes,
         )
     except sqlite3.IntegrityError as exc:
         raise HTTPException(
@@ -171,7 +178,9 @@ def patch_employee(
             division=req.division if "division" in req.model_fields_set else ...,
             email=email_arg if email_arg is not ... else ...,
             status=req.status,
+            allowance_minutes=req.allowance_minutes if "allowance_minutes" in req.model_fields_set else ...,
         )
+        free_time_ledger.invalidate()  # jatah baru berlaku tanpa menunggu event berikutnya
     except ValueError as exc:
         raise HTTPException(
             status_code=400,
@@ -187,6 +196,43 @@ def patch_employee(
         "status": "success",
         "employee": _public(updated),
     }
+
+
+def _employee_or_404(internal_id: int):
+    employee = get_employee_by_id(internal_id)
+    if employee is None:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    return employee
+
+
+@router.get("/{internal_id}/exemptions")
+def list_exemptions(internal_id: int, _admin=Depends(require_admin)):
+    """Pengecualian lokasi karyawan ini (JAT-07), termasuk yang sudah dicabut."""
+    employee = _employee_or_404(internal_id)
+    return {"status": "success", "exemptions": get_exemptions(str(employee["employee_id"]))}
+
+
+@router.post("/{internal_id}/exemptions", status_code=201)
+def create_exemption(internal_id: int, req: ExemptionCreateRequest, admin=Depends(require_admin)):
+    employee = _employee_or_404(internal_id)
+    person_id = str(employee["employee_id"])
+    if req.camera_id not in settings.cameras:
+        raise HTTPException(status_code=404, detail=f"Camera '{req.camera_id}' not found")
+    if any(item["camera_id"] == req.camera_id for item in get_exemptions(person_id, include_revoked=False)):
+        raise HTTPException(status_code=409, detail="Pengecualian untuk lokasi ini sudah aktif")
+    exemption = add_exemption(person_id, req.camera_id, created_by=admin["username"], reason=req.reason)
+    free_time_ledger.invalidate()
+    return {"status": "success", "exemption": exemption}
+
+
+@router.delete("/{internal_id}/exemptions/{exemption_id}")
+def delete_exemption(internal_id: int, exemption_id: int, admin=Depends(require_admin)):
+    """Mencabut, bukan menghapus: kunjungan selama pengecualian aktif tetap tidak ditagih."""
+    employee = _employee_or_404(internal_id)
+    if not revoke_exemption(exemption_id, revoked_by=admin["username"], person_id=str(employee["employee_id"])):
+        raise HTTPException(status_code=404, detail="Pengecualian tidak ditemukan atau sudah dicabut")
+    free_time_ledger.invalidate()
+    return {"status": "success"}
 
 
 @router.post("/{internal_id}/activate")

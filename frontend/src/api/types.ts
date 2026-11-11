@@ -13,6 +13,8 @@ export interface Employee {
   enrolled_refs: number;
   has_account: boolean;
   created_at: number;
+  /** Jatah free time harian karyawan ini (menit). null = jatah global. */
+  allowance_minutes?: number | null;
 }
 
 export interface EmployeeInput {
@@ -20,6 +22,25 @@ export interface EmployeeInput {
   name: string;
   division?: string | null;
   email?: string | null;
+  allowance_minutes?: number | null;
+}
+
+/** Pengecualian karyawan di satu lokasi/kamera: kunjungan di sana tidak memotong jatah. */
+export interface Exemption {
+  id: number;
+  person_id: string;
+  camera_id: string;
+  effective_from: number;
+  revoked_at: number | null;
+  reason: string;
+  created_by: string;
+  revoked_by: string | null;
+}
+
+export interface CameraOption {
+  id: string;
+  name: string;
+  counts_free_time: boolean;
 }
 
 export interface AccountCredentials {

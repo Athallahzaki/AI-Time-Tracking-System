@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
-import { AlertTriangle } from '@lucide/vue';
+import { AlertTriangle, X } from '@lucide/vue';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -12,7 +12,15 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { createEmployee, updateEmployee } from '@/api/employees';
+import {
+  createEmployee,
+  createExemption,
+  listCameraOptions,
+  listExemptions,
+  revokeExemption,
+  updateEmployee,
+} from '@/api/employees';
+import { nativeSelectClass } from '@/components/common/nativeSelect';
 import { isValidEmail } from '@/lib/format';
 
 const props = defineProps({
@@ -24,7 +32,16 @@ const props = defineProps({
 
 const emit = defineEmits(['update:open', 'saved']);
 
-const form = ref({ employee_id: '', name: '', division: '', email: '' });
+const form = ref({ employee_id: '', name: '', division: '', email: '', allowance_minutes: '' });
+
+// Pengecualian lokasi: hanya saat mengubah karyawan yang sudah ada.
+const cameras = ref([]);
+const exemptions = ref([]);
+const exemptionForm = ref({ camera_id: '', reason: '' });
+const exemptionError = ref('');
+const exemptionBusy = ref(false);
+const activeExemptions = computed(() => exemptions.value.filter((x) => x.revoked_at === null));
+const cameraName = (id) => cameras.value.find((c) => c.id === id)?.name || id;
 const errors = ref({});
 const serverError = ref('');
 const saving = ref(false);
@@ -44,12 +61,56 @@ watch(
       name: e?.name ?? '',
       division: e?.division ?? '',
       email: e?.email ?? '',
+      allowance_minutes: e?.allowance_minutes ?? '',
     };
     errors.value = {};
     serverError.value = '';
+    exemptions.value = [];
+    exemptionForm.value = { camera_id: '', reason: '' };
+    exemptionError.value = '';
+    if (e) loadExemptions(e.uid);
   },
   { immediate: true },
 );
+
+async function loadExemptions(uid) {
+  try {
+    [cameras.value, exemptions.value] = await Promise.all([listCameraOptions(), listExemptions(uid)]);
+  } catch (err) {
+    exemptionError.value = err?.message || 'Gagal memuat pengecualian lokasi.';
+  }
+}
+
+async function addExemption() {
+  const { camera_id, reason } = exemptionForm.value;
+  if (!camera_id || !reason.trim()) {
+    exemptionError.value = 'Pilih lokasi dan isi alasannya.';
+    return;
+  }
+  exemptionBusy.value = true;
+  exemptionError.value = '';
+  try {
+    exemptions.value.push(await createExemption(props.employee.uid, camera_id, reason.trim()));
+    exemptionForm.value = { camera_id: '', reason: '' };
+  } catch (err) {
+    exemptionError.value = err?.message || 'Gagal menambah pengecualian.';
+  } finally {
+    exemptionBusy.value = false;
+  }
+}
+
+async function removeExemption(item) {
+  exemptionBusy.value = true;
+  exemptionError.value = '';
+  try {
+    await revokeExemption(props.employee.uid, item.id);
+    item.revoked_at = Date.now() / 1000;
+  } catch (err) {
+    exemptionError.value = err?.message || 'Gagal mencabut pengecualian.';
+  } finally {
+    exemptionBusy.value = false;
+  }
+}
 
 function validate() {
   const next = {};
@@ -59,6 +120,9 @@ function validate() {
     next.employee_id = 'Hanya huruf, angka, titik, garis bawah, atau strip (maks. 50).';
   if (!f.name.trim()) next.name = 'Nama wajib diisi.';
   if (f.email.trim() && !isValidEmail(f.email)) next.email = 'Format email tidak valid.';
+  const allowance = String(f.allowance_minutes ?? '').trim();
+  if (allowance && !(Number(allowance) > 0 && Number(allowance) <= 1440))
+    next.allowance_minutes = 'Isi 1 sampai 1440 menit, atau kosongkan.';
   errors.value = next;
   return Object.keys(next).length === 0;
 }
@@ -72,6 +136,10 @@ async function submit() {
     name: form.value.name.trim(),
     division: form.value.division.trim() || null,
     email: form.value.email.trim() || null,
+    // Kosong = null = kembali ke jatah global.
+    allowance_minutes: String(form.value.allowance_minutes ?? '').trim()
+      ? Number(form.value.allowance_minutes)
+      : null,
   };
   try {
     const saved = isEdit.value
@@ -129,7 +197,70 @@ async function submit() {
               Tanpa email, peringatan pelanggaran hanya dikirim ke HR.
             </p>
           </div>
+          <div class="space-y-1.5">
+            <Label for="emp-allowance" class="text-xs font-semibold text-slate-700">
+              Jatah free time harian (menit)
+            </Label>
+            <Input
+              id="emp-allowance"
+              v-model="form.allowance_minutes"
+              type="number"
+              min="1"
+              max="1440"
+              step="1"
+              placeholder="Kosong = jatah global"
+              :aria-invalid="!!errors.allowance_minutes"
+            />
+            <p v-if="errors.allowance_minutes" class="text-[11px] text-red-600">{{ errors.allowance_minutes }}</p>
+          </div>
         </div>
+
+        <fieldset v-if="isEdit" class="space-y-2 rounded-md border border-slate-200 px-3 py-3">
+          <legend class="px-1 text-xs font-semibold text-slate-700">Pengecualian lokasi</legend>
+          <p class="text-[11px] text-slate-500">
+            Kunjungan karyawan ini di lokasi yang dikecualikan tetap tercatat, tetapi tidak memotong jatah.
+            Berlaku sejak ditambahkan, tidak mundur.
+          </p>
+          <ul v-if="activeExemptions.length" class="space-y-1">
+            <li
+              v-for="item in activeExemptions"
+              :key="item.id"
+              class="flex items-center justify-between gap-2 rounded bg-slate-50 px-2 py-1.5 text-xs"
+            >
+              <span>
+                <b>{{ cameraName(item.camera_id) }}</b>
+                <span class="text-slate-500"> · {{ item.reason }} · oleh {{ item.created_by }}</span>
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                :disabled="exemptionBusy"
+                :aria-label="`Cabut pengecualian ${cameraName(item.camera_id)}`"
+                @click="removeExemption(item)"
+              >
+                <X class="h-3.5 w-3.5" /> Cabut
+              </Button>
+            </li>
+          </ul>
+          <p v-else class="text-[11px] text-slate-500">Belum ada pengecualian aktif.</p>
+          <div class="grid gap-2 sm:grid-cols-[1fr_1.4fr_auto]">
+            <select v-model="exemptionForm.camera_id" :class="nativeSelectClass" aria-label="Lokasi yang dikecualikan">
+              <option value="">Pilih lokasi…</option>
+              <option
+                v-for="c in cameras"
+                :key="c.id"
+                :value="c.id"
+                :disabled="activeExemptions.some((x) => x.camera_id === c.id)"
+              >
+                {{ c.name }}{{ c.counts_free_time === false ? ' (tidak dihitung)' : '' }}
+              </option>
+            </select>
+            <Input v-model="exemptionForm.reason" placeholder="Alasan (wajib)" aria-label="Alasan pengecualian" />
+            <Button type="button" variant="outline" :disabled="exemptionBusy" @click="addExemption">Tambah</Button>
+          </div>
+          <p v-if="exemptionError" class="text-[11px] text-red-600">{{ exemptionError }}</p>
+        </fieldset>
 
         <div
           v-if="idChanged"

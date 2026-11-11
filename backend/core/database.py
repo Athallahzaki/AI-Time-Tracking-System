@@ -85,6 +85,10 @@ def _migrate_employees_schema(
     if "division" not in columns:
         conn.execute("ALTER TABLE employees ADD COLUMN division TEXT")
 
+    # JAT-12: jatah harian per karyawan (menit). NULL = pakai jatah global kebijakan.
+    if "allowance_minutes" not in columns:
+        conn.execute("ALTER TABLE employees ADD COLUMN allowance_minutes REAL")
+
     if "status" not in columns:
         conn.execute(
             """
@@ -282,6 +286,26 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             value TEXT NOT NULL
         )
     """)
+    # JAT-07: pengecualian karyawan di satu lokasi (kamera). Tidak berlaku mundur
+    # (effective_from) dan dicabut, bukan dihapus (revoked_at), supaya jejaknya utuh.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS free_time_exemptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            person_id TEXT NOT NULL,
+            camera_id TEXT NOT NULL,
+            effective_from REAL NOT NULL,
+            revoked_at REAL,
+            reason TEXT NOT NULL DEFAULT '',
+            created_by TEXT NOT NULL,
+            revoked_by TEXT
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_exemptions_person ON free_time_exemptions(person_id)"
+    )
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS corrections (
             correction_id TEXT PRIMARY KEY,
@@ -781,12 +805,32 @@ def get_enrollments() -> List[Dict[str, Any]]:
     ]
 
 
+_EMPLOYEE_COLUMNS = (
+    "id, employee_id, name, division, email, status, created_at, updated_at, allowance_minutes"
+)
+
+
+def _employee_dict(row) -> Dict[str, Any]:
+    return {
+        "id": row[0],
+        "employee_id": row[1],
+        "name": row[2],
+        "division": row[3],
+        "email": row[4],
+        "status": row[5],
+        "created_at": row[6],
+        "updated_at": row[7],
+        "allowance_minutes": row[8],
+    }
+
+
 def create_employee(
     employee_id: str,
     name: str,
     division: Optional[str] = None,
     email: Optional[str] = None,
     status: str = "active",
+    allowance_minutes: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Create a new employee. Returns the created employee dict."""
     init_database()
@@ -795,10 +839,10 @@ def create_employee(
         cursor = conn.execute(
             """
             INSERT INTO employees (
-                employee_id, name, division, email, status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                employee_id, name, division, email, status, created_at, updated_at, allowance_minutes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (employee_id, name, division, email, status, now, now),
+            (employee_id, name, division, email, status, now, now, allowance_minutes),
         )
         internal_id = cursor.lastrowid
     return {
@@ -810,6 +854,7 @@ def create_employee(
         "status": status,
         "created_at": now,
         "updated_at": now,
+        "allowance_minutes": allowance_minutes,
     }
 
 
@@ -818,10 +863,7 @@ def get_employees(
 ) -> List[Dict[str, Any]]:
     """List all employees. Optionally filter by status ('active' / 'inactive')."""
     init_database()
-    query = """
-        SELECT id, employee_id, name, division, email, status, created_at, updated_at
-        FROM employees
-    """
+    query = f"SELECT {_EMPLOYEE_COLUMNS} FROM employees"
     params: List[Any] = []
     if status_filter is not None:
         query += " WHERE status = ?"
@@ -829,19 +871,7 @@ def get_employees(
     query += " ORDER BY id ASC"
     with connect() as conn:
         rows = conn.execute(query, params).fetchall()
-    return [
-        {
-            "id": row[0],
-            "employee_id": row[1],
-            "name": row[2],
-            "division": row[3],
-            "email": row[4],
-            "status": row[5],
-            "created_at": row[6],
-            "updated_at": row[7],
-        }
-        for row in rows
-    ]
+    return [_employee_dict(row) for row in rows]
 
 
 def get_employee_by_id(internal_id: int) -> Optional[Dict[str, Any]]:
@@ -849,24 +879,10 @@ def get_employee_by_id(internal_id: int) -> Optional[Dict[str, Any]]:
     init_database()
     with connect() as conn:
         row = conn.execute(
-            """
-            SELECT id, employee_id, name, division, email, status, created_at, updated_at
-            FROM employees WHERE id = ?
-            """,
+            f"SELECT {_EMPLOYEE_COLUMNS} FROM employees WHERE id = ?",
             (int(internal_id),),
         ).fetchone()
-    if row is None:
-        return None
-    return {
-        "id": row[0],
-        "employee_id": row[1],
-        "name": row[2],
-        "division": row[3],
-        "email": row[4],
-        "status": row[5],
-        "created_at": row[6],
-        "updated_at": row[7],
-    }
+    return _employee_dict(row) if row is not None else None
 
 
 def get_employee_by_employee_id(employee_id: str) -> Optional[Dict[str, Any]]:
@@ -874,24 +890,10 @@ def get_employee_by_employee_id(employee_id: str) -> Optional[Dict[str, Any]]:
     init_database()
     with connect() as conn:
         row = conn.execute(
-            """
-            SELECT id, employee_id, name, division, email, status, created_at, updated_at
-            FROM employees WHERE employee_id = ?
-            """,
+            f"SELECT {_EMPLOYEE_COLUMNS} FROM employees WHERE employee_id = ?",
             (str(employee_id),),
         ).fetchone()
-    if row is None:
-        return None
-    return {
-        "id": row[0],
-        "employee_id": row[1],
-        "name": row[2],
-        "division": row[3],
-        "email": row[4],
-        "status": row[5],
-        "created_at": row[6],
-        "updated_at": row[7],
-    }
+    return _employee_dict(row) if row is not None else None
 
 
 def update_employee(
@@ -901,6 +903,7 @@ def update_employee(
     division: Optional[str] = ...,
     email: Optional[str] = ...,  # type: ignore[assignment]  # sentinel
     status: Optional[str] = None,
+    allowance_minutes: Optional[float] = ...,  # type: ignore[assignment]  # None = kembali ke jatah global
 ) -> Optional[Dict[str, Any]]:
     """Partial update an employee. Only provided fields are changed.
 
@@ -922,6 +925,9 @@ def update_employee(
     if email is not ...:
         sets.append("email = ?")
         params.append(email)
+    if allowance_minutes is not ...:
+        sets.append("allowance_minutes = ?")
+        params.append(allowance_minutes)
     if status is not None:
         if status not in ("active", "inactive"):
             raise ValueError("status must be 'active' or 'inactive'")
@@ -1515,6 +1521,57 @@ def save_correction(record: Dict[str, Any]) -> None:
                 json.dumps(record),
             ),
         )
+
+
+def add_exemption(person_id: str, camera_id: str, created_by: str, reason: str = "",
+                  effective_from: Optional[float] = None) -> Dict[str, Any]:
+    """Kecualikan satu karyawan di satu kamera, mulai sekarang (tidak berlaku mundur)."""
+    init_database()
+    start = time.time() if effective_from is None else float(effective_from)
+    with connect() as conn:
+        cursor = conn.execute(
+            "INSERT INTO free_time_exemptions (person_id, camera_id, effective_from, reason, created_by) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (str(person_id), str(camera_id), start, reason, created_by),
+        )
+        exemption_id = cursor.lastrowid
+    return {"id": exemption_id, "person_id": str(person_id), "camera_id": str(camera_id),
+            "effective_from": start, "revoked_at": None, "reason": reason,
+            "created_by": created_by, "revoked_by": None}
+
+
+def revoke_exemption(exemption_id: int, revoked_by: str, person_id: Optional[str] = None,
+                     at: Optional[float] = None) -> bool:
+    """Cabut pengecualian. False bila tidak ada, sudah dicabut, atau bukan milik `person_id`."""
+    init_database()
+    query = "UPDATE free_time_exemptions SET revoked_at = ?, revoked_by = ? WHERE id = ? AND revoked_at IS NULL"
+    params: List[Any] = [time.time() if at is None else float(at), revoked_by, int(exemption_id)]
+    if person_id is not None:
+        query += " AND person_id = ?"
+        params.append(str(person_id))
+    with connect() as conn:
+        return conn.execute(query, params).rowcount > 0
+
+
+def get_exemptions(person_id: Optional[str] = None, include_revoked: bool = True) -> List[Dict[str, Any]]:
+    init_database()
+    query = ("SELECT id, person_id, camera_id, effective_from, revoked_at, reason, created_by, revoked_by "
+             "FROM free_time_exemptions")
+    clauses, params = [], []
+    if person_id is not None:
+        clauses.append("person_id = ?")
+        params.append(str(person_id))
+    if not include_revoked:
+        clauses.append("revoked_at IS NULL")
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+    with connect() as conn:
+        rows = conn.execute(query + " ORDER BY id ASC", params).fetchall()
+    return [
+        {"id": r[0], "person_id": r[1], "camera_id": r[2], "effective_from": r[3], "revoked_at": r[4],
+         "reason": r[5], "created_by": r[6], "revoked_by": r[7]}
+        for r in rows
+    ]
 
 
 def get_corrections(

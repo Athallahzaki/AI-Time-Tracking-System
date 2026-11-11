@@ -1,7 +1,7 @@
 import { ApiError, qs, request } from './http';
 import { clone, db, generateTempPassword, save, uuid } from './mock/db';
 import { createUser } from './users';
-import type { AccountCredentials, Employee, EmployeeInput } from './types';
+import type { AccountCredentials, CameraOption, Employee, EmployeeInput, Exemption } from './types';
 
 const DOMAIN = 'employees';
 
@@ -69,6 +69,7 @@ export async function createEmployee(input: EmployeeInput): Promise<Employee> {
         name: input.name.trim(),
         division: input.division?.trim() || null,
         email: input.email?.trim() || null,
+        allowance_minutes: input.allowance_minutes ?? null,
         active: true,
         enrolled_refs: 0,
         has_account: false,
@@ -98,6 +99,7 @@ export async function updateEmployee(uid: string, input: Partial<EmployeeInput>)
       if (input.name !== undefined) e.name = input.name.trim();
       if (input.division !== undefined) e.division = input.division?.trim() || null;
       if (input.email !== undefined) e.email = input.email?.trim() || null;
+      if (input.allowance_minutes !== undefined) e.allowance_minutes = input.allowance_minutes;
       save();
       return { employee: clone(e) };
     },
@@ -157,6 +159,34 @@ export async function createEmployeeAccount(employee: Employee): Promise<Account
       return { username: employee.employee_id, temporary_password: password };
     },
   });
+}
+
+// ---- Pengecualian lokasi (hanya backend sungguhan; tanpa data tiruan) ----
+
+const exemptionsPath = (uid: string) => `/api/employees/${encodeURIComponent(uid)}/exemptions`;
+
+export async function listExemptions(uid: string): Promise<Exemption[]> {
+  const res = await request<{ exemptions: Exemption[] }>({ domain: DOMAIN, path: exemptionsPath(uid) });
+  return res.exemptions || [];
+}
+
+export async function createExemption(uid: string, cameraId: string, reason: string): Promise<Exemption> {
+  const res = await request<{ exemption: Exemption }>({
+    domain: DOMAIN,
+    method: 'POST',
+    path: exemptionsPath(uid),
+    body: { camera_id: cameraId, reason },
+  });
+  return res.exemption;
+}
+
+export async function revokeExemption(uid: string, exemptionId: number): Promise<void> {
+  await request({ domain: DOMAIN, method: 'DELETE', path: `${exemptionsPath(uid)}/${exemptionId}` });
+}
+
+export async function listCameraOptions(): Promise<CameraOption[]> {
+  const res = await request<{ cameras: CameraOption[] }>({ domain: DOMAIN, path: '/api/cameras' });
+  return res.cameras || [];
 }
 
 export async function listDivisions(): Promise<string[]> {
