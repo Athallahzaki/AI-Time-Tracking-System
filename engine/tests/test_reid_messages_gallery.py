@@ -97,3 +97,16 @@ def test_purge_harian_mengosongkan_galeri():
     assert g.day == "2026-10-10"
     with pytest.raises(ValueError):
         g.purge_day("10-10-2026")
+
+
+def test_matriks_prototipe_disimpan_dan_mengikuti_setiap_penambahan():
+    """Paket D: `matrix()` disimpan antar panggilan; setiap `add` (tambah, lebur, ganti) membuangnya."""
+    from engine.identity.reid.gallery import PrototypeSet
+    rng = np.random.default_rng(3)
+    protos = PrototypeSet(capacity=3)
+    for step in range(12):                                   # melewati tambah, penuh/ganti, dan lebur
+        vec = rng.normal(size=16).astype(np.float32)
+        protos.add(vec if step % 4 else protos.matrix()[0] if len(protos) else vec)
+        cached = protos.matrix()
+        assert protos.matrix() is cached                     # tidak ditumpuk ulang
+        assert np.array_equal(cached, np.stack(protos._vecs))  # tidak basi

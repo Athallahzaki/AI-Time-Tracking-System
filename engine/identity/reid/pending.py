@@ -291,11 +291,20 @@ class PendingIdentities:
     def _sweep_groups(self, person: str, at: float) -> List[Resolution]:
         """Kelompok ANON lain yang kini cocok dengan galeri orang ini."""
         out: List[Resolution] = []
+        own = self.gallery.prototypes(person)
+        if own is None:
+            return out
         for group in list(self._groups.values()):
             if group.resolved_to is not None or not group.members or not len(group.protos):
                 continue
+            # Di bawah ambang terhadap orang ini = mustahil menjadi `pick_best`; lewati
+            # penilaian terhadap SEMUA orang (dulu kelompok x orang tiap wajah terlihat).
+            if own.score_set(group.protos) < self.config.match_threshold:
+                continue
             if pick_best(self.gallery.scores_set(group.protos), self.config) != person:
                 continue
+            # Dihitung ulang tiap kelompok: kelompok yang baru selesai di sapuan ini
+            # menambah rentang orang itu dan harus ikut diperiksa.
             person_spans = self._person_spans(person)
             if all(check_group(person_spans, self._tracks[u].span, self.config).ok
                    for u in group.members):

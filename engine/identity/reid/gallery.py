@@ -43,22 +43,28 @@ class PrototypeSet:
         self._merge = merge_similarity
         self._vecs: List[np.ndarray] = []
         self._weights: List[int] = []
+        self._mat: Optional[np.ndarray] = None  # tumpukan `_vecs`; dibuang tiap `add`
 
     def __len__(self) -> int:
         return len(self._vecs)
 
     def matrix(self) -> np.ndarray:
+        """Jangan diubah di tempat: hasilnya disimpan (np.stack per panggilan
+        dulu ±80% biaya sapuan kelompok ANON)."""
         if not self._vecs:
             return np.zeros((0, 0), dtype=np.float32)
-        return np.stack(self._vecs)
+        if self._mat is None:
+            self._mat = np.stack(self._vecs)
+        return self._mat
 
     def add(self, embedding: np.ndarray) -> None:
         emb = l2_normalize(embedding)
+        mat = self.matrix()
+        self._mat = None  # setiap cabang di bawah mengubah `_vecs`
         if not self._vecs:
             self._vecs.append(emb)
             self._weights.append(1)
             return
-        mat = self.matrix()
         sims = mat @ emb
         nearest = int(np.argmax(sims))
         if sims[nearest] >= self._merge:

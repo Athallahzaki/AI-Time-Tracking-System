@@ -226,3 +226,24 @@ def test_penilaian_ulang_menyelesaikan_ke_karyawan_galeri():
     assert first.person_id.startswith("ANON-")
     again = core.observe(_obs("cam5", 3, 45, _vec(0), zone="biliar"))
     assert again.person_id == "4471" and [r.reason for r in again.resolutions] == ["group_merged"]
+
+
+# ---- Paket D (11 Nov 2026): biaya sapuan tidak tumbuh mengikuti jumlah kelompok ----
+
+def test_sapuan_wajah_tidak_menilai_penuh_kelompok_yang_mustahil_cocok(monkeypatch):
+    """Dulu setiap wajah terlihat menilai SEMUA kelompok ANON terhadap SEMUA orang
+    (terukur 101 ms per wajah pada 3.200 track; kunci yang sama dipakai thread kamera).
+    Kelompok di bawah ambang terhadap orang itu kini dilewati tanpa penilaian penuh."""
+    core = _core()
+    for i in range(1, 21):                                   # 20 kelompok ANON yang saling asing
+        core.observe(_obs("cam1", i, i * 100, _vec(i), zone="lobby"))
+    assert len(core.unresolved_anon_ids()) == 20
+
+    full_scorings = []
+    original = core.gallery.scores_set
+    monkeypatch.setattr(core.gallery, "scores_set",
+                        lambda protos: full_scorings.append(1) or original(protos))
+    seen = core.observe(_obs("cam2", 99, 5000, _vec(0), face="EMP1", zone="lobby"))
+
+    assert full_scorings == []
+    assert seen.resolutions == () and len(core.unresolved_anon_ids()) == 20
