@@ -14,6 +14,7 @@ from backend.routers import (
     attendance,
     auth,
     cameras,
+    debug,
     employees,
     enrollments,
     notifications,
@@ -128,6 +129,11 @@ app.include_router(reports.router)
 app.include_router(hr_review.router)
 app.include_router(reviews.router)
 app.include_router(me.router)
+
+# Panel debug admin: default mati. Mati = rutenya tidak terdaftar sama sekali.
+if debug.debug_panel_enabled():
+    debug.install_log_capture()
+    app.include_router(debug.router)
 
 @app.get("/")
 def root():

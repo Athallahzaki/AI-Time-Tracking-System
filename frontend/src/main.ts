@@ -7,6 +7,11 @@ import EnrollmentView from './views/EnrollmentView.vue';
 import LoginView from './views/LoginView.vue';
 import { homePathFor, useAuth } from './composables/useAuth';
 import { loadDisplayConfig } from './config/display';
+import { reportClientError } from './api/debug';
+
+// Galat browser masuk ke panel debug admin (bila panel menyala); tanpa itu diabaikan.
+window.addEventListener('error', (event) => reportClientError(event.error || event.message));
+window.addEventListener('unhandledrejection', (event) => reportClientError(event.reason));
 
 import SettingsView from './views/SettingsView.vue';
 
@@ -17,6 +22,7 @@ const ReportsView = () => import('./views/ReportsView.vue');
 const ReviewQueueView = () => import('./views/ReviewQueueView.vue');
 const ViewerHomeView = () => import('./views/ViewerHomeView.vue');
 const ChangePasswordView = () => import('./views/ChangePasswordView.vue');
+const DebugView = () => import('./views/DebugView.vue');
 
 // meta.roles: peran yang boleh membuka halaman. Ini hanya kenyamanan UI —
 // penyaringan sebenarnya WAJIB di backend (dok. 12 §3.8).
@@ -34,6 +40,7 @@ const routes = [
   { path: '/reports', component: ReportsView, meta: ADMIN },
   { path: '/reviews', component: ReviewQueueView, meta: ADMIN },
   { path: '/settings', component: SettingsView, meta: ADMIN },
+  { path: '/debug', component: DebugView, meta: ADMIN },
   { path: '/:pathMatch(.*)*', redirect: '/' },
 ];
 

@@ -7,6 +7,31 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-11-11 · paket be-r12 + fe-r6 (Paket F) — Panel debug admin, Fase 1
+
+Tanpa perubahan kontrak: semua data engine di panel ini sudah dikirim lewat `engine.health`/`camera.*` dan tersimpan
+di `protocol_events`, hanya belum pernah ditampilkan. **Default mati:** tanpa `DEBUG_PANEL_ENABLED=1` rute
+`/api/debug/*` tidak terdaftar dan halaman Debug menampilkan cara menyalakannya.
+
+- **`GET /api/debug/health`** (admin): status per kamera, fps, lag, alasan gagal/turun terakhir (24 jam), umur
+  laporan kesehatan, dan penghitung sebagai LAJU per menit dari dua laporan terakhir (bukan total kumulatif).
+- **`GET /api/debug/logs`** (admin): log backend (ring buffer 1.000 baris, hilang saat restart) dan galat browser
+  dalam satu daftar. **`POST /api/debug/client-log`** (semua pengguna login, pesan dibatasi 2.000 karakter):
+  frontend mengirim `window.onerror`, `unhandledrejection`, dan kegagalan WHEP (maks. 20 per muat halaman).
+- **`GET /api/debug/health.csv?from=&to=`** (admin): rekaman kesehatan satu rentang, kolom seperti
+  `scripts/lag_probe.py` (sumber `health`), bisa dibaca `scripts/summarize_gladi.py`. Tombol Mulai/Hentikan di
+  halaman hanya mencatat rentang waktunya; datanya memang sudah durabel.
+- Frontend: halaman **Debug** (`/debug`, admin) + tautan sidebar; diperbarui tiap 10 dtk.
+- `DEBUG_PANEL_ENABLED` diteruskan di kedua compose dan dicontohkan di `.env.example`.
+- Tidak dikerjakan: polling `/v3/paths/list` MediaMTX; `lag_probe`/`runtime_uji`/bench tetap skrip (ANALISIS §6).
+
+File: `backend/routers/debug.py`, `backend/main.py`, `backend/tests/test_debug_panel.py`,
+`frontend/src/{api/debug.ts,views/DebugView.vue,main.ts}`, `frontend/src/components/{layout/AppSidebarContent,
+dashboard/CameraFeedCard}.vue`, `deploy/docker-compose{,.portainer}.yml`, `deploy/{.env,portainer.env}.example`.
+
+Uji: backend 165 (6 baru), `npm run build`; halaman diuji di browser terhadap backend lokal dengan data kesehatan
+tiruan (kamera gagal + alasan 404 tampil, galat browser masuk ke log).
+
 ## 2026-11-11 · paket deploy-r1 (Paket E) — Watchdog engine untuk Docker/Linux
 
 - **`deploy/engine/run-with-watchdog.sh`** (baru, POSIX sh): menjalankan `python -m engine.runtime "$@"`, memantau

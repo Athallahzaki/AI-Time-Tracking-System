@@ -11,6 +11,7 @@ import Hls from 'hls.js';
 import { displayConfig } from '@/config/display';
 import { Circle, ScanSearch, TriangleAlert, Video, Wifi } from '@lucide/vue';
 import DetectionBox from './DetectionBox.vue';
+import { reportClientError } from '@/api/debug';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -424,6 +425,7 @@ async function startWhep(url) {
     });
   } catch (err) {
     console.error('[WebRTC] WHEP error:', err);
+    reportClientError(`[WebRTC] ${props.camera?.id ?? ''} ${err?.message || err}`);
     streamError.value = true;
     teardownWebRtc();
   }

@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
 import {
+  Activity,
   ClipboardCheck,
   FileText,
   House,
@@ -57,6 +58,7 @@ const mainNav = computed(() => {
     },
     { label: 'Manajemen Pengguna', icon: ShieldCheck, to: '/users' },
     { label: 'Pengaturan Sistem', icon: Settings, to: '/settings' },
+    { label: 'Debug', icon: Activity, to: '/debug' },
   ];
 });
 
