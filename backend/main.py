@@ -3,8 +3,10 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+from backend.core.security import require_api_key
 
 from backend.core.config import settings
 from backend.core.database import init_database
@@ -97,6 +99,8 @@ app = FastAPI(
     description="AI Time Tracking backend.",
     version="2.1.0",
     lifespan=lifespan,
+    # Dulu didefinisikan tetapi tidak dipasang di rute mana pun (kontrol palsu).
+    dependencies=[Depends(require_api_key)],
 )
 
 

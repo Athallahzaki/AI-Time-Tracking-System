@@ -112,11 +112,11 @@ kehadiran. Pakai `down` tanpa `-v`.
 
 ## API key
 
-Kalau `BACKEND_API_KEY` diisi, nginx menyuntikkan `X-API-Key` ke setiap
-request `/api`. Artinya kunci ini melindungi port backend langsung, **bukan**
-dashboard — siapa pun yang bisa membuka port 80 tetap bisa mengubah data.
-Autentikasi pengguna masih pekerjaan terbuka; sampai itu ada, batasi akses
-port 80 (`HTTP_BIND`, firewall, VPN).
+Kalau `BACKEND_API_KEY` diisi, backend menolak (401) setiap request `/api/*`
+tanpa header `X-API-Key` yang cocok; nginx dan proxy Vite menyuntikkannya.
+Kunci ini melindungi port backend langsung, **bukan** dashboard: yang
+melindungi dashboard adalah login pengguna. Skrip yang memanggil backend
+langsung di port 8000 harus ikut mengirim header itu. Kosong = tidak diperiksa.
 
 ## Update
 

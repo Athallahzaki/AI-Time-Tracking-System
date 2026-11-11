@@ -28,6 +28,8 @@ from backend.core.database import (
 )
 from backend.core.security import (
     require_admin,
+    require_session,
+    session_token,
     require_video_user,
     require_user,
 )
@@ -154,7 +156,7 @@ def login(req: LoginRequest, request: Request, response: Response):
 
 @router.get("/me")
 def me(
-    user=Depends(require_user),
+    user=Depends(require_session),
 ):
     return {
         "status": "success",
@@ -165,18 +167,12 @@ def me(
 @router.post("/logout")
 def logout(
     response: Response,
-    authorization: str | None = Header(
-        default=None
-    ),
-    user=Depends(require_user),
+    token: str = Depends(session_token),
+    user=Depends(require_session),
 ):
     del user
 
-    token = authorization.split(
-        " ",
-        1,
-    )[1]
-
+    # Token dari header ATAU cookie: dulu sesi cookie-saja gagal 500 di sini.
     auth_service.logout(
         token
     )
@@ -303,13 +299,16 @@ def reset_password(user_id: int, _admin=Depends(require_admin)):
 
 
 @router.post("/change-password", status_code=204)
-def change_password(req: ChangePasswordRequest, user=Depends(require_user)):
+def change_password(req: ChangePasswordRequest, user=Depends(require_session),
+                    token: str = Depends(session_token)):
     current = get_user_by_id(user["id"], include_password=True)
     if current is None or not auth_service.verify_password(req.old_password, current["password_hash"]):
         raise HTTPException(status_code=400, detail="Old password is incorrect")
     update_user(
         user["id"], password_hash=auth_service.hash_password(req.new_password),
         must_change_password=False,
+        # Sesi ini tetap hidup; semua sesi lain pengguna ini dicabut.
+        keep_session_hash=auth_service.hash_token(token),
     )
     return None
 

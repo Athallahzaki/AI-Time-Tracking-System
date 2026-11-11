@@ -1,12 +1,8 @@
-"""Minimal guard for mutating endpoints.
+"""Dependensi autentikasi: sesi pengguna, peran, dan cakupan data viewer.
 
-Bukan pengganti autentikasi pengguna (itu masih pekerjaan terbuka: siapa HR
-yang mengoreksi, siapa operator yang mengganti kamera). Ini memastikan bahwa
-kalau `BACKEND_API_KEY` di-set, tidak ada klien di jaringan yang bisa mengubah
-kamera, enrollment, atau koreksi tanpa kunci itu.
-
-Frontend dev server menyuntikkan header ini lewat proxy Vite (lihat
-`frontend/vite.config.ts`), jadi kunci tidak pernah masuk ke bundle browser.
+`require_session` = sesi sah saja (dipakai /me, ganti password, logout).
+`require_user` = sesi sah DAN bukan password sementara; `require_admin` di atasnya.
+`require_api_key` = lapis terpisah untuk port backend (dipasang di `main.py`).
 """
 
 from __future__ import annotations
@@ -14,7 +10,7 @@ from __future__ import annotations
 import hmac
 import os
 
-from fastapi import Cookie, Header, HTTPException, Query
+from fastapi import Cookie, Header, HTTPException, Query, Request
 from backend.core.database import get_employee_by_id
 from backend.services.auth_service import (
     auth_service,
@@ -22,13 +18,17 @@ from backend.services.auth_service import (
 
 from collections.abc import Mapping
 
-def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
+def require_api_key(request: Request, x_api_key: str | None = Header(default=None)) -> None:
+    """Bila `BACKEND_API_KEY` diisi, /api/* hanya menerima request yang membawa kunci itu
+    (nginx dan proxy Vite menyuntikkannya), jadi port backend tidak bisa dipakai langsung.
+    Kosong = tidak diperiksa. `/` dikecualikan: healthcheck container memakainya."""
     expected = os.getenv("BACKEND_API_KEY", "")
-    if not expected:
+    if not expected or not request.url.path.startswith("/api/"):
         return
     if not x_api_key or not hmac.compare_digest(x_api_key, expected):
         raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key")
-    
+
+
 def _bearer_token(
     authorization: str | None,
 ) -> str:
@@ -52,6 +52,55 @@ def _bearer_token(
     return token
 
 
+PASSWORD_CHANGE_REQUIRED = "Password change required"
+
+
+def session_token(
+    authorization: str | None = Header(default=None),
+    access_token_cookie: str | None = Cookie(
+        default=None,
+        alias="access_token",
+    ),
+) -> str:
+    """Token mentah sesi ini, dari header Bearer atau cookie."""
+    raw_token = _bearer_token(authorization) if authorization else access_token_cookie
+    if not raw_token:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing authentication token",
+        )
+    return raw_token
+
+
+def _session_user(raw_token: str):
+    user = auth_service.authenticate(raw_token)
+    if user is None or not user["enabled"]:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired session",
+        )
+    return user
+
+
+def _reject_temporary_password(user):
+    # Ditegakkan di server: dulu hanya frontend yang memaksa ganti password,
+    # jadi akun berpassword sementara tetap bisa memakai seluruh API.
+    if user.get("must_change_password"):
+        raise HTTPException(status_code=403, detail=PASSWORD_CHANGE_REQUIRED)
+    return user
+
+
+def require_session(
+    authorization: str | None = Header(default=None),
+    access_token_cookie: str | None = Cookie(
+        default=None,
+        alias="access_token",
+    ),
+):
+    """Sesi sah, termasuk akun yang masih wajib ganti password."""
+    return _session_user(session_token(authorization, access_token_cookie))
+
+
 def require_user(
     authorization: str | None = Header(default=None),
     access_token_cookie: str | None = Cookie(
@@ -59,28 +108,9 @@ def require_user(
         alias="access_token",
     ),
 ):
-    raw_token: str | None = None
-
-    if authorization:
-        raw_token = _bearer_token(authorization)
-    elif access_token_cookie:
-        raw_token = access_token_cookie
-
-    if not raw_token:
-        raise HTTPException(
-            status_code=401,
-            detail="Missing authentication token",
-        )
-
-    user = auth_service.authenticate(raw_token)
-
-    if user is None or not user["enabled"]:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid or expired session",
-        )
-
-    return user
+    return _reject_temporary_password(
+        require_session(authorization=authorization, access_token_cookie=access_token_cookie)
+    )
 
 
 def require_admin(
@@ -115,10 +145,7 @@ def require_stream_user(
         raw = _bearer_token(authorization)
     if not raw:
         raise HTTPException(status_code=401, detail="Missing stream access token")
-    user = auth_service.authenticate(raw)
-    if user is None or not user["enabled"]:
-        raise HTTPException(status_code=401, detail="Invalid or expired session")
-    return user
+    return _reject_temporary_password(_session_user(raw))
 
 
 def require_video_user(
@@ -132,10 +159,7 @@ def require_video_user(
         raw = _bearer_token(authorization)
     if not raw:
         raise HTTPException(status_code=401, detail="Missing video access token")
-    user = auth_service.authenticate(raw)
-    if user is None or not user["enabled"]:
-        raise HTTPException(status_code=401, detail="Invalid or expired session")
-    return user
+    return _reject_temporary_password(_session_user(raw))
 
 
 def employee_scope(user) -> str | None:

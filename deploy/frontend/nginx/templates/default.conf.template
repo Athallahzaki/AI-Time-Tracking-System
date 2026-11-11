@@ -84,13 +84,11 @@ server {
         proxy_set_header Authorization $http_authorization;
         proxy_set_header Cookie $http_cookie;
         proxy_set_header X-Original-URI $request_uri;
+        proxy_set_header X-API-Key "${BACKEND_API_KEY}";
     }
 
-    # FastAPI docs (opsional, berguna untuk debugging lewat satu port).
-    location ~ ^/(docs|redoc|openapi\.json)$ {
-        include /etc/nginx/snippets/proxy-common.conf;
-        proxy_pass $backend_upstream;
-    }
+    # /docs, /redoc, /openapi.json TIDAK diteruskan: peta seluruh API tidak untuk
+    # publik. Untuk debugging, buka langsung di host backend (127.0.0.1:8000/docs).
 
     # ------------------------------------------------------------------
     # MediaMTX HLS: /hls/<path>/index.m3u8  ->  mediamtx:8888/<path>/index.m3u8

@@ -7,6 +7,31 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-11-11 · paket be-r10 (Paket B) — Sesi, password sementara, dan akses viewer
+
+Temuan audit keamanan 1, 2, 5, 6, 7 (ANALISIS-KETAHANAN §2.2). Tanpa perubahan kontrak. Frontend tidak berubah:
+ia sudah mengalihkan akun berpassword sementara ke halaman ganti password.
+
+- **`must_change_password` ditegakkan server.** `require_user` (dan stream/video) menolak 403
+  "Password change required"; hanya `/api/auth/me`, `/change-password`, `/logout` yang menerima sesi itu
+  (`require_session`). Dulu hanya frontend yang memaksa.
+- **Ganti/reset password mencabut sesi lama.** `update_user(password_hash=...)` menghapus `auth_sessions` pengguna
+  itu dalam transaksi yang sama; `/change-password` mempertahankan sesi yang sedang dipakai (`keep_session_hash`).
+- **Logout dengan sesi cookie-saja** tidak lagi 500 (dulu membaca header `Authorization` yang tidak ada).
+- **Viewer** tidak lagi menerima `source_uri`/`allowed_sources` dari `GET /api/cameras[/{id}]`; `GET
+  /api/settings/email` kini admin saja.
+- **`/docs`, `/redoc`, `/openapi.json`** tidak lagi diteruskan nginx (tetap ada di 127.0.0.1:8000 pada host backend).
+- **`BACKEND_API_KEY` kini benar-benar diperiksa** di semua `/api/*` bila diisi (dulu `require_api_key` tidak dipasang
+  di rute mana pun). `/` dikecualikan (healthcheck). nginx kini juga mengirim kunci di subrequest `/_video_auth`.
+  **Perubahan perilaku bila kunci sudah diisi di `stack.env`:** skrip yang memanggil port 8000 langsung harus
+  mengirim `X-API-Key`. Kosong = tidak diperiksa (default).
+
+File: `backend/core/{security,database}.py`, `backend/main.py`, `backend/routers/{auth,cameras,settings}.py`,
+`backend/tests/{test_sesi_dan_akses,test_cameras_and_routes}.py`,
+`deploy/frontend/nginx/templates/default.conf.template`, `deploy/README.md`.
+
+Uji: backend 155 (6 baru). Template nginx TIDAK diuji di sini (tanpa nginx): uji manual di SERAH-TERIMA.
+
 ## 2026-11-11 · paket ea-r26 + be-r9 (Paket A) — Kanal pesan tahan baris raksasa dan pesan cacat
 
 Dari uji ketahanan 11 Nov (ANALISIS-KETAHANAN §3). Tanpa perubahan kontrak, tanpa saklar: pesan sah tidak

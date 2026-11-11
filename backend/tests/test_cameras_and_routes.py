@@ -68,7 +68,7 @@ def test_source_switch_is_restricted_to_allow_list(env):
     ok = cameras.switch_camera_source(
         "r1", cameras.SwitchSourceRequest(source_uri="rtsp://localhost:8554/cam01-backup"))
     assert ok["status"] == "success"
-    listed = {c["id"]: c for c in cameras.list_cameras()["cameras"]}
+    listed = {c["id"]: c for c in cameras.list_cameras(user={"role": "admin"})["cameras"]}
     assert listed["r1"]["source_uri"] == "rtsp://localhost:8554/cam01-backup"
 
 

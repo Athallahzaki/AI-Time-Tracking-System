@@ -115,7 +115,7 @@ def update_policy(req: FreeTimePolicyUpdate):
     }
 
 @router.get("/email")
-def get_email_status(_user=Depends(require_user)):
+def get_email_status(_admin=Depends(require_admin)):  # host SMTP + penerima HR: admin saja
     return {
         "status": "success",
         "email": email_service.status(),

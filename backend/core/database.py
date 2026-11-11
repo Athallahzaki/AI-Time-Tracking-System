@@ -1442,7 +1442,9 @@ def update_user(
     enabled: Optional[bool] = None,
     employee_internal_id: Any = ...,
     must_change_password: Optional[bool] = None,
+    keep_session_hash: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
+    """`password_hash` baru mencabut semua sesi pengguna itu, kecuali `keep_session_hash`."""
     init_database()
     sets: List[str] = []
     params: List[Any] = []
@@ -1468,6 +1470,12 @@ def update_user(
         cursor = conn.execute(f"UPDATE users SET {', '.join(sets)} WHERE id = ?", params)
         if cursor.rowcount == 0:
             return None
+        if password_hash is not None:
+            # Password lama bocor = token lama ikut dianggap bocor. Satu transaksi dengan UPDATE.
+            conn.execute(
+                "DELETE FROM auth_sessions WHERE user_id = ? AND token_hash != ?",
+                (int(user_id), keep_session_hash or ""),
+            )
     return get_user_by_id(user_id)
 
 

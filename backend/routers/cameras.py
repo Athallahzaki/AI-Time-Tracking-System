@@ -23,7 +23,10 @@ class SwitchSourceRequest(BaseModel):
     source_uri: str
 
 
-def _configured_cameras() -> list[dict]:
+def _configured_cameras(user=None) -> list[dict]:
+    """`user` bukan admin: alamat sumber disembunyikan (alamat internal, dan
+    kredensial bila URL RTSP memuat user:pass). Panggilan internal (tanpa user) utuh."""
+    hide_sources = user is not None and user.get("role") != "admin"
     cameras = []
     now = time.time()
     for item in effective_cameras():
@@ -45,6 +48,10 @@ def _configured_cameras() -> list[dict]:
             "active_people": activity.get("people_count", 0) if recently_updated else 0,
             "stream_status": activity.get("stream_status", "Standby"),
         })
+    if hide_sources:
+        for camera in cameras:
+            camera.pop("source_uri", None)
+            camera.pop("allowed_sources", None)
     return cameras
 
 
@@ -68,13 +75,13 @@ def _require_camera(camera_id: str):
 
 
 @router.get("")
-def list_cameras():
-    return {"status": "success", "cameras": _configured_cameras()}
+def list_cameras(user=Depends(require_user)):
+    return {"status": "success", "cameras": _configured_cameras(user)}
 
 
 @router.get("/{camera_id}")
-def get_camera_detail(camera_id: str):
-    for cam in _configured_cameras():
+def get_camera_detail(camera_id: str, user=Depends(require_user)):
+    for cam in _configured_cameras(user):
         if cam["id"] == camera_id:
             return cam
     raise HTTPException(status_code=404, detail=f"Camera '{camera_id}' not found")
