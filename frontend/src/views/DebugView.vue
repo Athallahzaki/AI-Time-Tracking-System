@@ -36,6 +36,12 @@ const identityRates = computed(() =>
 
 const stateClass = { online: 'bg-emerald-100 text-emerald-800', degraded: 'bg-amber-100 text-amber-800', failed: 'bg-red-100 text-red-800' };
 const levelClass = { ERROR: 'text-red-700', WARNING: 'text-amber-700', INFO: 'text-slate-500' };
+const IMAGE_FLAGS = { image_ir: 'mode IR', image_dark: 'gelap', image_blurry: 'buram', image_frozen: 'beku' };
+// null = pemantau kondisi gambar mati di engine (image_condition.enabled: false).
+const imageFlags = (metrics) =>
+  metrics.image_ir === undefined
+    ? null
+    : Object.entries(IMAGE_FLAGS).filter(([key]) => metrics[key] === 1).map(([, label]) => label);
 const fmt = (value, digits = 1) => (typeof value === 'number' ? value.toFixed(digits) : '–');
 const ago = (epoch) => {
   const seconds = Math.max(0, Date.now() / 1000 - epoch);
@@ -140,6 +146,7 @@ onBeforeUnmount(() => clearInterval(timer));
                   <th :class="tableClass.th">fps</th>
                   <th :class="tableClass.th">Lag (dtk)</th>
                   <th :class="tableClass.th">Frame basi / mnt</th>
+                  <th :class="tableClass.th">Gambar</th>
                   <th :class="tableClass.th">Kejadian terakhir</th>
                 </tr>
               </thead>
@@ -150,6 +157,13 @@ onBeforeUnmount(() => clearInterval(timer));
                   <td :class="tableClass.td">{{ fmt(cam.metrics.effective_fps) }}</td>
                   <td :class="tableClass.td">{{ fmt(cam.metrics.lag_seconds, 2) }}</td>
                   <td :class="tableClass.td">{{ fmt(cam.per_minute.frames_dropped_stale) }}</td>
+                  <td :class="tableClass.td" class="text-xs">
+                    <template v-if="imageFlags(cam.metrics) === null">–</template>
+                    <template v-else-if="!imageFlags(cam.metrics).length">normal</template>
+                    <Badge v-for="label in imageFlags(cam.metrics) || []" :key="label" :class="stateClass.degraded" class="mr-1">
+                      {{ label }}
+                    </Badge>
+                  </td>
                   <td :class="tableClass.td" class="text-xs text-slate-600">
                     <template v-if="cam.last_event">
                       <b>{{ cam.last_event.type }}</b> · {{ ago(cam.last_event.at) }}
@@ -159,7 +173,7 @@ onBeforeUnmount(() => clearInterval(timer));
                   </td>
                 </tr>
                 <tr v-if="!health.cameras.length">
-                  <td :class="tableClass.td" colspan="6" class="text-slate-500">Engine belum melaporkan kamera.</td>
+                  <td :class="tableClass.td" colspan="7" class="text-slate-500">Engine belum melaporkan kamera.</td>
                 </tr>
               </tbody>
             </table>

@@ -492,6 +492,43 @@ class ReidSettings:
 
 
 @dataclass(frozen=True)
+class ImageConditionConfig:
+    """Pemantau kondisi gambar (runtime/image_condition.py). Default mati = perilaku lama.
+
+    Semua ambang perseptual pada skala piksel 0..255 dan HARUS dikalibrasi dari
+    rekaman kamera sungguhan: nilai bawaan hanya titik awal yang masuk akal.
+    """
+
+    enabled: bool = False
+    interval_seconds: float = 1.0
+    # Status berganti setelah sekian pengukuran berturut-turut (anti kedip saat kamera berpindah mode).
+    hold_samples: int = 3
+    # Mode IR: rata-rata selisih antar kanal warna di bawah ini (gambar abu-abu sejati ±0..1).
+    ir_max_channel_diff: float = 1.5
+    # Terlalu gelap: rata-rata kecerahan di bawah ini.
+    dark_max_brightness: float = 30.0
+    # Buram / lensa tertutup: varians Laplacian di bawah ini.
+    blur_max_sharpness: float = 8.0
+    # Beku: rata-rata selisih dengan sampel sebelumnya di bawah ini (0 = identik persis).
+    frozen_max_change: float = 0.0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.enabled, bool):
+            raise ValueError("image_condition.enabled harus true/false")
+        if not isinstance(self.hold_samples, int) or isinstance(self.hold_samples, bool) or not 1 <= self.hold_samples <= 60:
+            raise ValueError(f"image_condition.hold_samples={self.hold_samples!r} harus bilangan bulat 1..60")
+        ranges = {
+            "interval_seconds": (0.1, 60.0), "ir_max_channel_diff": (0.0, 50.0),
+            "dark_max_brightness": (0.0, 255.0), "blur_max_sharpness": (0.0, 10000.0),
+            "frozen_max_change": (0.0, 50.0),
+        }
+        for name, (low, high) in ranges.items():
+            value = getattr(self, name)
+            if not isinstance(value, (int, float)) or isinstance(value, bool) or not low <= value <= high:
+                raise ValueError(f"image_condition.{name}={value!r} di luar {low}..{high}")
+
+
+@dataclass(frozen=True)
 class AnalysisTriggerConfig:
     """Kapan rekognisi wajah / embedding ReID dijalankan (pipeline/change_gate.py).
 
@@ -662,6 +699,7 @@ class EngineConfig:
     recognition: RecognitionConfig = field(default_factory=RecognitionConfig)
     reid: ReidSettings = field(default_factory=ReidSettings)
     analysis_trigger: AnalysisTriggerConfig = field(default_factory=AnalysisTriggerConfig)
+    image_condition: ImageConditionConfig = field(default_factory=ImageConditionConfig)
 
     def effective_fps(self, source_fps: float) -> float:
         """

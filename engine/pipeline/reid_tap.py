@@ -62,6 +62,7 @@ class TapMetrics:
     gate_aspect: int = 0
     gate_truncated: int = 0
     gate_empty: int = 0
+    gate_kondisi_gambar: int = 0   # ditahan: mode IR / terlalu gelap
     labels_applied: int = 0
     labels_cleared: int = 0
 
@@ -101,6 +102,8 @@ class ReidCameraTap:
         self.metrics = TapMetrics()
         # Gerbang perubahan kotak bersama antrean rekognisi kamera ini; None = interval tetap.
         self.change_gate: Any = None
+        # False saat gambar tidak layak di-embed (mode IR / terlalu gelap; runtime/image_condition.py).
+        self.embed_allowed = True
         self._pts = 0.0
 
     # -- dibaca camera.py -------------------------------------------------------
@@ -171,6 +174,10 @@ class ReidCameraTap:
 
     def _try_embed(self, track: Any, uuid: str, state: _TrackState, at: float,
                    face: Optional[str], image: Any) -> None:
+        if not self.embed_allowed:
+            self.metrics.count_gate("kondisi_gambar")
+            state.retry_after = at + self._retry
+            return
         height, width = image.shape[:2]
         box = track.bbox
         quality = assess_crop(float(box.x1), float(box.y1), float(box.x2), float(box.y2),

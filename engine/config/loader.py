@@ -44,6 +44,7 @@ from typing import Any, Dict, Iterable, Optional, Set, Union
 
 from .schema import (
     AnalysisTriggerConfig,
+    ImageConditionConfig,
     DetectorConfig,
     EngineConfig,
     IngestConfig,
@@ -76,7 +77,8 @@ def _field_names(cls: type) -> Set[str]:
 # Derived from the dataclasses, so the schema cannot drift from what the loader
 # accepts. These are nested objects on EngineConfig and sections in the file,
 # not keys inside `core`.
-_NESTED = {"ingest", "detector", "tracker", "zones", "recognition", "reid", "analysis_trigger"}
+_NESTED = {"ingest", "detector", "tracker", "zones", "recognition", "reid", "analysis_trigger",
+           "image_condition"}
 _CORE_KEYS = _field_names(EngineConfig) - _NESTED
 _SECTIONS: Dict[str, Set[str]] = {
     "core": _CORE_KEYS,
@@ -87,6 +89,7 @@ _SECTIONS: Dict[str, Set[str]] = {
     "recognition": _field_names(RecognitionConfig),
     "reid": _field_names(ReidSettings),
     "analysis_trigger": _field_names(AnalysisTriggerConfig),
+    "image_condition": _field_names(ImageConditionConfig),
 }
 
 
@@ -253,6 +256,7 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
         ),
         reid=_reid_settings(rid),
         analysis_trigger=AnalysisTriggerConfig(**(raw.get("analysis_trigger") or {})),
+        image_condition=ImageConditionConfig(**(raw.get("image_condition") or {})),
     )
 
 

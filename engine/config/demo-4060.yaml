@@ -188,3 +188,17 @@ tracker:
   track_threshold: 0.45
   match_threshold: 0.8
   track_buffer_seconds: 1.0
+
+# Pemantau kondisi gambar (runtime/image_condition.py; ANALISIS-KETAHANAN §5.5). Default mati.
+# Menyala: mode IR / terlalu gelap menahan embedding ReID kamera itu; semua status tampil di
+# engine.health (menu Debug). Ambang WAJIB dikalibrasi dari rekaman kamera sungguhan:
+# baca image_brightness / image_sharpness / image_channel_diff di menu Debug saat siang,
+# redup, dan IR, lalu taruh ambang di antaranya.
+# image_condition:
+#   enabled: true
+#   interval_seconds: 1.0
+#   hold_samples: 3
+#   ir_max_channel_diff: 1.5
+#   dark_max_brightness: 30
+#   blur_max_sharpness: 8
+#   frozen_max_change: 0

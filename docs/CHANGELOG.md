@@ -7,6 +7,30 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-11-11 · paket ea-r28 + fe-r7 (Paket G) — Pemantau kondisi gambar (IR, gelap, buram, beku)
+
+Tanpa model dan tanpa perubahan kontrak. **Default mati** (`image_condition.enabled: false`): perilaku lama.
+
+- **`engine/runtime/image_condition.py`**: ±1×/dtk per kamera atas frame yang diperkecil (lebar ±160 px): selisih
+  antar kanal (mode IR), kecerahan rata-rata (gelap), varians Laplacian (buram/lensa tertutup), selisih dengan sampel
+  sebelumnya (beku). Status berganti setelah `hold_samples` pengukuran berturut-turut (anti kedip).
+- **ReID ditahan saat IR atau gelap:** `ReidTap.embed_allowed = False` → crop tidak di-embed (penghitung
+  `gate_kondisi_gambar`); wajah tetap dilaporkan ke koordinator tanpa embedding, jadi galeri siang tidak dikotori.
+  Buram dan beku hanya dilaporkan.
+- **Pelaporan:** angka `image_ir/dark/blurry/frozen` (0/1) + `image_brightness/sharpness/channel_diff` di
+  `engine.health.camera_metrics` (skema mengizinkan kunci tambahan). Menu Debug mendapat kolom "Gambar".
+  Tidak memakai `camera.degraded` supaya status stream kamera tidak ikut berubah.
+- Bagian config baru `image_condition` (kunci asing ditolak; contoh berkomentar di `demo-4060.yaml`). Belum bisa
+  diubah lewat `set_tuning`: perlu restart engine.
+- **Ambang bawaan belum dikalibrasi.** Tidak ada penyesuaian kecerahan otomatis (ANALISIS §5.5).
+
+File: `engine/runtime/{image_condition,camera}.py`, `engine/config/{schema,loader}.py`, `engine/config/demo-4060.yaml`,
+`engine/pipeline/reid_tap.py`, `engine/tests/{test_image_condition,test_reid_runtime}.py`,
+`frontend/src/views/DebugView.vue`.
+
+Uji: engine 861 (8 dilewati; 10 baru), kontrak 151; engine mock sungguhan dengan pemantau menyala melaporkan
+`image_dark: 1` (sumber mock memang gelap) tanpa traceback. Belum diuji pada kamera/IR sungguhan.
+
 ## 2026-11-11 · paket be-r12 + fe-r6 (Paket F) — Panel debug admin, Fase 1
 
 Tanpa perubahan kontrak: semua data engine di panel ini sudah dikirim lewat `engine.health`/`camera.*` dan tersimpan

@@ -297,6 +297,25 @@ def test_crop_kecil_tidak_dikirim_ke_worker():
     assert r1.tap.metrics.gate_too_small >= 1
 
 
+def test_kondisi_gambar_buruk_menahan_embedding_dan_tidak_mengotori_galeri():
+    """Paket G: saat kamera IR/gelap, crop tidak di-embed; wajah tetap dilaporkan
+    ke koordinator, tetapi tanpa embedding yang akan mengotori galeri siang."""
+    runtime, _, emit = _runtime()
+    r1 = _Kamera("r1", runtime, emit)
+    r1.tap.embed_allowed = False
+    r1.masuk("tr_r1-a", 1, 3, 0.0)
+    _jalan([r1], 0.0, 20.0, runtime)
+    assert r1.tap.metrics.submitted == 0 and r1.tap.metrics.gate_kondisi_gambar >= 1
+    r1.wajah("tr_r1-a", "4471", 21.0)
+    _jalan([r1], 21.0, 22.0, runtime)
+    assert r1.tap.metrics.submitted == 0
+    assert runtime.coordinator.core.gallery.prototype_count("4471") == 0
+
+    r1.tap.embed_allowed = True                 # gambar pulih: embedding jalan lagi
+    _jalan([r1], 22.5, 40.0, runtime)
+    assert r1.tap.metrics.submitted >= 1
+
+
 def test_dua_kamera_anon_lalu_wajah_menghasilkan_identity_resolved_yang_sah():
     runtime, messages, emit = _runtime()
     r1, r2 = _Kamera("r1", runtime, emit), _Kamera("r2", runtime, emit)

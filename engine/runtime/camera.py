@@ -61,6 +61,7 @@ from ..perception.gpu_fatal import describe, is_fatal_gpu_error
 from ..ports.frame import Frame
 from ..ports.tracking import Track, TrackState
 from .clock import OffsetCorrector
+from .image_condition import ImageConditionMonitor
 from .lag import LagMonitor, lag_between
 
 logger = logging.getLogger("engine.runtime.camera")
@@ -199,6 +200,7 @@ class CameraSupervisor:
         self._zoner: Optional[TrackZoner] = None
         self._queue: Optional[ZonePriorityQueue] = None
         self._change_gate: Optional[ChangeGate] = None
+        self._image: Optional[ImageConditionMonitor] = None
         self._binding: Optional[EngineBinding] = None
         self._assembler: Optional[PresenceAssembler] = None
 
@@ -456,6 +458,7 @@ class CameraSupervisor:
         self._change_gate = ChangeGate(config.analysis_trigger)
         if self._reid_tap is not None:
             self._reid_tap.change_gate = self._change_gate
+        self._image = ImageConditionMonitor(config.image_condition)
         if self._scheduler is not None:
             self._queue = ZonePriorityQueue(
                 scheduler=self._scheduler,
@@ -581,7 +584,10 @@ class CameraSupervisor:
             # tidak ada track, overlay, heartbeat, atau ReID.
             return
         self._observe_idle(pts, tracks)
+        if self._image is not None:
+            self._image.update(getattr(frame, "image", None), pts)
         if self._reid_tap is not None:
+            self._reid_tap.embed_allowed = self._image is None or not self._image.skip_reid
             self._reid_tap.step(frame, tracks, pts)
         self._remember_live(frame, tracks, pts)
         self._heartbeats(pts)
@@ -973,6 +979,8 @@ class CameraSupervisor:
             out["recognitions_not_attempted"] = int(m.recognitions_not_attempted)
         if self._change_gate is not None and self._change_gate.params.enabled:
             out.update(self._change_gate.metrics())
+        if self._image is not None:
+            out.update(self._image.metrics())
         return out
 
     def apply_tuning(self, config: EngineConfig) -> None:
