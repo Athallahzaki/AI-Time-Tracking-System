@@ -144,8 +144,9 @@ def daily_xlsx(from_: str = Query(..., alias="from"), to: str = Query(...), divi
 
 @router.post("/daily/send")
 def send_daily(date: str = Query(...), revision: int = Query(1, ge=1), _admin=Depends(require_admin)):
+    local_date = _date(date).isoformat()  # di luar try: tanggal cacat = 4xx, bukan 502
     try:
-        sent = report_service.generate_and_send(_date(date).isoformat(), revision)
+        sent = report_service.generate_and_send(local_date, revision)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     if not sent:

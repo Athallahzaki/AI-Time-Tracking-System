@@ -114,6 +114,8 @@ per peran (`core/security.py::scoped_person_id`). CI: `.github/workflows/backend
 | Status kerja terakhir | `docs/SERAH-TERIMA.md` |
 | Rencana overhaul engine (prioritas, akar masalah, data lapangan) | `docs/RENCANA-OVERHAUL.md` |
 | Test case klien yang dijaga tes (JAT-02/05/07/12/14) | `backend/tests/test_uji_penerimaan_jatah.py` |
+| Matriks akses semua rute (rute baru otomatis ikut; rute publik harus didaftarkan) | `backend/tests/test_matriks_akses.py` |
+| Sesi, password sementara, akses viewer, `BACKEND_API_KEY` | `backend/core/security.py`, `backend/tests/test_sesi_dan_akses.py` |
 | Analisis ketahanan 11 Nov: insiden, keamanan, uji ketahanan, availability, akurasi, IR, dashboard debug, urutan paket A–H | `docs/ANALISIS-KETAHANAN.md` |
 | Serah terima per paket EA (berlaku bersama SERAH-TERIMA.md) | `docs/SERAH-TERIMA-EA-K1.md`, `docs/SERAH-TERIMA-EA-R3.md` |
 | Riwayat perubahan (entri teratas cukup) | `docs/CHANGELOG.md` |

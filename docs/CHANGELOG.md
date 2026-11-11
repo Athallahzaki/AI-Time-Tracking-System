@@ -7,6 +7,27 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-11-11 · paket be-r11 (Paket C) — Matriks akses atas semua rute sebagai tes permanen
+
+- **`backend/tests/test_matriks_akses.py`**: daftar rute diambil dari skema OpenAPI, jadi rute baru otomatis ikut.
+  (1) tanpa login semua rute menolak kecuali daftar `PUBLIK` (login, `/api/settings/display`, `/`); (2) viewer
+  tidak bisa mengubah apa pun kecuali logout/ganti password sendiri; (3) body dan parameter cacat (termasuk
+  percobaan injeksi) tidak pernah menjadi 5xx. Tiap sapuan memeriksa sesinya masih hidup di akhir, supaya tidak
+  lulus secara hampa. Berjalan di CI `backend.yml` (±3 dtk).
+- **Ditemukan tes ini:** `POST /api/reports/daily/send` dengan tanggal cacat menjawab 502 (validasi tanggal ada di
+  dalam `try` yang memetakan semua galat ke 502). Kini 4xx.
+- **Ditemukan tes ini juga:** pembaruan kebijakan tanpa perubahan (`policy_service.update({})`) menulis ulang
+  `policy.yaml` lewat `safe_dump` dan membuang semua komentarnya. Kini tanpa perubahan = tidak menulis. (Pembaruan
+  sungguhan lewat jalur ini masih membuang komentar; belum diubah.)
+- Fuzz kanal engine sudah menjadi tes permanen di Paket A (`engine/tests/test_api_connection.py`,
+  `backend/tests/test_engine_channel.py`).
+- Catatan: sapuan "masukan cacat" versi skrip 11 Nov ternyata sebagian hampa (sesi admin tercabut di tengah
+  sapuan); angka "nol 5xx" di ANALISIS §3 baru benar-benar terbukti oleh tes ini.
+
+File: `backend/tests/test_matriks_akses.py`, `backend/routers/reports.py`, `backend/services/policy_service.py`.
+
+Uji: backend 159.
+
 ## 2026-11-11 · paket be-r10 (Paket B) — Sesi, password sementara, dan akses viewer
 
 Temuan audit keamanan 1, 2, 5, 6, 7 (ANALISIS-KETAHANAN §2.2). Tanpa perubahan kontrak. Frontend tidak berubah:

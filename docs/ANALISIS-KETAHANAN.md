@@ -111,6 +111,9 @@ Backend membaca dari engine dengan `readline()` tanpa batas juga [kode, belum di
 `/api/settings/display`, `/` (disengaja); viewer tidak bisa mengubah apa pun; body/parameter
 cacat dan percobaan injeksi SQL → **nol** respons 5xx.
 
+> Koreksi (Paket C): sapuan skrip untuk klaim "nol 5xx" sebagian hampa karena sesi admin tercabut di
+> tengah jalan. Tes permanen menemukan satu kasus (tanggal cacat di `/api/reports/daily/send` → 502), sudah diperbaiki.
+
 ## 4. Availability dan optimisasi engine
 
 **Sudah kuat** [kode]: supervisor per kamera dengan backoff; worker rekognisi/ReID menelan galat
@@ -267,9 +270,9 @@ kode debug bersama (tidak bisa diatribusikan, tidak bisa dicabut per orang).
 | # | Paket | Isi | Kontrak |
 |---|---|---|---|
 | 0 | (tanpa kode) | Konfirmasi hop insiden 1; `curl` MediaMTX §2.1; ukur 5 kamera (`sibuk %`, lag) + isi tabel waktu tempuh | — |
-| A | EA | Batas baris kedua sisi; pesan bukan objek → ack ditolak; (keputusan) engine menolak start tanpa kunci di alamat non-loopback | tidak |
-| B | BE | Temuan 1, 2, 5, 6, 7 | tidak |
-| C | QA | Matriks akses semua rute + fuzz kanal sebagai tes CI permanen | tidak |
+| A | EA | **Selesai 11 Nov** (ea-r26 + be-r9): batas baris kedua sisi; pesan bukan objek → ack ditolak. Belum: (keputusan) engine menolak start tanpa kunci di alamat non-loopback | tidak |
+| B | BE | **Selesai 11 Nov** (be-r10): temuan 1, 2, 5, 6, 7 | tidak |
+| C | QA | **Selesai 11 Nov** (be-r11): matriks akses semua rute + fuzz kanal sebagai tes CI permanen | tidak |
 | D | EA | Perbaikan biaya `_sweep_groups` + tes biaya tidak tumbuh | tidak |
 | E | EA/deploy | Watchdog detak untuk engine di Docker (padanan `engine-watchdog.ps1`) | tidak |
 | F | BE+FE | Fase 1 dashboard debug | tidak |

@@ -89,9 +89,13 @@ class PolicyService:
         return self.get()
 
     def update(self, changes: dict[str, Any]) -> dict[str, Any]:
+        changes = {key: value for key, value in changes.items() if value is not None}
+        if not changes:
+            # Tanpa perubahan: jangan tulis ulang policy.yaml (safe_dump membuang komentarnya).
+            return self.get()
         with self._lock:
             data = self._read_yaml()
-            data.update({key: value for key, value in changes.items() if value is not None})
+            data.update(changes)
             temp_path = self.path.with_suffix(self.path.suffix + ".tmp")
             try:
                 temp_path.write_text(
