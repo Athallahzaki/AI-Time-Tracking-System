@@ -65,6 +65,7 @@ class EngineClient:
         self._replay_gap_handler: Optional[Callable[[Dict[str, Any]], Any]] = None
         self._control_handler: Optional[Callable[[Dict[str, Any]], Any]] = None
         self._debug_handler: Optional[Callable[[Dict[str, Any]], Any]] = None
+        self._template_handler: Optional[Callable[[Dict[str, Any]], Any]] = None
         self._outbox_changed_handler: Optional[Callable[[str, str], Any]] = None
         self.connected = False
 
@@ -90,6 +91,9 @@ class EngineClient:
 
     def set_debug_handler(self, handler: Callable[[Dict[str, Any]], Any]) -> None:
         self._debug_handler = handler
+
+    def set_template_handler(self, handler: Callable[[Dict[str, Any]], Any]) -> None:
+        self._template_handler = handler
 
     def set_event_handler(self, handler: Callable[[Dict[str, Any]], Any]) -> None:
         self._event_handler = handler
@@ -254,6 +258,18 @@ class EngineClient:
                     self._debug_handler(message)
                 except Exception:  # noqa: BLE001 — debug tidak boleh memutus aliran event
                     logger.exception("Debug message handling failed")
+            return
+
+        # Kontrak template wajah (contracts/schema/face_template.schema.json): juga di luar
+        # kontrak produksi. Divalidasi terhadap skemanya sendiri oleh penangannya.
+        is_template = (isinstance(message_type, str) and message_type.startswith("template.")) or (
+            message_type == "ack" and str(message.get("in_reply_to", "")).startswith("template."))
+        if is_template:
+            if self._template_handler is not None:
+                try:
+                    self._template_handler(message)
+                except Exception:  # noqa: BLE001 — template tidak boleh memutus aliran event
+                    logger.exception("Template message handling failed")
             return
 
         if message_type == "replay_gap":

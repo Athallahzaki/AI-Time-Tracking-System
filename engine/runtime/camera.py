@@ -148,8 +148,11 @@ class CameraSupervisor:
         reid: Any = None,
         on_fatal: Optional[Callable[[str, str], None]] = None,
         cross_camera: Any = None,
+        template_sink: Any = None,
     ) -> None:
         self.spec = spec
+        # ea-r31: FaceTemplateCollector.offer bersama; None = mati.
+        self._template_sink = template_sink
         # P8: identity.cross_camera.CrossCameraClaims bersama; None = mati.
         self._cross_camera = cross_camera
         # Dipanggil (camera_id, ringkasan error) saat error GPU fatal terlihat
@@ -452,6 +455,7 @@ class CameraSupervisor:
             uuid_prefix=f"tr_{nonce}",
             executor=self._recognition_executor,
         )
+        self._binding.template_sink = self._template_sink
 
         # Gerbang perubahan kotak, satu per kamera, dibagi antrean wajah dan tap ReID.
         # Selalu ada; aktif bila params.enabled (bisa diubah saat jalan, set_tuning).

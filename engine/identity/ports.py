@@ -45,6 +45,12 @@ class Evidence:
     pts: float
     quality: float = 1.0
     embedding_version: str = "unknown"
+    # Hanya diisi bila penangkap template wajah menyala (identity/templates.py, ea-r31):
+    # crop wajah diperluas dari frame (BGR, salinan) dan ukuran mutunya. None = tidak ditangkap.
+    face_crop: Optional[np.ndarray] = field(default=None, compare=False, repr=False)
+    face_px: float = 0.0
+    det_score: float = 0.0
+    yaw: Optional[float] = None
 
 
 @dataclass(frozen=True)

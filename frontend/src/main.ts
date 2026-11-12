@@ -23,6 +23,7 @@ const ReviewQueueView = () => import('./views/ReviewQueueView.vue');
 const ViewerHomeView = () => import('./views/ViewerHomeView.vue');
 const ChangePasswordView = () => import('./views/ChangePasswordView.vue');
 const DebugView = () => import('./views/DebugView.vue');
+const FaceTemplatesView = () => import('./views/FaceTemplatesView.vue');
 
 // meta.roles: peran yang boleh membuka halaman. Ini hanya kenyamanan UI —
 // penyaringan sebenarnya WAJIB di backend (dok. 12 §3.8).
@@ -41,6 +42,7 @@ const routes = [
   { path: '/reviews', component: ReviewQueueView, meta: ADMIN },
   { path: '/settings', component: SettingsView, meta: ADMIN },
   { path: '/debug', component: DebugView, meta: ADMIN },
+  { path: '/face-templates', component: FaceTemplatesView, meta: ADMIN },
   { path: '/:pathMatch(.*)*', redirect: '/' },
 ];
 

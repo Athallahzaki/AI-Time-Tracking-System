@@ -494,6 +494,39 @@ def _create_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_frames_observed ON detection_frames(observed_at)"
     )
+    # ea-r31/be-r14: kandidat template wajah dari CCTV (docs/RENCANA-TEMPLATE-WAJAH.md).
+    # `jpeg` dan `embedding` dikosongkan saat rejected/discarded/removed: wajah yang
+    # tidak dipakai tidak disimpan.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS face_template_candidates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            candidate_id TEXT UNIQUE NOT NULL,
+            person_id TEXT NOT NULL,
+            camera_id TEXT NOT NULL,
+            captured_at TEXT NOT NULL,
+            track_uuid TEXT,
+            embedding_version TEXT NOT NULL,
+            jpeg BLOB,
+            embedding BLOB,
+            anchor_similarity REAL NOT NULL,
+            margin REAL NOT NULL,
+            runner_up_id TEXT,
+            runner_up_similarity REAL,
+            face_px REAL NOT NULL,
+            det_score REAL NOT NULL,
+            yaw REAL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            reason TEXT,
+            reference_id INTEGER,
+            created_at REAL NOT NULL,
+            decided_by TEXT,
+            decided_at REAL,
+            applied_at REAL
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_face_templates_status ON face_template_candidates(status, person_id)"
+    )
 
 
 # ---------------------------------------------------------------------------

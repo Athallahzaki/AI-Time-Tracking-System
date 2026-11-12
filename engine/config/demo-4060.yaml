@@ -209,3 +209,13 @@ tracker:
 # debug:
 #   enabled: true
 #   crop_cache_tracks: 200
+
+# Template wajah dari CCTV (identity/templates.py, ea-r31; docs/RENCANA-TEMPLATE-WAJAH.md). Default
+# mati. Menyala: bukti wajah track CONFIRMED yang lolos gerbang disimpan DI MEMORI sebagai kandidat
+# (crop wajah = data biometrik) dan diserahkan ke backend lewat template.pull; engine tidak pernah
+# memasang referensi sendiri. Butuh FACE_TEMPLATES_ENABLED=1 di backend. Angka belum dikalibrasi.
+# face_templates:
+#   enabled: true
+#   per_person_cooldown_seconds: 60
+#   min_face_px: 48
+#   min_margin: 0.10

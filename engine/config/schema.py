@@ -517,6 +517,51 @@ class DebugConfig:
 
 
 @dataclass(frozen=True)
+class FaceTemplateConfig:
+    """Gerbang tangkap kandidat template wajah dari CCTV (identity/templates.py, ea-r31).
+
+    Default mati. Menyala: bukti wajah dari track CONFIRMED yang lolos semua syarat
+    di bawah disimpan sebagai kandidat DI MEMORI dan diserahkan ke backend lewat
+    `template.pull` (contracts/schema/face_template.schema.json). Engine tidak pernah
+    memasang referensi sendiri; backend yang memutuskan (`template.apply`).
+    Semua angka perseptual dan BELUM dikalibrasi (docs/RENCANA-TEMPLATE-WAJAH.md §4).
+    """
+
+    enabled: bool = False
+    # Paling sering satu kandidat per orang per sekian detik.
+    per_person_cooldown_seconds: float = 60.0
+    min_face_px: float = 48.0
+    min_det_score: float = 0.60
+    max_yaw: float = 0.50
+    # Skor terhadap JANGKAR (referensi enrollment) orang itu. None = ambang matcher.
+    min_anchor_similarity: Optional[float] = None
+    # Selisih terhadap orang lain terdekat di seluruh roster.
+    min_margin: float = 0.10
+    # Di atas ini terhadap referensi orang itu sendiri = mubazir, tidak ditangkap.
+    duplicate_similarity: float = 0.90
+    buffer_size: int = 200
+    # Crop wajah diperluas sekian kali ukuran kotak wajah (bahan embed ulang saat model diganti).
+    crop_expand: float = 2.0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.enabled, bool):
+            raise ValueError("face_templates.enabled harus true/false")
+        if self.per_person_cooldown_seconds < 0:
+            raise ValueError("face_templates.per_person_cooldown_seconds harus >= 0")
+        if self.min_face_px < 0 or not 0.0 <= self.min_det_score <= 1.0 or self.max_yaw <= 0:
+            raise ValueError("face_templates: min_face_px >= 0, min_det_score 0..1, max_yaw > 0")
+        if self.min_anchor_similarity is not None and not -1.0 <= self.min_anchor_similarity <= 1.0:
+            raise ValueError("face_templates.min_anchor_similarity harus di [-1, 1] (atau kosong)")
+        if not 0.0 <= self.min_margin <= 2.0 or not 0.0 < self.duplicate_similarity <= 1.0:
+            raise ValueError("face_templates: min_margin 0..2, duplicate_similarity (0, 1]")
+        size = self.buffer_size
+        if not isinstance(size, int) or isinstance(size, bool) or not 1 <= size <= 5000:
+            raise ValueError(f"face_templates.buffer_size={size!r} harus bilangan bulat 1..5000")
+        if not 1.0 <= self.crop_expand <= 4.0:
+            raise ValueError("face_templates.crop_expand harus 1..4")
+
+
+@dataclass(frozen=True)
 class ImageConditionConfig:
     """Pemantau kondisi gambar (runtime/image_condition.py). Default mati = perilaku lama.
 
@@ -726,6 +771,7 @@ class EngineConfig:
     analysis_trigger: AnalysisTriggerConfig = field(default_factory=AnalysisTriggerConfig)
     image_condition: ImageConditionConfig = field(default_factory=ImageConditionConfig)
     debug: DebugConfig = field(default_factory=DebugConfig)
+    face_templates: FaceTemplateConfig = field(default_factory=FaceTemplateConfig)
 
     def effective_fps(self, source_fps: float) -> float:
         """

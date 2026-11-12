@@ -531,6 +531,10 @@ class OnnxFaceRecognizer:
         # Cari ulang di seluruh kotak orang bila potongan kepala kosong (paket ea-r30).
         # False = perilaku lama: hanya `head_fraction` bagian atas kotak.
         self._full_box_fallback = bool(full_box_fallback)
+        # Penangkap template wajah (ea-r31) menyalakan ini: Evidence membawa crop wajah
+        # diperluas + ukuran mutunya. False = Evidence persis seperti dulu.
+        self.capture_face_crops = False
+        self.capture_expand = 2.0
         self._gate = {"embedded": 0, "lewati_kecil": 0, "lewati_skor": 0, "lewati_samping": 0,
                       "fallback_dicoba": 0, "fallback_ketemu": 0}
         # onnxruntime sessions are thread-safe for run(), but the detector's
@@ -562,11 +566,20 @@ class OnnxFaceRecognizer:
             embedding = self._embedder.embed(aligned)
             self._gate["embedded"] += 1
         quality = float(min(1.0, face.score * min(1.0, min(face.width, face.height) / 112.0)))
+        extra = {}
+        if self.capture_face_crops:
+            extra = dict(
+                face_crop=expanded_face_crop(image, face.bbox, (x1, y1), self.capture_expand),
+                face_px=float(min(face.width, face.height)),
+                det_score=float(face.score),
+                yaw=float(yaw_ratio(face.landmarks)),
+            )
         return Evidence(
             embedding=embedding,
             pts=float(frame.metadata.pts or 0.0),
             quality=max(quality, 1e-3),
             embedding_version=self.embedding_version,
+            **extra,
         )
 
     def _search_full_box(self, image: np.ndarray, box: Any, head_rows: int):
@@ -668,6 +681,24 @@ def head_crop(image: np.ndarray, box: Any, min_face_px: float, head_fraction: fl
 # Pita horizontal (fraksi lebar kotak) tempat pusat wajah fallback harus berada.
 # Lengan terangkat ke samping melebarkan kotak, jadi pitanya tidak sesempit sepertiga.
 FULL_BOX_CENTER_BAND = (0.2, 0.8)
+
+
+def expanded_face_crop(image: np.ndarray, face_bbox, offset, expand: float) -> Optional[np.ndarray]:
+    """Salinan wilayah wajah diperluas `expand` kali dari pusatnya, dalam koordinat frame.
+
+    Diperluas supaya SCRFD masih bisa menemukan wajahnya lagi saat referensi di-embed
+    ulang (ganti model): crop seketat kotak wajah sering gagal dideteksi.
+    """
+    height, width = image.shape[:2]
+    fx1, fy1, fx2, fy2 = (float(v) for v in face_bbox)
+    cx = (fx1 + fx2) / 2.0 + offset[0]
+    cy = (fy1 + fy2) / 2.0 + offset[1]
+    half = max(fx2 - fx1, fy2 - fy1) * expand / 2.0
+    x1, y1 = max(0, int(cx - half)), max(0, int(cy - half))
+    x2, y2 = min(width, int(cx + half)), min(height, int(cy + half))
+    if x2 - x1 < 2 or y2 - y1 < 2:
+        return None
+    return np.array(image[y1:y2, x1:x2], copy=True)
 
 
 def full_box_crop(image: np.ndarray, box: Any, min_face_px: float):

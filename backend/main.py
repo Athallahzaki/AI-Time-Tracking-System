@@ -43,6 +43,7 @@ from backend.services.engine_integration import (
     engine_integration,
 )
 from backend.services.report_service import report_scheduler
+from backend.services import face_template_service as face_templates
 
 
 logging.basicConfig(
@@ -81,6 +82,8 @@ async def lifespan(app: FastAPI):
     email_service.start()
     report_scheduler.start()
     engine_connection_manager.start()
+    if face_templates.templates_enabled():
+        face_templates.face_template_scheduler.start()
 
     yield
 
@@ -90,6 +93,7 @@ async def lifespan(app: FastAPI):
 
     
     engine_connection_manager.stop()
+    face_templates.face_template_scheduler.stop()
     report_scheduler.stop()
     email_service.stop()
     detection_writer.stop()
@@ -135,6 +139,13 @@ if debug.debug_panel_enabled():
     debug.install_log_capture()
     engine_client.set_debug_handler(debug.engine_debug.handle)
     app.include_router(debug.router)
+
+# Template wajah dari CCTV (docs/RENCANA-TEMPLATE-WAJAH.md): default mati, rute tidak terdaftar.
+if face_templates.templates_enabled():
+    from backend.routers import face_templates as face_templates_router
+
+    engine_client.set_template_handler(face_templates.engine_templates.handle)
+    app.include_router(face_templates_router.router)
 
 @app.get("/")
 def root():

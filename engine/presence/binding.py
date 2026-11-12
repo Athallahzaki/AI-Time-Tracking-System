@@ -111,6 +111,10 @@ class EngineBinding:
         self._camera_by_uuid: Dict[str, str] = {}
         self._frame_by_camera: Dict[str, Frame] = {}
         self.metrics = BindingMetrics()
+        # Penangkap template wajah (identity/templates.py, ea-r31): dipanggil
+        # (person_id, camera_id, track_uuid, evidence) untuk bukti track CONFIRMED.
+        # None = mati, tidak ada yang berubah.
+        self.template_sink: Optional[Callable[[str, str, str, Any], Any]] = None
         # P7: bila ada `executor` (RecognitionWorker), `recognize` dijalankan di
         # thread worker dan hasilnya kembali lewat antrean ini. deque.append dan
         # popleft atomik, jadi worker dan thread kamera tidak butuh kunci.
@@ -330,6 +334,15 @@ class EngineBinding:
             self._assembler.identity_released(uuid, pts=evidence.pts)
 
         self._publish_identity(track, uuid)
+
+        sink = self.template_sink
+        if (sink is not None and identity.person_id is not None
+                and identity.state is IdentityState.CONFIRMED
+                and getattr(evidence, "face_crop", None) is not None):
+            try:
+                sink(identity.person_id, camera_id, uuid, evidence)
+            except Exception:  # noqa: BLE001 - penangkap template tidak boleh menjatuhkan loop kamera
+                logger.exception("penangkap template wajah gagal")
 
     def _open(self, uuid: str, camera_id: str, track: Track, pts: float, frame: Frame) -> None:
         self._arbiter.open_track(uuid, camera_id)

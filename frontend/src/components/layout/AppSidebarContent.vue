@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import {
   Activity,
+  ScanFace,
   ClipboardCheck,
   FileText,
   House,
@@ -58,6 +59,7 @@ const mainNav = computed(() => {
     },
     { label: 'Manajemen Pengguna', icon: ShieldCheck, to: '/users' },
     { label: 'Pengaturan Sistem', icon: Settings, to: '/settings' },
+    { label: 'Template Wajah', icon: ScanFace, to: '/face-templates' },
     { label: 'Debug', icon: Activity, to: '/debug' },
   ];
 });

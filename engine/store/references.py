@@ -135,6 +135,11 @@ class SqliteReferenceStore:
             CREATE INDEX IF NOT EXISTS refs_version ON refs(embedding_version);
             """
         )
+        # ea-r31: asal referensi. `enroll` = jangkar dari enrollment (tidak pernah dihapus
+        # otomatis); `learned` = template wajah dari CCTV yang dipasang backend (template.apply).
+        columns = {row[1] for row in self._db.execute("PRAGMA table_info(refs)")}
+        if "source" not in columns:
+            self._db.execute("ALTER TABLE refs ADD COLUMN source TEXT NOT NULL DEFAULT 'enroll'")
         self._db.commit()
 
     # ---------------- protokol ReferenceStore ----------------
@@ -180,6 +185,7 @@ class SqliteReferenceStore:
         camera_id: Optional[str] = None,
         captured_at: Optional[str] = None,
         embedding_version: Optional[str] = None,
+        source: str = "enroll",
     ) -> int:
         """Simpan satu referensi. Gambar aslinya WAJIB.
 
@@ -215,14 +221,52 @@ class SqliteReferenceStore:
             )
             cursor = self._db.execute(
                 "INSERT INTO refs (person_id, embedding_version, enrollment_version, vector, "
-                "image, quality, camera_id, captured_at, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                "image, quality, camera_id, captured_at, created_at, source) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (
                     person_id, version, enrollment_version, vector.tobytes(),
                     sqlite3.Binary(image_jpeg), float(quality), camera_id, captured_at, now,
+                    "learned" if source == "learned" else "enroll",
                 ),
             )
             self._db.commit()
             return int(cursor.lastrowid)
+
+    def vectors_of(self, person_id: str, source: Optional[str] = None) -> np.ndarray:
+        """Vektor (N, D) satu orang, versi sekarang saja; `source` menyaring asal (ea-r31)."""
+        query = "SELECT vector FROM refs WHERE person_id = ? AND embedding_version = ?"
+        params: Tuple = (person_id, self._version)
+        if source is not None:
+            query += " AND source = ?"
+            params += (source,)
+        with self._lock:
+            rows = self._db.execute(query + " ORDER BY reference_id", params).fetchall()
+        if not rows:
+            return np.empty((0, self._dimension), dtype=np.float32)
+        return np.stack([np.frombuffer(blob, dtype=np.float32) for (blob,) in rows]).copy()
+
+    def enrollment_version_of(self, person_id: str) -> Optional[int]:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT enrollment_version FROM persons WHERE person_id = ?", (person_id,)
+            ).fetchone()
+        return int(row[0]) if row else None
+
+    def delete_learned(self, reference_ids: Sequence[int]) -> int:
+        """Hapus template hasil belajar. Jangkar enrollment TIDAK PERNAH terhapus di sini."""
+        ids = [int(i) for i in reference_ids]
+        if not ids:
+            return 0
+        removed = 0
+        with self._lock:
+            for start in range(0, len(ids), 500):
+                chunk = ids[start:start + 500]
+                marks = ",".join("?" * len(chunk))
+                cursor = self._db.execute(
+                    f"DELETE FROM refs WHERE source = 'learned' AND reference_id IN ({marks})", chunk
+                )
+                removed += cursor.rowcount
+            self._db.commit()
+        return removed
 
     def delete_person(self, person_id: str) -> int:
         """Hapus orang beserta seluruh vektor dan gambarnya.

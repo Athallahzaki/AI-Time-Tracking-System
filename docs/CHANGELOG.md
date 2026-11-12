@@ -7,6 +7,48 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-11-12 · paket ea-r31 + be-r14 + fe-r9 — Template wajah dari CCTV
+
+**Perubahan kontrak, PERLU PERSETUJUAN EA** sebelum dinyalakan di pilot: skema terpisah
+`contracts/schema/face_template.schema.json` (6 pesan `template.*`, semua kanal control, tidak durabel).
+Kontrak produksi dan fixture tidak berubah. Tiga saklar, semuanya default mati: `face_templates.enabled`
+(engine), `FACE_TEMPLATES_ENABLED` (backend), "Aktif" di menu. Rancangan: `docs/RENCANA-TEMPLATE-WAJAH.md`
+(arah disetujui Zena 12 Nov).
+
+- **Alasan:** referensi enrollment adalah pas foto frontal; wajah CCTV kecil dan miring. Embedding wajah dari
+  kamera lokasi untuk orang yang sudah terkonfirmasi menutup jarak itu tanpa melatih model.
+- **Engine** (`identity/templates.py`): bukti wajah track CONFIRMED yang lolos gerbang (jeda 60 dtk per orang,
+  wajah ≥ 48 px, skor ≥ 0,6, sudut ≤ 0,5, skor ke JANGKAR enrollment ≥ ambang matcher, margin ke orang lain
+  ≥ 0,10, tidak > 0,90 mirip referensi sendiri) disimpan di buffer memori (200). `template.pull` menyerahkannya;
+  `template.apply` memasang sebagai `refs.source = learned` setelah memeriksa ulang terhadap roster saat itu
+  (termasuk kembar dalam satu batch); `template.remove` hanya menghapus `learned`. Engine tidak pernah memasang
+  sendiri. `Evidence` membawa crop wajah diperluas 2× hanya bila penangkap menyala. Kolom `refs.source`
+  ditambahkan otomatis ke `references.sqlite3` lama.
+- **Backend** (`services/face_template_service.py`): tabel `face_template_candidates`; penarik tiap 60 dtk;
+  penimbang (versi, duplikat > 0,90, pencilan median − 0,15, 5 per orang per hari, margin < 0,15 → tinjau);
+  jadwal harian (mode `otomatis`: queued + approved; `persetujuan`: approved saja); umur 30 hari dan maks. 30
+  per orang dicabut otomatis. Gambar dan embedding dikosongkan saat ditolak/dibuang/dicabut. Pesan engine
+  divalidasi terhadap skemanya. Rute `/api/face-templates/*` admin saja, gambar `Cache-Control: no-store`,
+  keputusan dan pengaturan masuk `settings_audit`.
+- **Frontend**: menu "Template Wajah" (pengaturan, Timbang/Terapkan sekarang, filter, kartu per kandidat dengan
+  angka dan alasan, Setujui/Buang/Cabut).
+- Deploy: `FACE_TEMPLATES_ENABLED` di `docker-compose.yml`, `.env.example`, `portainer.env.example`; contoh
+  berkomentar di `demo-4060.yaml`.
+
+File: `contracts/schema/face_template.schema.json`, `contracts/tests/test_face_template_contract.py`,
+`engine/identity/{templates,ports,face_onnx}.py`, `engine/store/references.py`, `engine/presence/binding.py`,
+`engine/runtime/{service,camera}.py`, `engine/config/{schema,loader}.py`, `engine/config/demo-4060.yaml`,
+`engine/tests/test_template_wajah.py`, `backend/core/database.py`, `backend/services/{face_template_service,
+engine_client}.py`, `backend/routers/face_templates.py`, `backend/main.py`,
+`backend/tests/test_template_wajah_backend.py`, `frontend/src/{api/faceTemplates.ts,views/FaceTemplatesView.vue,
+main.ts,components/layout/AppSidebarContent.vue}`, `deploy/{docker-compose.yml,.env.example,portainer.env.example}`,
+`docs/{RENCANA-TEMPLATE-WAJAH,CHANGELOG,PETA-KODE,SERAH-TERIMA}.md`.
+
+Uji: engine penuh lulus (sebelum contoh yaml; tes config/template/store/enrollment/binding diulang sesudahnya),
+backend + kontrak lulus, `npm run build` lulus, `policy_grep` bersih. Backend diuji dengan engine tiruan yang
+menjawab lewat jalur `handle` yang sama. **Belum diuji:** engine sungguhan di GPU (crop, beban `cv2.imencode`,
+dampak ke waktu identifikasi), tampilan menu di browser.
+
 ## 2026-11-12 · paket ea-r30 — Fallback kotak penuh untuk wajah (tangan terangkat)
 
 **Default mati** (`recognition.full_box_fallback: false`): perilaku lama. Tanpa perubahan kontrak.

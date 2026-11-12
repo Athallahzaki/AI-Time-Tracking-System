@@ -205,6 +205,22 @@ class EngineRuntime:
         self._recognize = recognize
         self._store = reference_store
 
+        # Template wajah dari CCTV (identity/templates.py, ea-r31). Mati = None.
+        self._templates: Any = None
+        if self.config.face_templates.enabled:
+            if recognize is None or reference_store is None or matcher is None \
+                    or not hasattr(recognize, "capture_face_crops"):
+                logger.warning("face_templates.enabled tetapi recognizer onnx_face tidak aktif: "
+                               "penangkap template wajah tidak dinyalakan")
+            else:
+                from ..identity.templates import FaceTemplateCollector
+
+                self._templates = FaceTemplateCollector(self.config.face_templates, reference_store, matcher)
+                recognize.capture_face_crops = True
+                recognize.capture_expand = self.config.face_templates.crop_expand
+                logger.warning("face_templates.enabled: kandidat template wajah (crop wajah, data "
+                               "biometrik) dikumpulkan di memori untuk diputuskan backend")
+
         # ReID berjangkar wajah (dokumen 12 §3.6). Mati = None, tidak ada yang
         # dimuat. Menyala tapi model tidak bisa dimuat = ReidModelUnavailable
         # di sini, jadi engine menolak start (sama seperti recognizer wajah).
@@ -283,6 +299,10 @@ class EngineRuntime:
         self.api.on_control("enroll", self._on_enroll)
         self.api.on_control("forget_person", self._on_forget_person)
         self.api.on_control("set_tuning", self._on_set_tuning)
+        # Kontrak template wajah (contracts/schema/face_template.schema.json). Selalu
+        # terdaftar supaya backend mendapat alasan penolakan yang jelas saat mati.
+        for kind in ("template.pull", "template.apply", "template.remove"):
+            self.api.on_control(kind, self._on_template)
 
         # Kontrak debug sementara (contracts/schema/debug.schema.json). Selalu terdaftar
         # supaya backend mendapat alasan penolakan yang jelas; mati kecuali debug.enabled.
@@ -449,6 +469,7 @@ class EngineRuntime:
             reid=self._reid,
             on_fatal=self._on_camera_fatal if self.config.gpu_fatal_action == "exit" else None,
             cross_camera=self._cross_camera,
+            template_sink=self._templates.offer if self._templates is not None else None,
         )
         if self._tick_gate is not None and not self._tick_gate.running:
             self._tick_gate.start()
@@ -612,6 +633,32 @@ class EngineRuntime:
             if result.accepted:
                 self._matcher.rebuild()
         return result.to_message(request_id, self.config.recognition.embedding_version, ts)
+
+    def _on_template(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        """`template.pull` / `template.apply` / `template.remove` (ea-r31)."""
+        kind = str(message.get("type"))
+        ts = events.rfc3339(time.time())
+        request_id = str(message.get("request_id") or "")[:64]
+        if self._templates is None:
+            return {"type": "ack", "v": 1, "ts": ts, "in_reply_to": kind, "accepted": False,
+                    "reason": "face_templates tidak menyala di engine ini"}
+        if not request_id:
+            return {"type": "ack", "v": 1, "ts": ts, "in_reply_to": kind, "accepted": False,
+                    "reason": "request_id wajib"}
+        if kind == "template.pull":
+            items = self._templates.pull(int(message.get("max_items") or 20))
+            return {"type": "template.candidates", "v": 1, "ts": ts, "request_id": request_id,
+                    "embedding_version": self._store.embedding_version, "items": items}
+        if kind == "template.apply":
+            items = [item for item in (message.get("items") or [])[:50] if isinstance(item, dict)]
+            with self._emit_lock:
+                results = self._templates.apply(items)
+            return {"type": "template.applied", "v": 1, "ts": ts, "request_id": request_id, "items": results}
+        ids = [int(i) for i in (message.get("reference_ids") or [])[:500]
+               if isinstance(i, int) and not isinstance(i, bool) and i > 0]
+        with self._emit_lock:
+            removed = self._templates.remove(ids)
+        return {"type": "template.removed", "v": 1, "ts": ts, "request_id": request_id, "removed": removed}
 
     def _on_forget_person(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """Hapus semua referensi + foto orang ini; jawab dengan bukti (P14, E13).
@@ -858,6 +905,8 @@ class EngineRuntime:
             logger.info("gerbang embedding: di-embed %d, lewati kecil %d, skor %d, samping %d",
                         g.get("embedded", 0), g.get("lewati_kecil", 0), g.get("lewati_skor", 0),
                         g.get("lewati_samping", 0))
+        if self._templates is not None:
+            logger.info("template wajah: %s", self._templates.snapshot_counters())
         if callable(gate) and getattr(rec, "full_box_fallback", False):
             g = gate()
             logger.info("fallback kotak penuh: dicoba %d, wajah ketemu %d",
