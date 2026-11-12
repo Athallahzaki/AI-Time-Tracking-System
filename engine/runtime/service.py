@@ -858,6 +858,10 @@ class EngineRuntime:
             logger.info("gerbang embedding: di-embed %d, lewati kecil %d, skor %d, samping %d",
                         g.get("embedded", 0), g.get("lewati_kecil", 0), g.get("lewati_skor", 0),
                         g.get("lewati_samping", 0))
+        if callable(gate) and getattr(rec, "full_box_fallback", False):
+            g = gate()
+            logger.info("fallback kotak penuh: dicoba %d, wajah ketemu %d",
+                        g.get("fallback_dicoba", 0), g.get("fallback_ketemu", 0))
         if previous is None or now <= previous[0]:
             return None
         d_processed = processed - previous[1]

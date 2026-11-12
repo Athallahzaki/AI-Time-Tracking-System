@@ -7,6 +7,32 @@ ditulis langsung di sini (dokumen kesepakatan tim, dokumen 12 §10.2).
 
 Format entri: tanggal, nama paket, apa yang berubah, alasan, file yang tersentuh, cara uji.
 
+## 2026-11-12 · paket ea-r30 — Fallback kotak penuh untuk wajah (tangan terangkat)
+
+**Default mati** (`recognition.full_box_fallback: false`): perilaku lama. Tanpa perubahan kontrak.
+
+- **Masalah (uji Zena 12 Nov, crop dari panel debug):** tangan terangkat lurus menggeser batas atas kotak
+  orang ke ujung jari. Wajah jatuh di ±42–72% tinggi kotak, sedangkan `head_crop` hanya memberi SCRFD 45%
+  teratas, jadi yang dicari cuma tangan dan lengan. Setiap percobaan gagal sampai tangan turun, padahal wajah
+  frontal dan tidak tertutup; ReID (crop seluruh tubuh) tetap memberi label, jadi terlihat "ReID dulu, wajah
+  belakangan".
+- **Perbaikan:** bila potongan kepala tidak menghasilkan wajah ≥ `min_face_px`, SCRFD dipanggil sekali lagi
+  pada seluruh kotak (`full_box_crop`). Hanya wajah yang pusatnya di pita 20–80% lebar kotak yang diterima
+  (`FULL_BOX_CENTER_BAND`), supaya wajah orang lain yang kotaknya tumpang-tindih tidak ikut. Kotak yang tidak
+  lebih tinggi dari potongan kepala tidak dicari ulang. Gerbang kualitas `embed_*` tetap berlaku sesudahnya.
+- **Biaya:** satu SCRFD tambahan, hanya pada percobaan yang sudah gagal; potongan lebih besar = wajah relatif
+  lebih kecil di input 640. Penghitung `fallback_dicoba` / `fallback_ketemu` di `gate_metrics()`, dicetak di
+  log berkala "fallback kotak penuh: dicoba N, wajah ketemu M" saat flag menyala.
+- Belum bisa diubah lewat `set_tuning`: perlu restart engine. Tidak ditulis di `demo-*.yaml` karena blok
+  `recognition` 4060 dan 1060 dijaga sama oleh tes.
+
+File: `engine/identity/face_onnx.py`, `engine/config/{schema,loader}.py`, `engine/runtime/service.py`,
+`engine/tests/test_fallback_kotak_penuh.py`, `docs/{CHANGELOG,PETA-KODE,SERAH-TERIMA}.md`.
+
+Uji: `test_fallback_kotak_penuh.py` (9) + `test_rekognisi_beban.py` lulus. Rangkaian engine penuh BELUM
+dijalankan di sesi ini. **Belum diuji di GPU:** beban SCRFD tambahan dan apakah wajah tangan-terangkat lolos
+`match_threshold` wajah yang sedang di-override.
+
 ## 2026-11-11 · paket ea-r29 + be-r13 + fe-r8 (Paket H) — Debug Fase 2: kontrak debug sementara, log engine, crop tubuh
 
 **Perubahan kontrak, disetujui Zena 11 Nov ("lanjutkan sampai H").** Kontrak produksi

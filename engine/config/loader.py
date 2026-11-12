@@ -253,6 +253,7 @@ def load_config(path: Optional[Union[str, Path]] = None) -> EngineConfig:
             embed_min_face_px=_optional_float(rec.get("embed_min_face_px")),
             embed_min_score=_optional_float(rec.get("embed_min_score")),
             embed_max_yaw=_optional_float(rec.get("embed_max_yaw")),
+            full_box_fallback=bool(rec.get("full_box_fallback", False)),
             match_threshold=_optional_float(rec.get("match_threshold")),
             match_margin=_optional_float(rec.get("match_margin")),
         ),

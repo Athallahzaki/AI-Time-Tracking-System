@@ -36,7 +36,7 @@ frontend (Vue + Vite): dashboard, overlay kotak, enrollment, pengaturan
 | Pengenal error CUDA fatal (`is_fatal_gpu_error`, pola teks) | `perception/gpu_fatal.py` (tes `test_gpu_fatal.py`) |
 | Tracker | `perception/bytetrack_tracker.py`, `perception/iou_tracker.py` |
 | Crop orang/kepala | `perception/person_cropper.py` |
-| Wajah (SCRFD + AuraFace ONNX), gerbang kualitas sebelum embedding (`embed_*`, `yaw_ratio`), cek bentuk model SCRFD (`_check_static_size`), TensorRT EP + cache (`recognition_providers`, `tensorrt_options`, `ProviderUnavailable`), potongan kepala (`head_crop`) | `identity/face_onnx.py` (tes `test_rekognisi_beban.py`, `test_tensorrt_rekognisi.py`) |
+| Wajah (SCRFD + AuraFace ONNX), gerbang kualitas sebelum embedding (`embed_*`, `yaw_ratio`), cek bentuk model SCRFD (`_check_static_size`), TensorRT EP + cache (`recognition_providers`, `tensorrt_options`, `ProviderUnavailable`), potongan kepala (`head_crop`), fallback kotak penuh bila potongan kepala kosong (`full_box_crop`, `recognition.full_box_fallback`, ea-r30) | `identity/face_onnx.py` (tes `test_rekognisi_beban.py`, `test_tensorrt_rekognisi.py`, `test_fallback_kotak_penuh.py`) |
 | Klaim wajah lintas kamera (P8, ea-r19; `recognition.cross_camera_claims`) | `identity/cross_camera.py` (tes `test_klaim_lintas_kamera.py`) |
 | Pemicu analisis berbasis perubahan kotak (eb-r15; `analysis_trigger`) | `pipeline/change_gate.py` (dipakai `pipeline/zoning.py`, `pipeline/reid_tap.py`; tes `test_change_gate.py`) |
 | Pengaturan realtime `set_tuning` (ea-r23) | `runtime/tuning.py`, `runtime/service.py::_on_set_tuning`, `runtime/camera.py::apply_tuning` (tes `test_tuning.py`) |

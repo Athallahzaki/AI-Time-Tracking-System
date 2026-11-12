@@ -317,6 +317,11 @@ class RecognitionConfig:
     embed_min_face_px: Optional[float] = None
     embed_min_score: Optional[float] = None
     embed_max_yaw: Optional[float] = None
+    # Potongan kepala (45% teratas kotak) kosong -> cari sekali lagi di seluruh kotak
+    # orang (paket ea-r30). Untuk tangan terangkat: batas atas kotak pindah ke ujung
+    # jari dan wajah jatuh di luar potongan. Biaya: satu SCRFD tambahan, hanya pada
+    # percobaan yang sudah gagal. False = perilaku lama. Perlu restart engine.
+    full_box_fallback: bool = False
     match_threshold: Optional[float] = None
     match_margin: Optional[float] = None
 

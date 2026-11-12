@@ -515,7 +515,8 @@ class OnnxFaceRecognizer:
                  head_fraction: float = 0.45,
                  embed_min_face_px: Optional[float] = None,
                  embed_min_score: Optional[float] = None,
-                 embed_max_yaw: Optional[float] = None) -> None:
+                 embed_max_yaw: Optional[float] = None,
+                 full_box_fallback: bool = False) -> None:
         self._detector = detector
         self._embedder = embedder
         self.embedding_version = embedding_version
@@ -527,7 +528,11 @@ class OnnxFaceRecognizer:
         self._embed_min_face = None if embed_min_face_px is None else float(embed_min_face_px)
         self._embed_min_score = None if embed_min_score is None else float(embed_min_score)
         self._embed_max_yaw = None if embed_max_yaw is None else float(embed_max_yaw)
-        self._gate = {"embedded": 0, "lewati_kecil": 0, "lewati_skor": 0, "lewati_samping": 0}
+        # Cari ulang di seluruh kotak orang bila potongan kepala kosong (paket ea-r30).
+        # False = perilaku lama: hanya `head_fraction` bagian atas kotak.
+        self._full_box_fallback = bool(full_box_fallback)
+        self._gate = {"embedded": 0, "lewati_kecil": 0, "lewati_skor": 0, "lewati_samping": 0,
+                      "fallback_dicoba": 0, "fallback_ketemu": 0}
         # onnxruntime sessions are thread-safe for run(), but the detector's
         # anchor cache and cv2 temporary buffers are cheap to serialise and the
         # recognition path is already rate-limited by the scheduler.
@@ -543,6 +548,8 @@ class OnnxFaceRecognizer:
         with self._lock:
             faces = self._detector.detect(crop)
             faces = [f for f in faces if min(f.width, f.height) >= self._min_face]
+            if not faces and self._full_box_fallback:
+                faces, (x1, y1) = self._search_full_box(image, track.bbox, crop.shape[0])
             if not faces:
                 return None
             face = max(faces, key=lambda f: f.width * f.height)
@@ -561,6 +568,34 @@ class OnnxFaceRecognizer:
             quality=max(quality, 1e-3),
             embedding_version=self.embedding_version,
         )
+
+    def _search_full_box(self, image: np.ndarray, box: Any, head_rows: int):
+        """Satu panggilan SCRFD lagi atas seluruh kotak orang (kunci sudah dipegang).
+
+        Untuk pose yang menggeser batas atas kotak menjauhi kepala: tangan
+        terangkat lurus, meregangkan badan. Potongan 45% teratas lalu hanya berisi
+        tangan dan lengan, sementara wajah ada di tengah kotak. Hanya wajah yang
+        pusatnya di pita tengah lebar kotak yang diterima, supaya wajah orang lain
+        yang kotaknya bertumpang-tindih tidak ikut tertangkap.
+        -> (wajah, offset potongan); daftar kosong bila tidak ada.
+        """
+        cut = full_box_crop(image, box, self._min_face)
+        if cut is None:
+            return [], (0, 0)
+        crop, offset = cut
+        if crop.shape[0] <= head_rows:
+            return [], offset           # kotak sependek potongan kepala: tidak ada yang baru
+        self._gate["fallback_dicoba"] += 1
+        lo, hi = FULL_BOX_CENTER_BAND
+        width = crop.shape[1]
+        faces = [
+            f for f in self._detector.detect(crop)
+            if min(f.width, f.height) >= self._min_face
+            and lo * width <= (f.bbox[0] + f.bbox[2]) / 2.0 <= hi * width
+        ]
+        if faces:
+            self._gate["fallback_ketemu"] += 1
+        return faces, offset
 
     def _gate_reason(self, face: FaceDetection) -> Optional[str]:
         """Nama penghitung bila wajah ini dilewati, None bila di-embed."""
@@ -630,6 +665,21 @@ def head_crop(image: np.ndarray, box: Any, min_face_px: float, head_fraction: fl
     return np.ascontiguousarray(image[y1:head_y2, x1:x2]), (x1, y1)
 
 
+# Pita horizontal (fraksi lebar kotak) tempat pusat wajah fallback harus berada.
+# Lengan terangkat ke samping melebarkan kotak, jadi pitanya tidak sesempit sepertiga.
+FULL_BOX_CENTER_BAND = (0.2, 0.8)
+
+
+def full_box_crop(image: np.ndarray, box: Any, min_face_px: float):
+    """Seluruh kotak orang, dipotong ke batas gambar. -> (crop, (x1, y1)) atau None."""
+    height, width = image.shape[:2]
+    x1, y1 = max(0, int(box.x1)), max(0, int(box.y1))
+    x2, y2 = min(width, int(box.x2)), min(height, int(box.y2))
+    if x2 - x1 < min_face_px or y2 - y1 < min_face_px:
+        return None
+    return np.ascontiguousarray(image[y1:y2, x1:x2]), (x1, y1)
+
+
 def build_recognizer(recognition_config: Any) -> Optional[OnnxFaceRecognizer]:
     """None when the config says so; RecognizerUnavailable when it cannot load."""
     kind = getattr(recognition_config, "recognizer", "none") or "none"
@@ -658,4 +708,5 @@ def build_recognizer(recognition_config: Any) -> Optional[OnnxFaceRecognizer]:
         embed_min_face_px=getattr(recognition_config, "embed_min_face_px", None),
         embed_min_score=getattr(recognition_config, "embed_min_score", None),
         embed_max_yaw=getattr(recognition_config, "embed_max_yaw", None),
+        full_box_fallback=bool(getattr(recognition_config, "full_box_fallback", False)),
     )
